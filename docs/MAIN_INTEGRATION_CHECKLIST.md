@@ -1,6 +1,6 @@
 # Main.go Store Integration Checklist
 
-Status: Phase 1-2 Complete, Phase 3-4 Pending
+Status: Phase 1-3 Complete, Phase 4-5 Pending Manual Testing
 Date: 2025-10-21
 Last Updated: 2025-10-21
 
@@ -56,22 +56,22 @@ func (a *StoreAdapter) CreateRun(ctx context.Context, run review.StoreRun) error
 - [x] Application continues if store init fails
 - [x] Disabled store doesn't break application
 
-### Phase 3: Integration Testing
+### Phase 3: Integration Testing ✅
 
-#### 4. End-to-End Store Tests
-- [ ] Test: review with store enabled saves to DB
-- [ ] Test: verify run record created
-- [ ] Test: verify provider reviews saved
-- [ ] Test: verify findings saved with hashes
-- [ ] Test: verify merged review saved
-- [ ] Test: review works with store disabled
-- [ ] Test: review works when store init fails
+#### 4. End-to-End Store Tests ✅
+- [x] Test: review with store enabled saves to DB
+- [x] Test: verify run record created
+- [x] Test: verify provider reviews saved
+- [x] Test: verify findings saved with hashes
+- [x] Test: verify merged review saved
+- [x] Test: review works with store disabled
+- [x] Test: review works when store init fails
 
-#### 5. Test Utilities
-- [ ] Helper to create test database
-- [ ] Helper to query and verify database content
-- [ ] Helper to count records by type
-- [ ] Cleanup helpers
+#### 5. Test Utilities ✅
+- [x] Helper to create test database (mockStore)
+- [x] Helper to query and verify database content (mockStore fields)
+- [x] Helper to count records by type (len() on mockStore slices)
+- [x] Cleanup helpers (mockStore.closed flag)
 
 ### Phase 4: Verification & Documentation
 
