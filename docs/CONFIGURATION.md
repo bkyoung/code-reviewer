@@ -177,7 +177,44 @@ budget:
 
 ## Environment Variables
 
-All configuration can be overridden with environment variables:
+### Using Environment Variables in Config Files
+
+You can reference environment variables directly in your YAML configuration using `${VAR}` or `$VAR` syntax:
+
+```yaml
+providers:
+  openai:
+    enabled: true
+    model: "gpt-4o-mini"
+    apiKey: "${OPENAI_API_KEY}"  # Expands to value of OPENAI_API_KEY env var
+
+  anthropic:
+    enabled: true
+    model: "claude-3-5-sonnet-20241022"
+    apiKey: "$ANTHROPIC_API_KEY"  # Also works without braces
+
+output:
+  directory: "${CR_OUTPUT_DIR}"  # Can be used for any string field
+
+store:
+  path: "${HOME}/.config/cr/reviews.db"  # Useful for home directory references
+```
+
+**How it works:**
+- When the config is loaded, `${VARIABLE_NAME}` is replaced with the value from `os.Getenv("VARIABLE_NAME")`
+- Both `${VAR}` and `$VAR` syntax are supported
+- If the environment variable is not set, the original syntax is kept unchanged (e.g., `${UNDEFINED}` stays as `${UNDEFINED}`)
+- Only uppercase variable names are matched: `[A-Z_][A-Z0-9_]*`
+- Multiple variables can be used in a single string: `"${PATH1}:${PATH2}"`
+
+**Recommended approach:**
+1. Use `${VAR}` syntax in config files (portable, keeps secrets out of version control)
+2. Set actual values in your shell environment
+3. Never commit files with hardcoded API keys
+
+### Overriding with Environment Variables
+
+All configuration can also be overridden completely using environment variables (without modifying the config file):
 
 ```bash
 # Store configuration
@@ -200,6 +237,8 @@ export CR_DETERMINISM_TEMPERATURE=0.0
 ```
 
 Environment variables use the format: `CR_<SECTION>_<KEY>`
+
+**Note:** Direct environment variables (e.g., `CR_PROVIDERS_OPENAI_APIKEY`) take precedence over config file values, even those using `${VAR}` expansion.
 
 ## Example Configurations
 
@@ -326,6 +365,27 @@ Error: config load failed: yaml: unmarshal errors
 ```
 
 **Solution:** Validate YAML syntax at https://www.yamllint.com/
+
+### Environment variable not expanding
+
+```
+OpenAI: No API key provided, using static client
+```
+
+If you have `apiKey: "${OPENAI_API_KEY}"` in your config but it's not working:
+
+**Solution:**
+1. Check if the environment variable is actually set:
+   ```bash
+   echo $OPENAI_API_KEY
+   ```
+2. If empty, export it before running the tool:
+   ```bash
+   export OPENAI_API_KEY="sk-your-key-here"
+   ./cr review branch main --target HEAD
+   ```
+3. Ensure the variable name is uppercase (lowercase variables won't be expanded)
+4. Rebuild the application after updating config code: `go build ./cmd/cr`
 
 ## Next Steps
 
