@@ -1,7 +1,8 @@
 # Phase 3 Implementation Checklist
 
-Status: Planning → In Progress
+Status: Week 1 ✅ COMPLETE, Weeks 2-4 🔄 DEFERRED
 Started: 2025-10-21
+Updated: 2025-10-21
 
 ## Week 1: SQLite Store Implementation ✅ COMPLETE
 
@@ -33,18 +34,21 @@ Started: 2025-10-21
 - [x] Write test for Precision() calculation (α / (α + β))
 - [x] Verify uniform prior starts at 0.5 (α=1, β=1)
 
-### 1.5 Store Integration (Week 2)
-- [ ] Add Store to OrchestratorDeps
-- [ ] Update orchestrator to save runs after review completion
-- [ ] Update orchestrator to save reviews and findings
-- [ ] Add config options for store (enabled, path)
-- [ ] Update default config to enable store at ~/.config/cr/reviews.db
+### 1.5 Store Integration ✅ COMPLETE
+- [x] Add Store to OrchestratorDeps (orchestrator.go)
+- [x] Update orchestrator to save runs after review completion (orchestrator.go)
+- [x] Update orchestrator to save reviews and findings (orchestrator.go - saveReviewToStore)
+- [x] Add config options for store (config.go - StoreConfig)
+- [x] Update default config to enable store at ~/.config/cr/reviews.db (loader.go)
+- [x] Wire store into main.go (main.go - store initialization and adapter)
 
-### 1.6 Utility Functions (Week 2)
-- [ ] Implement generateRunID() using timestamp + hash
-- [ ] Implement calculateConfigHash() for deterministic hashing
-- [ ] Implement finding hash generation (file + lines + normalized description)
-- [x] Add Close() method with proper cleanup
+### 1.6 Utility Functions ✅ COMPLETE
+- [x] Implement GenerateRunID() using timestamp + hash (util.go)
+- [x] Implement CalculateConfigHash() for deterministic hashing (util.go)
+- [x] Implement finding hash generation (util.go - GenerateFindingHash)
+- [x] Implement GenerateReviewID() (util.go)
+- [x] Implement GenerateFindingID() (util.go)
+- [x] Add Close() method with proper cleanup (sqlite/store.go)
 
 ## Week 2: Basic TUI Implementation
 
