@@ -13,6 +13,7 @@ import (
 	"github.com/brandon/code-reviewer/internal/adapter/git"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/anthropic"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/gemini"
+	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/ollama"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/openai"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/static"
@@ -65,7 +66,10 @@ func run() error {
 	jsonWriter := json.NewWriter(nowFunc)
 	sarifWriter := sarif.NewWriter(nowFunc)
 
-	providers := buildProviders(cfg.Providers)
+	// Build observability components
+	observability := buildObservability(cfg.Observability)
+
+	providers := buildProviders(cfg.Providers, observability)
 
 	merger := merge.NewService()
 
@@ -141,7 +145,53 @@ func defaultConfigPaths() []string {
 	return paths
 }
 
-func buildProviders(providersConfig map[string]config.ProviderConfig) map[string]review.Provider {
+// observabilityComponents holds shared observability instances
+type observabilityComponents struct {
+	logger  llmhttp.Logger
+	metrics llmhttp.Metrics
+	pricing llmhttp.Pricing
+}
+
+// buildObservability creates observability components based on configuration
+func buildObservability(cfg config.ObservabilityConfig) observabilityComponents {
+	var logger llmhttp.Logger
+	var metrics llmhttp.Metrics
+	var pricing llmhttp.Pricing
+
+	// Create logger if enabled
+	if cfg.Logging.Enabled {
+		logLevel := llmhttp.LogLevelInfo
+		switch cfg.Logging.Level {
+		case "debug":
+			logLevel = llmhttp.LogLevelDebug
+		case "error":
+			logLevel = llmhttp.LogLevelError
+		}
+
+		logFormat := llmhttp.LogFormatHuman
+		if cfg.Logging.Format == "json" {
+			logFormat = llmhttp.LogFormatJSON
+		}
+
+		logger = llmhttp.NewDefaultLogger(logLevel, logFormat, cfg.Logging.RedactAPIKeys)
+	}
+
+	// Create metrics tracker if enabled
+	if cfg.Metrics.Enabled {
+		metrics = llmhttp.NewDefaultMetrics()
+	}
+
+	// Always create pricing calculator (used for cost tracking)
+	pricing = llmhttp.NewDefaultPricing()
+
+	return observabilityComponents{
+		logger:  logger,
+		metrics: metrics,
+		pricing: pricing,
+	}
+}
+
+func buildProviders(providersConfig map[string]config.ProviderConfig, obs observabilityComponents) map[string]review.Provider {
 	providers := make(map[string]review.Provider)
 
 	// OpenAI provider
@@ -157,7 +207,18 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 			log.Println("OpenAI: No API key provided, using static client")
 			providers["openai"] = openai.NewProvider(model, openai.NewStaticClient())
 		} else {
-			providers["openai"] = openai.NewProvider(model, openai.NewHTTPClient(apiKey, model))
+			client := openai.NewHTTPClient(apiKey, model)
+			// Wire up observability
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			providers["openai"] = openai.NewProvider(model, client)
 		}
 	}
 
@@ -172,7 +233,18 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 		if apiKey == "" {
 			log.Println("Anthropic: No API key provided, skipping provider")
 		} else {
-			providers["anthropic"] = anthropic.NewProvider(model, anthropic.NewHTTPClient(apiKey, model))
+			client := anthropic.NewHTTPClient(apiKey, model)
+			// Wire up observability
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			providers["anthropic"] = anthropic.NewProvider(model, client)
 		}
 	}
 
@@ -187,7 +259,18 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 		if apiKey == "" {
 			log.Println("Gemini: No API key provided, skipping provider")
 		} else {
-			providers["gemini"] = gemini.NewProvider(model, gemini.NewHTTPClient(apiKey, model))
+			client := gemini.NewHTTPClient(apiKey, model)
+			// Wire up observability
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			providers["gemini"] = gemini.NewProvider(model, client)
 		}
 	}
 
@@ -202,7 +285,18 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 		if host == "" {
 			host = "http://localhost:11434"
 		}
-		providers["ollama"] = ollama.NewProvider(model, ollama.NewHTTPClient(host, model))
+		client := ollama.NewHTTPClient(host, model)
+		// Wire up observability
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
+		}
+		if obs.metrics != nil {
+			client.SetMetrics(obs.metrics)
+		}
+		if obs.pricing != nil {
+			client.SetPricing(obs.pricing)
+		}
+		providers["ollama"] = ollama.NewProvider(model, client)
 	}
 
 	// Static provider (for testing)

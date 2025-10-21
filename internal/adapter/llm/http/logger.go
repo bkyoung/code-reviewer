@@ -78,10 +78,10 @@ type DefaultLogger struct {
 }
 
 // NewDefaultLogger creates a logger with the specified config.
-func NewDefaultLogger(level LogLevel, format LogFormat) *DefaultLogger {
+func NewDefaultLogger(level LogLevel, format LogFormat, redactKeys bool) *DefaultLogger {
 	return &DefaultLogger{
 		level:      level,
-		redactKeys: true,
+		redactKeys: redactKeys,
 		format:     format,
 	}
 }

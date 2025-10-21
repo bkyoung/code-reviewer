@@ -461,7 +461,7 @@ func TestHTTPClient_WithObservability(t *testing.T) {
 	client.SetBaseURL(server.URL)
 
 	// Set up observability
-	logger := llmhttp.NewDefaultLogger(llmhttp.LogLevelDebug, llmhttp.LogFormatHuman)
+	logger := llmhttp.NewDefaultLogger(llmhttp.LogLevelDebug, llmhttp.LogFormatHuman, true)
 	metrics := llmhttp.NewDefaultMetrics()
 	pricing := llmhttp.NewDefaultPricing()
 

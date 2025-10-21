@@ -126,6 +126,70 @@ redaction:
     - "src/**/*.go"   # Explicitly allow patterns
 ```
 
+### Observability (Logging and Metrics)
+
+Monitor LLM API calls with detailed logging and metrics:
+
+```yaml
+observability:
+  logging:
+    enabled: true           # Enable request/response logging
+    level: "info"           # Options: debug, info, error
+    format: "human"         # Options: human, json
+    redactAPIKeys: true     # Redact API keys in logs (show only last 4 chars)
+  metrics:
+    enabled: true           # Enable performance and cost metrics tracking
+```
+
+**Logging Levels:**
+- `debug` - Log requests (with prompt size and redacted API key) and responses
+- `info` - Log responses only (default, recommended for production)
+- `error` - Log errors only
+
+**Log Formats:**
+- `human` - Human-readable format for terminal output (default)
+  ```
+  [INFO] openai/gpt-4o-mini: Response received (duration=2.3s, tokens=150/75, cost=$0.0012)
+  ```
+- `json` - Structured JSON for log aggregation and analysis
+  ```json
+  {"level":"info","type":"response","provider":"openai","model":"gpt-4o-mini","timestamp":"2025-10-21T10:30:00Z","duration_ms":2300,"tokens_in":150,"tokens_out":75,"cost":0.0012,"status_code":200,"finish_reason":"stop"}
+  ```
+
+**API Key Redaction:**
+- When enabled (default), API keys are redacted to show only the last 4 characters
+- Example: `sk-1234567890abcdef` becomes `****cdef`
+- Disable only for local development or debugging: `redactAPIKeys: false`
+
+**Metrics Tracked:**
+- Request/response duration
+- Token counts (input and output)
+- Cost per request and total cost
+- Error rates and types
+- Per-provider statistics
+
+**Environment Variable Overrides:**
+```bash
+export CR_OBSERVABILITY_LOGGING_ENABLED=true
+export CR_OBSERVABILITY_LOGGING_LEVEL=debug
+export CR_OBSERVABILITY_LOGGING_FORMAT=json
+export CR_OBSERVABILITY_LOGGING_REDACTAPIKEYS=true
+export CR_OBSERVABILITY_METRICS_ENABLED=true
+```
+
+**When to enable logging:**
+- Debugging API issues or rate limits
+- Monitoring performance in production
+- Analyzing cost patterns
+- Troubleshooting timeout or connectivity issues
+
+**When to use JSON format:**
+- Production environments with log aggregation (e.g., ELK, Splunk)
+- Automated log analysis and alerting
+- Cost tracking and budget monitoring
+
+See [OBSERVABILITY.md](./OBSERVABILITY.md) for detailed logging examples and [COST_TRACKING.md](./COST_TRACKING.md) for cost analysis.
+
 ### Determinism (Reproducible Reviews)
 
 Control review consistency:
@@ -296,6 +360,15 @@ redaction:
     - "**/*.pem"
     - "**/*.key"
 
+observability:
+  logging:
+    enabled: true
+    level: "info"
+    format: "json"  # JSON for production log aggregation
+    redactAPIKeys: true
+  metrics:
+    enabled: true
+
 determinism:
   enabled: true
   temperature: 0.0
@@ -394,5 +467,7 @@ If you have `apiKey: "${OPENAI_API_KEY}"` in your config but it's not working:
 ## Next Steps
 
 - See [USAGE.md](./USAGE.md) for running reviews
+- See [OBSERVABILITY.md](./OBSERVABILITY.md) for logging and metrics details
+- See [COST_TRACKING.md](./COST_TRACKING.md) for cost analysis and optimization
 - See [MAIN_INTEGRATION_CHECKLIST.md](./MAIN_INTEGRATION_CHECKLIST.md) for store features
 - See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for roadmap

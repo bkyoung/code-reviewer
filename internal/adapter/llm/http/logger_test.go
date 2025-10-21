@@ -16,7 +16,7 @@ import (
 )
 
 func TestNewDefaultLogger(t *testing.T) {
-	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
 	assert.NotNil(t, logger)
 }
 
@@ -55,7 +55,7 @@ func TestDefaultLogger_RedactAPIKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman)
+			logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman, true)
 			result := logger.RedactAPIKey(tt.key)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -67,7 +67,7 @@ func TestDefaultLogger_LogRequest_DebugLevel(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman, true)
 	logger.LogRequest(context.Background(), http.RequestLog{
 		Provider:    "openai",
 		Model:       "gpt-4o-mini",
@@ -90,7 +90,7 @@ func TestDefaultLogger_LogRequest_InfoLevel_Skipped(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
 	logger.LogRequest(context.Background(), http.RequestLog{
 		Provider:    "openai",
 		Model:       "gpt-4o-mini",
@@ -108,7 +108,7 @@ func TestDefaultLogger_LogRequest_JSONFormat(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatJSON)
+	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatJSON, true)
 	now := time.Now()
 	logger.LogRequest(context.Background(), http.RequestLog{
 		Provider:    "openai",
@@ -141,7 +141,7 @@ func TestDefaultLogger_LogResponse(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
 	logger.LogResponse(context.Background(), http.ResponseLog{
 		Provider:     "openai",
 		Model:        "gpt-4o-mini",
@@ -169,7 +169,7 @@ func TestDefaultLogger_LogResponse_JSONFormat(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatJSON)
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatJSON, true)
 	logger.LogResponse(context.Background(), http.ResponseLog{
 		Provider:     "anthropic",
 		Model:        "claude-3-5-sonnet-20241022",
@@ -203,7 +203,7 @@ func TestDefaultLogger_LogError(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelError, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelError, http.LogFormatHuman, true)
 
 	err := &http.Error{
 		Type:       http.ErrTypeRateLimit,
@@ -237,7 +237,7 @@ func TestDefaultLogger_LogError_JSONFormat(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := http.NewDefaultLogger(http.LogLevelError, http.LogFormatJSON)
+	logger := http.NewDefaultLogger(http.LogLevelError, http.LogFormatJSON, true)
 
 	err := &http.Error{
 		Type:       http.ErrTypeAuthentication,
@@ -274,7 +274,7 @@ func TestDefaultLogger_LogError_JSONFormat(t *testing.T) {
 }
 
 func TestDefaultLogger_NoRedaction_WhenDisabled(t *testing.T) {
-	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman)
+	logger := http.NewDefaultLogger(http.LogLevelDebug, http.LogFormatHuman, true)
 	logger.SetRedaction(false)
 
 	result := logger.RedactAPIKey("sk-1234567890abcdef")
