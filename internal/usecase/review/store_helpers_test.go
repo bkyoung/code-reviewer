@@ -13,13 +13,21 @@ import (
 
 // mockStore implements review.Store for testing
 type mockStore struct {
-	runs     []review.StoreRun
-	reviews  []review.StoreReview
-	findings []review.StoreFinding
-	saveErr  error
+	runs            []review.StoreRun
+	reviews         []review.StoreReview
+	findings        []review.StoreFinding
+	saveErr         error // Legacy: applies to all operations
+	createRunErr    error
+	saveReviewErr   error
+	saveFindingsErr error
+	closeErr        error
+	closed          bool
 }
 
 func (m *mockStore) CreateRun(ctx context.Context, run review.StoreRun) error {
+	if m.createRunErr != nil {
+		return m.createRunErr
+	}
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -28,6 +36,9 @@ func (m *mockStore) CreateRun(ctx context.Context, run review.StoreRun) error {
 }
 
 func (m *mockStore) SaveReview(ctx context.Context, r review.StoreReview) error {
+	if m.saveReviewErr != nil {
+		return m.saveReviewErr
+	}
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -36,6 +47,9 @@ func (m *mockStore) SaveReview(ctx context.Context, r review.StoreReview) error 
 }
 
 func (m *mockStore) SaveFindings(ctx context.Context, findings []review.StoreFinding) error {
+	if m.saveFindingsErr != nil {
+		return m.saveFindingsErr
+	}
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -44,7 +58,8 @@ func (m *mockStore) SaveFindings(ctx context.Context, findings []review.StoreFin
 }
 
 func (m *mockStore) Close() error {
-	return nil
+	m.closed = true
+	return m.closeErr
 }
 
 func TestOrchestrator_SaveReviewToStore(t *testing.T) {
