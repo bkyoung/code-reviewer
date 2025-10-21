@@ -1,0 +1,85 @@
+# Code Reviewer Configuration File
+# This file configures the code-reviewer application behavior
+
+# LLM Provider Configuration
+# Enable the providers you want to use for code reviews
+providers:
+  # Static provider (for testing - returns canned responses)
+  static:
+    enabled: true
+    model: "static-model"
+
+  # OpenAI provider (GPT models)
+  # Uncomment and add your API key to enable
+  # openai:
+  #   enabled: true
+  #   model: "gpt-4o-mini"  # or "gpt-4o", "gpt-4-turbo", etc.
+  #   apiKey: "${OPENAI_API_KEY}"  # Set via environment variable
+
+  # Anthropic provider (Claude models)
+  # Uncomment and add your API key to enable
+  # anthropic:
+  #   enabled: true
+  #   model: "claude-3-5-sonnet-20241022"  # or other Claude models
+  #   apiKey: "${ANTHROPIC_API_KEY}"  # Set via environment variable
+
+  # Google Gemini provider
+  # Uncomment and add your API key to enable
+  # gemini:
+  #   enabled: true
+  #   model: "gemini-pro"
+  #   apiKey: "${GEMINI_API_KEY}"  # Set via environment variable
+
+  # Ollama provider (local LLM)
+  # Uncomment to use local models via Ollama
+  # ollama:
+  #   enabled: true
+  #   model: "llama2"  # or "codellama", "mistral", etc.
+
+# Store Configuration
+# Enables persistence of review history to SQLite database
+store:
+  enabled: true
+  path: "~/.config/cr/reviews.db"  # Database location
+
+# Output Configuration
+# Where to write review markdown/json/sarif files
+output:
+  directory: "./reviews"  # Review output directory
+
+# Git Configuration (optional)
+# git:
+#   repositoryDir: "."  # Repository to review (defaults to current directory)
+
+# Merge Configuration (for multi-provider consensus)
+# merge:
+#   enabled: true
+#   strategy: "weighted"  # or "unanimous", "majority"
+#   weights:
+#     openai: 1.0
+#     anthropic: 1.0
+
+# Budget Configuration (cost control)
+# budget:
+#   hardCapUSD: 10.0  # Maximum spend per review run
+#   degradationPolicy:
+#     - "reduce-providers"
+#     - "reduce-context"
+
+# Redaction Configuration (secret protection)
+redaction:
+  enabled: true
+  denyGlobs:
+    - "**/*.env"
+    - "**/*.pem"
+    - "**/*.key"
+    - "**/credentials.json"
+  # allowGlobs:
+  #   - "src/**/*.go"
+  #   - "internal/**/*.go"
+
+# Determinism Configuration (reproducible reviews)
+determinism:
+  enabled: true
+  temperature: 0.0  # 0.0 = deterministic, 1.0 = creative
+  useSeed: true     # Use deterministic seeds for reproducibility
