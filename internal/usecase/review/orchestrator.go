@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brandon/code-reviewer/internal/domain"
 )
@@ -62,6 +63,51 @@ type Redactor interface {
 	Redact(input string) (string, error)
 }
 
+// Store defines the outbound port for persisting review history.
+type Store interface {
+	CreateRun(ctx context.Context, run StoreRun) error
+	SaveReview(ctx context.Context, review StoreReview) error
+	SaveFindings(ctx context.Context, findings []StoreFinding) error
+	Close() error
+}
+
+// StoreRun represents a review run for persistence.
+type StoreRun struct {
+	RunID      string
+	Timestamp  time.Time
+	Scope      string
+	ConfigHash string
+	TotalCost  float64
+	BaseRef    string
+	TargetRef  string
+	Repository string
+}
+
+// StoreReview represents a review record for persistence.
+type StoreReview struct {
+	ReviewID  string
+	RunID     string
+	Provider  string
+	Model     string
+	Summary   string
+	CreatedAt time.Time
+}
+
+// StoreFinding represents a finding record for persistence.
+type StoreFinding struct {
+	FindingID   string
+	ReviewID    string
+	FindingHash string
+	File        string
+	LineStart   int
+	LineEnd     int
+	Category    string
+	Severity    string
+	Description string
+	Suggestion  string
+	Evidence    bool
+}
+
 // OrchestratorDeps captures the inbound dependencies for the orchestrator.
 type OrchestratorDeps struct {
 	Git           GitEngine
@@ -73,6 +119,7 @@ type OrchestratorDeps struct {
 	Redactor      Redactor
 	SeedGenerator SeedFunc
 	PromptBuilder PromptBuilder
+	Store         Store // Optional: persistence layer for review history
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -136,6 +183,7 @@ func (o *Orchestrator) validateDependencies() error {
 		return errors.New("seed generator is required")
 	}
 	// Redactor is optional
+	// Store is optional
 	return nil
 }
 
@@ -152,6 +200,29 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	diff, err := o.deps.Git.GetCumulativeDiff(ctx, req.BaseRef, req.TargetRef, req.IncludeUncommitted)
 	if err != nil {
 		return Result{}, err
+	}
+
+	// Create run record if store is available
+	var runID string
+	if o.deps.Store != nil {
+		now := time.Now()
+		runID = generateRunID(now, req.BaseRef, req.TargetRef)
+		run := StoreRun{
+			RunID:      runID,
+			Timestamp:  now,
+			Scope:      fmt.Sprintf("%s..%s", req.BaseRef, req.TargetRef),
+			ConfigHash: calculateConfigHash(req),
+			TotalCost:  0.0, // Cost tracking not yet implemented
+			BaseRef:    req.BaseRef,
+			TargetRef:  req.TargetRef,
+			Repository: req.Repository,
+		}
+
+		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
+			// Log warning but continue - store failures shouldn't break reviews
+			// In production, this would use proper logging
+			fmt.Printf("warning: failed to create run record: %v\n", err)
+		}
 	}
 
 	seed := o.deps.SeedGenerator(req.BaseRef, req.TargetRef)
@@ -183,7 +254,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 
 	for name, provider := range o.deps.Providers {
 		wg.Add(1)
-		go func(name string, provider Provider) {
+		go func(name string, provider Provider, runID string) {
 			defer func() {
 				if r := recover(); r != nil {
 					resultsChan <- struct {
@@ -267,6 +338,14 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				return
 			}
 
+			// Save review to store if available
+			if runID != "" {
+				if err := o.SaveReviewToStore(ctx, runID, review); err != nil {
+					// Log warning but continue
+					fmt.Printf("warning: failed to save review to store: %v\n", err)
+				}
+			}
+
 			resultsChan <- struct {
 				review    domain.Review
 				path      string
@@ -274,7 +353,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				sarifPath string
 				err       error
 			}{review: review, path: markdownPath, jsonPath: jsonPath, sarifPath: sarifPath}
-		}(name, provider)
+		}(name, provider, runID)
 	}
 
 	wg.Wait()
@@ -343,6 +422,14 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("sarif write failed for merged review: %w", err)
+	}
+
+	// Save merged review to store if available
+	if runID != "" {
+		if err := o.SaveReviewToStore(ctx, runID, mergedReview); err != nil {
+			// Log warning but continue
+			fmt.Printf("warning: failed to save merged review to store: %v\n", err)
+		}
 	}
 
 	markdownPaths["merged"] = mergedMarkdownPath
