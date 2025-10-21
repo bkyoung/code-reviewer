@@ -32,6 +32,7 @@ type Review struct {
 	ModelName    string    `json:"modelName"`
 	Summary      string    `json:"summary"`
 	Findings     []Finding `json:"findings"`
+	Cost         float64   `json:"cost"` // Cost in USD
 }
 
 // Finding represents a single issue detected by an LLM.

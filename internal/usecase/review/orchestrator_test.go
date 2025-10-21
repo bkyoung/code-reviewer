@@ -620,3 +620,77 @@ type testError struct {
 func (e *testError) Error() string {
 	return e.msg
 }
+
+// TestReviewBranch_CostTracking verifies cost aggregation from provider reviews
+func TestReviewBranch_CostTracking(t *testing.T) {
+	ctx := context.Background()
+	diff := domain.Diff{
+		FromCommitHash: "abc123",
+		ToCommitHash:   "def456",
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "@@ -0,0 +1,2 @@\n+package main\n+func main() {}"},
+		},
+	}
+
+	// Provider 1 costs $0.05
+	review1 := domain.Review{
+		ProviderName: "provider1",
+		ModelName:    "model1",
+		Summary:      "Review 1",
+		Cost:         0.05,
+	}
+
+	// Provider 2 costs $0.03
+	review2 := domain.Review{
+		ProviderName: "provider2",
+		ModelName:    "model2",
+		Summary:      "Review 2",
+		Cost:         0.03,
+	}
+
+	provider1 := &mockProvider{response: review1}
+	provider2 := &mockProvider{response: review2}
+	gitMock := &mockGitEngine{diff: diff}
+	writerMock := &mockMarkdownWriter{}
+	jsonWriterMock := &mockJSONWriter{}
+	sarifWriterMock := &mockSARIFWriter{}
+	mergerMock := &mockMerger{}
+	storeMock := &mockStore{}
+
+	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
+		Git: gitMock,
+		Providers: map[string]review.Provider{
+			"provider1": provider1,
+			"provider2": provider2,
+		},
+		Merger:        mergerMock,
+		Markdown:      writerMock,
+		JSON:          jsonWriterMock,
+		SARIF:         sarifWriterMock,
+		Store:         storeMock,
+		SeedGenerator: func(_, _ string) uint64 { return 42 },
+		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+			return review.ProviderRequest{Prompt: "prompt", Seed: 42, MaxSize: 16384}, nil
+		},
+	})
+
+	_, err := orchestrator.ReviewBranch(ctx, review.BranchRequest{
+		BaseRef:    "main",
+		TargetRef:  "feature",
+		OutputDir:  t.TempDir(),
+		Repository: "test-repo",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Verify run record has correct total cost ($0.05 + $0.03 = $0.08)
+	if len(storeMock.runs) != 1 {
+		t.Fatalf("expected 1 run record, got %d", len(storeMock.runs))
+	}
+	run := storeMock.runs[0]
+	expectedTotalCost := 0.08
+	if run.TotalCost != expectedTotalCost {
+		t.Errorf("expected total cost $%.4f, got $%.4f", expectedTotalCost, run.TotalCost)
+	}
+}

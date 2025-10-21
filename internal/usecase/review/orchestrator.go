@@ -202,27 +202,11 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		return Result{}, err
 	}
 
-	// Create run record if store is available
+	// Generate run ID for potential store usage
+	now := time.Now()
 	var runID string
 	if o.deps.Store != nil {
-		now := time.Now()
 		runID = generateRunID(now, req.BaseRef, req.TargetRef)
-		run := StoreRun{
-			RunID:      runID,
-			Timestamp:  now,
-			Scope:      fmt.Sprintf("%s..%s", req.BaseRef, req.TargetRef),
-			ConfigHash: calculateConfigHash(req),
-			TotalCost:  0.0, // Cost tracking not yet implemented
-			BaseRef:    req.BaseRef,
-			TargetRef:  req.TargetRef,
-			Repository: req.Repository,
-		}
-
-		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
-			// Log warning but continue - store failures shouldn't break reviews
-			// In production, this would use proper logging
-			fmt.Printf("warning: failed to create run record: %v\n", err)
-		}
 	}
 
 	seed := o.deps.SeedGenerator(req.BaseRef, req.TargetRef)
@@ -364,6 +348,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	jsonPaths := make(map[string]string)
 	sarifPaths := make(map[string]string)
 	var errs []error
+	var totalCost float64
 
 	for res := range resultsChan {
 		if res.err != nil {
@@ -373,6 +358,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			markdownPaths[res.review.ProviderName] = res.path
 			jsonPaths[res.review.ProviderName] = res.jsonPath
 			sarifPaths[res.review.ProviderName] = res.sarifPath
+			totalCost += res.review.Cost
 		}
 	}
 
@@ -385,7 +371,28 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		return Result{}, fmt.Errorf("%d provider(s) failed: %s", len(errs), strings.Join(errMsgs, "; "))
 	}
 
+	// Create run record now that we have total cost
+	if o.deps.Store != nil && runID != "" {
+		run := StoreRun{
+			RunID:      runID,
+			Timestamp:  now,
+			Scope:      fmt.Sprintf("%s..%s", req.BaseRef, req.TargetRef),
+			ConfigHash: calculateConfigHash(req),
+			TotalCost:  totalCost,
+			BaseRef:    req.BaseRef,
+			TargetRef:  req.TargetRef,
+			Repository: req.Repository,
+		}
+
+		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
+			// Log warning but continue - store failures shouldn't break reviews
+			// In production, this would use proper logging
+			fmt.Printf("warning: failed to create run record: %v\n", err)
+		}
+	}
+
 	mergedReview := o.deps.Merger.Merge(reviews)
+	mergedReview.Cost = totalCost // Merged review gets total cost from all providers
 
 	mergedMarkdownPath, err := o.deps.Markdown.Write(ctx, domain.MarkdownArtifact{
 		OutputDir:    req.OutputDir,
