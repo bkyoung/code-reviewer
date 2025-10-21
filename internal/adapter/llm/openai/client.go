@@ -157,20 +157,20 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create HTTP request
-	url := c.baseURL + "/v1/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
 	// Execute request with retry logic
+	url := c.baseURL + "/v1/chat/completions"
 	var response *APIResponse
 	operation := func(ctx context.Context) error {
+		// Recreate request for each retry with fresh body
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
+		}
+
+		// Set headers
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
 		resp, err := c.client.Do(req)
 		if err != nil {
 			// Check if it's a timeout

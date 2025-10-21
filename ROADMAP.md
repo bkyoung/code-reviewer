@@ -41,6 +41,116 @@ The code reviewer now has:
 - [ ] Add graceful shutdown handling for in-flight requests
 - [ ] Improve context propagation and cancellation support
 
+## Known Issues & Technical Debt
+
+This section tracks issues identified through code reviews and technical debt items to be addressed in future releases.
+
+### High Priority
+
+#### 1. Response Body Leak Prevention
+**Source**: Anthropic code review feedback
+**Location**: `internal/adapter/llm/anthropic/client.go:161-186`
+**Status**: Needs verification
+
+Audit all error paths in retry logic to ensure response bodies are properly closed. While current implementation appears correct, complex retry logic could potentially leak resources.
+
+**Action**: Audit with `-race` detector and ensure `defer resp.Body.Close()` is on all paths.
+
+#### 2. Structured Logging Throughout
+**Source**: OpenAI code review feedback
+**Locations**: `cmd/cr/main.go:88,93`, `internal/usecase/review/orchestrator.go:244,349,398`
+**Status**: Partially implemented
+
+Replace `fmt.Printf` usage with structured logging through the observability logger. Currently using unstructured logging for warnings, which makes log aggregation and filtering harder.
+
+**Impact**: Better production observability and consistent log format.
+
+#### 3. RetryWithBackoff Edge Case
+**Source**: Anthropic code review feedback
+**Location**: `internal/adapter/llm/http/retry.go:71-77`
+**Status**: Low severity edge case
+
+If context is cancelled before the first operation attempt, `lastErr` could be nil. Should initialize `lastErr` to a non-nil value or handle context cancellation explicitly.
+
+**Fix**: Initialize `lastErr = errors.New("no attempts made")` or return `ctx.Err()` when context is cancelled.
+
+### Medium Priority
+
+#### 4. Extract Shared JSON Parsing Logic
+**Source**: OpenAI code review feedback
+**Locations**: All LLM clients
+**Status**: Code duplication
+
+Each provider duplicates JSON extraction and parsing logic from markdown code blocks. Should extract to `internal/adapter/llm/http/json_extractor.go`.
+
+**Benefits**: DRY principle, easier maintenance, consistent parsing behavior.
+
+#### 5. Deduplicate ID Generation
+**Source**: OpenAI code review feedback
+**Locations**: `internal/usecase/review/orchestrator.go`, `internal/store/util.go`
+**Status**: Needs investigation
+
+ID generation functions may be duplicated between orchestrator and store utilities. Verify and consolidate if appropriate.
+
+#### 6. Environment Variable Expansion for All Config
+**Source**: OpenAI code review feedback
+**Location**: `internal/config/loader.go`
+**Status**: Incomplete feature
+
+Env var expansion (`${VAR}`) may not be applied to all config sections (merge, redaction, budget). Ensure `expandEnvString` is called recursively on all string fields.
+
+### Low Priority
+
+#### 7. Magic Number Documentation
+**Source**: Anthropic code review feedback
+**Location**: `internal/determinism/seed.go:23-25`
+**Status**: Readability improvement
+
+Use named constant for `0x7FFFFFFFFFFFFFFF`:
+```go
+const maxInt64Mask = 0x7FFFFFFFFFFFFFFF // Ensures result fits in int64 range
+seed = seed & maxInt64Mask
+```
+
+#### 8. SARIF Cost Validation
+**Source**: Anthropic code review feedback
+**Location**: `internal/adapter/output/sarif/writer.go:110-115`
+**Status**: Edge case handling
+
+Validate cost is not NaN or Inf before adding to properties, as JSON marshaling may fail silently:
+```go
+if !math.IsNaN(artifact.Review.Cost) && !math.IsInf(artifact.Review.Cost, 0) {
+    properties["cost"] = artifact.Review.Cost
+}
+```
+
+#### 9. API Key Redaction Format
+**Source**: Anthropic code review feedback
+**Location**: `internal/adapter/llm/http/logger.go:157-166`
+**Status**: UX improvement
+
+Current format `****cdef` could be clearer. Consider `[REDACTED-cdef]` or `<redacted:cdef>` to make redaction more obvious.
+
+## Recently Fixed Issues
+
+### ✅ OpenAI Retry Bug - Request Body Consumed
+**Fixed**: 2025-10-21
+**Location**: `internal/adapter/llm/openai/client.go:162-180`
+**Severity**: HIGH (broke retry functionality)
+
+**Problem**: The retry operation created request once with `bytes.NewBuffer(jsonData)` then reused the same `req` variable in retry closure. After first HTTP request, `req.Body` was consumed and subsequent retries sent empty bodies.
+
+**Solution**: Moved request creation inside retry operation closure, recreating request body on each attempt (matching Anthropic/Gemini/Ollama pattern).
+
+### ✅ FOREIGN KEY Constraint Failed
+**Fixed**: 2025-10-21
+**Location**: `internal/usecase/review/orchestrator.go`
+**Severity**: CRITICAL (broke review persistence)
+
+**Problem**: CreateRun was called AFTER provider goroutines tried to save reviews, causing foreign key constraint violations.
+
+**Solution**: Moved CreateRun before launching goroutines, added UpdateRunCost method to update total cost after all reviews complete.
+
 ## Future Features (Deferred)
 
 ### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
