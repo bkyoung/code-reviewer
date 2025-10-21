@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,11 @@ type HTTPClient struct {
 	baseURL string
 	timeout time.Duration
 	client  *http.Client
+
+	// Observability components
+	logger  llmhttp.Logger
+	metrics llmhttp.Metrics
+	pricing llmhttp.Pricing
 }
 
 // NewHTTPClient creates a new Anthropic HTTP client.
@@ -52,6 +58,21 @@ func (c *HTTPClient) SetTimeout(timeout time.Duration) {
 	c.client.Timeout = timeout
 }
 
+// SetLogger sets the logger for this client.
+func (c *HTTPClient) SetLogger(logger llmhttp.Logger) {
+	c.logger = logger
+}
+
+// SetMetrics sets the metrics tracker for this client.
+func (c *HTTPClient) SetMetrics(metrics llmhttp.Metrics) {
+	c.metrics = metrics
+}
+
+// SetPricing sets the pricing calculator for this client.
+func (c *HTTPClient) SetPricing(pricing llmhttp.Pricing) {
+	c.pricing = pricing
+}
+
 // CallOptions contains options for the API call.
 type CallOptions struct {
 	Temperature float64
@@ -66,10 +87,29 @@ type APIResponse struct {
 	TokensOut  int
 	Model      string
 	StopReason string
+	Cost       float64 // Cost in USD
 }
 
 // Call makes a request to the Anthropic Messages API.
 func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOptions) (*APIResponse, error) {
+	startTime := time.Now()
+
+	// Log request (if logger configured)
+	if c.logger != nil {
+		c.logger.LogRequest(ctx, llmhttp.RequestLog{
+			Provider:    "anthropic",
+			Model:       c.model,
+			Timestamp:   startTime,
+			PromptChars: len(prompt),
+			APIKey:      c.apiKey,
+		})
+	}
+
+	// Record request metric
+	if c.metrics != nil {
+		c.metrics.RecordRequest("anthropic", c.model)
+	}
+
 	// Build request
 	reqBody := MessagesRequest{
 		Model: c.model,
@@ -158,7 +198,32 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		return nil
 	}, retryConfig)
 
+	duration := time.Since(startTime)
+
 	if err != nil {
+		// Log error
+		if c.logger != nil {
+			var httpErr *llmhttp.Error
+			if errors.As(err, &httpErr) {
+				c.logger.LogError(ctx, llmhttp.ErrorLog{
+					Provider:   "anthropic",
+					Model:      c.model,
+					Timestamp:  time.Now(),
+					Duration:   duration,
+					Error:      err,
+					ErrorType:  httpErr.Type,
+					StatusCode: httpErr.StatusCode,
+					Retryable:  httpErr.Retryable,
+				})
+			}
+		}
+		// Record error metric
+		if c.metrics != nil {
+			var httpErr *llmhttp.Error
+			if errors.As(err, &httpErr) {
+				c.metrics.RecordError("anthropic", c.model, httpErr.Type)
+			}
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -186,13 +251,44 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		}
 	}
 
-	return &APIResponse{
+	response := &APIResponse{
 		Text:       strings.Join(textParts, ""),
 		TokensIn:   messagesResp.Usage.InputTokens,
 		TokensOut:  messagesResp.Usage.OutputTokens,
 		Model:      messagesResp.Model,
 		StopReason: messagesResp.StopReason,
-	}, nil
+	}
+
+	// Calculate cost
+	var cost float64
+	if c.pricing != nil {
+		cost = c.pricing.GetCost("anthropic", c.model, response.TokensIn, response.TokensOut)
+		response.Cost = cost
+	}
+
+	// Log response
+	if c.logger != nil {
+		c.logger.LogResponse(ctx, llmhttp.ResponseLog{
+			Provider:     "anthropic",
+			Model:        c.model,
+			Timestamp:    time.Now(),
+			Duration:     duration,
+			TokensIn:     response.TokensIn,
+			TokensOut:    response.TokensOut,
+			Cost:         cost,
+			StatusCode:   200,
+			FinishReason: response.StopReason,
+		})
+	}
+
+	// Record metrics
+	if c.metrics != nil {
+		c.metrics.RecordDuration("anthropic", c.model, duration)
+		c.metrics.RecordTokens("anthropic", c.model, response.TokensIn, response.TokensOut)
+		c.metrics.RecordCost("anthropic", c.model, cost)
+	}
+
+	return response, nil
 }
 
 // handleErrorResponse maps HTTP status codes to typed errors.
