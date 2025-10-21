@@ -75,9 +75,10 @@ This batch implements production HTTP clients with proper error handling, retrie
 - [x] Update main.go to use HTTPClient instead of StaticClient
 - [x] Add API key loading from config/env
 - [x] Write integration test with mock HTTP server
-- [ ] Test with real OpenAI API (manual - requires user API key)
+- [x] Test with real OpenAI API (manual - verified working)
 - [x] Update configuration documentation
-- [x] Add example .env file
+- [x] Add environment variable expansion (${VAR} syntax)
+- [x] Fix seed generation to work with OpenAI int64 limits
 
 ## Week 2: Anthropic (Claude) HTTP Client
 
