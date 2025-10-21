@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
@@ -18,6 +19,15 @@ const (
 	defaultBaseURL = "https://api.openai.com"
 	defaultTimeout = 60 * time.Second
 )
+
+// isO1Model returns true if the model is an o1-series reasoning model.
+// These models have different API requirements:
+// - Use max_completion_tokens instead of max_tokens
+// - Don't support temperature, seed, or response_format
+func isO1Model(model string) bool {
+	modelLower := strings.ToLower(model)
+	return strings.HasPrefix(modelLower, "o1-") || strings.HasPrefix(modelLower, "o4-")
+}
 
 // HTTPClient is an HTTP client for the OpenAI API.
 type HTTPClient struct {
@@ -81,12 +91,24 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 				Content: prompt,
 			},
 		},
-		Temperature: options.Temperature,
-		Seed:        options.Seed,
 	}
 
+	// o1-series models have different API requirements
+	isO1 := isO1Model(c.model)
+
+	// Set token limits
 	if options.MaxTokens > 0 {
-		reqBody.MaxTokens = options.MaxTokens
+		if isO1 {
+			reqBody.MaxCompletionTokens = options.MaxTokens
+		} else {
+			reqBody.MaxTokens = options.MaxTokens
+		}
+	}
+
+	// o1 models don't support temperature, seed, or response_format
+	if !isO1 {
+		reqBody.Temperature = options.Temperature
+		reqBody.Seed = options.Seed
 	}
 
 	// Marshal request

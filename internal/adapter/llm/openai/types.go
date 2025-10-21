@@ -2,12 +2,13 @@ package openai
 
 // ChatCompletionRequest represents the request to OpenAI's Chat Completion API.
 type ChatCompletionRequest struct {
-	Model          string          `json:"model"`
-	Messages       []Message       `json:"messages"`
-	Temperature    float64         `json:"temperature,omitempty"`
-	Seed           *uint64         `json:"seed,omitempty"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []Message       `json:"messages"`
+	Temperature         float64         `json:"temperature,omitempty"`
+	Seed                *uint64         `json:"seed,omitempty"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"` // For o1 models
+	ResponseFormat      *ResponseFormat `json:"response_format,omitempty"`
 }
 
 // Message represents a chat message in the conversation.

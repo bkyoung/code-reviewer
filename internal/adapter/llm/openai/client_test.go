@@ -308,6 +308,133 @@ func TestHTTPClient_Call_EmptyChoices(t *testing.T) {
 	assert.Contains(t, err.Error(), "no choices in response")
 }
 
+func TestHTTPClient_Call_O1Model(t *testing.T) {
+	// Test that o1 models use max_completion_tokens and omit unsupported params
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Parse request body
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify o1 model uses max_completion_tokens, not max_tokens
+		assert.Equal(t, 4000, req.MaxCompletionTokens, "o1 models should use max_completion_tokens")
+		assert.Equal(t, 0, req.MaxTokens, "o1 models should not set max_tokens")
+
+		// Verify o1 models don't send temperature or seed
+		assert.Equal(t, 0.0, req.Temperature, "o1 models should not set temperature")
+		assert.Nil(t, req.Seed, "o1 models should not set seed")
+
+		// Send response
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "o1-mini",
+			Choices: []openai.Choice{
+				{
+					Index:        0,
+					Message:      openai.Message{Role: "assistant", Content: "test response"},
+					FinishReason: "stop",
+				},
+			},
+			Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+		})
+	}))
+	defer server.Close()
+
+	// Test with o1-mini
+	client := openai.NewHTTPClient("test-key", "o1-mini")
+	client.SetBaseURL(server.URL)
+
+	seed := uint64(12345)
+	resp, err := client.Call(context.Background(), "test prompt", openai.CallOptions{
+		Temperature: 0.7, // Should be ignored for o1
+		Seed:        &seed,
+		MaxTokens:   4000,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "test response", resp.Text)
+}
+
+func TestHTTPClient_Call_O4Model(t *testing.T) {
+	// Test that o4 models (if they exist) also use o1 behavior
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify o4 model uses max_completion_tokens
+		assert.Equal(t, 2000, req.MaxCompletionTokens)
+		assert.Equal(t, 0, req.MaxTokens)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "o4-mini",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("test-key", "o4-mini")
+	client.SetBaseURL(server.URL)
+
+	resp, err := client.Call(context.Background(), "test", openai.CallOptions{MaxTokens: 2000})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.Text)
+}
+
+func TestHTTPClient_Call_RegularModel_UsesTemperatureAndSeed(t *testing.T) {
+	// Verify regular models (non-o1) still use temperature, seed, and max_tokens
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Regular models should use max_tokens
+		assert.Equal(t, 1000, req.MaxTokens, "regular models should use max_tokens")
+		assert.Equal(t, 0, req.MaxCompletionTokens, "regular models should not set max_completion_tokens")
+
+		// Regular models should support temperature and seed
+		assert.Equal(t, 0.5, req.Temperature)
+		require.NotNil(t, req.Seed)
+		assert.Equal(t, uint64(99999), *req.Seed)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "gpt-4o-mini",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client.SetBaseURL(server.URL)
+
+	seed := uint64(99999)
+	resp, err := client.Call(context.Background(), "test", openai.CallOptions{
+		Temperature: 0.5,
+		Seed:        &seed,
+		MaxTokens:   1000,
+	})
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.Text)
+}
+
 // Helper function
 func uint64Ptr(v uint64) *uint64 {
 	return &v
