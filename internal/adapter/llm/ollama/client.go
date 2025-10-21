@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,11 @@ type HTTPClient struct {
 	model   string
 	timeout time.Duration
 	client  *http.Client
+
+	// Observability components
+	logger  llmhttp.Logger
+	metrics llmhttp.Metrics
+	pricing llmhttp.Pricing
 }
 
 // NewHTTPClient creates a new Ollama HTTP client.
@@ -43,6 +49,21 @@ func (c *HTTPClient) SetTimeout(timeout time.Duration) {
 	c.client.Timeout = timeout
 }
 
+// SetLogger sets the logger for this client.
+func (c *HTTPClient) SetLogger(logger llmhttp.Logger) {
+	c.logger = logger
+}
+
+// SetMetrics sets the metrics tracker for this client.
+func (c *HTTPClient) SetMetrics(metrics llmhttp.Metrics) {
+	c.metrics = metrics
+}
+
+// SetPricing sets the pricing calculator for this client.
+func (c *HTTPClient) SetPricing(pricing llmhttp.Pricing) {
+	c.pricing = pricing
+}
+
 // CallOptions contains options for the API call.
 type CallOptions struct {
 	Temperature float64
@@ -55,10 +76,29 @@ type APIResponse struct {
 	TokensIn  int
 	TokensOut int
 	Model     string
+	Cost      float64 // Cost in USD (always $0 for Ollama/local)
 }
 
 // Call makes a request to the Ollama Generate API.
 func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOptions) (*APIResponse, error) {
+	startTime := time.Now()
+
+	// Log request (if logger configured)
+	if c.logger != nil {
+		c.logger.LogRequest(ctx, llmhttp.RequestLog{
+			Provider:    "ollama",
+			Model:       c.model,
+			Timestamp:   startTime,
+			PromptChars: len(prompt),
+			APIKey:      "", // Ollama doesn't use API keys
+		})
+	}
+
+	// Record request metric
+	if c.metrics != nil {
+		c.metrics.RecordRequest("ollama", c.model)
+	}
+
 	// Build request
 	reqBody := GenerateRequest{
 		Model:  c.model,
@@ -146,7 +186,32 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		return nil
 	}, retryConfig)
 
+	duration := time.Since(startTime)
+
 	if err != nil {
+		// Log error
+		if c.logger != nil {
+			var httpErr *llmhttp.Error
+			if errors.As(err, &httpErr) {
+				c.logger.LogError(ctx, llmhttp.ErrorLog{
+					Provider:   "ollama",
+					Model:      c.model,
+					Timestamp:  time.Now(),
+					Duration:   duration,
+					Error:      err,
+					ErrorType:  httpErr.Type,
+					StatusCode: httpErr.StatusCode,
+					Retryable:  httpErr.Retryable,
+				})
+			}
+		}
+		// Record error metric
+		if c.metrics != nil {
+			var httpErr *llmhttp.Error
+			if errors.As(err, &httpErr) {
+				c.metrics.RecordError("ollama", c.model, httpErr.Type)
+			}
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -171,12 +236,37 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		return nil, fmt.Errorf("empty response from Ollama")
 	}
 
-	return &APIResponse{
+	response := &APIResponse{
 		Text:      genResp.Response,
 		TokensIn:  genResp.PromptEvalCount,
 		TokensOut: genResp.EvalCount,
 		Model:     genResp.Model,
-	}, nil
+		Cost:      0.0, // Ollama is always free (local)
+	}
+
+	// Log response
+	if c.logger != nil {
+		c.logger.LogResponse(ctx, llmhttp.ResponseLog{
+			Provider:     "ollama",
+			Model:        c.model,
+			Timestamp:    time.Now(),
+			Duration:     duration,
+			TokensIn:     response.TokensIn,
+			TokensOut:    response.TokensOut,
+			Cost:         0.0,
+			StatusCode:   200,
+			FinishReason: "complete",
+		})
+	}
+
+	// Record metrics
+	if c.metrics != nil {
+		c.metrics.RecordDuration("ollama", c.model, duration)
+		c.metrics.RecordTokens("ollama", c.model, response.TokensIn, response.TokensOut)
+		c.metrics.RecordCost("ollama", c.model, 0.0)
+	}
+
+	return response, nil
 }
 
 // handleErrorResponse maps HTTP status codes to typed errors.
