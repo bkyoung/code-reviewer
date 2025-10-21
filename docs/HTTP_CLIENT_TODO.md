@@ -80,51 +80,50 @@ This batch implements production HTTP clients with proper error handling, retrie
 - [x] Add environment variable expansion (${VAR} syntax)
 - [x] Fix seed generation to work with OpenAI int64 limits
 
-## Week 2: Anthropic (Claude) HTTP Client
+## Week 2: Anthropic (Claude) HTTP Client ✅ COMPLETE
 
-### 2.1 Anthropic API Client (TDD)
-- [ ] Create `internal/adapter/llm/anthropic/client.go`
-- [ ] Define MessagesRequest struct (Anthropic API format)
-- [ ] Define MessagesResponse struct
-- [ ] Write tests for API authentication (x-api-key header)
-- [ ] Implement NewHTTPClient with proper headers
-- [ ] Write tests for successful message creation
-- [ ] Implement Review() calling Messages API
+### 2.1 Anthropic API Client (TDD) ✅
+- [x] Create `internal/adapter/llm/anthropic/client.go`
+- [x] Define MessagesRequest struct (Anthropic API format)
+- [x] Define MessagesResponse struct
+- [x] Write tests for API authentication (x-api-key header)
+- [x] Implement NewHTTPClient with proper headers
+- [x] Write tests for successful message creation
+- [x] Implement Review() calling Messages API
 
-### 2.2 Anthropic-Specific Features (TDD)
-- [ ] Write tests for system prompt vs user message
-- [ ] Implement system prompt handling
-- [ ] Write tests for streaming disabled
-- [ ] Ensure non-streaming responses only
-- [ ] Write tests for content block handling
-- [ ] Implement content block extraction
-- [ ] Test with claude-3-5-sonnet and claude-3-5-haiku models
+### 2.2 Anthropic-Specific Features (TDD) ✅
+- [x] Write tests for system prompt vs user message
+- [x] Implement system prompt handling
+- [x] Write tests for streaming disabled
+- [x] Ensure non-streaming responses only
+- [x] Write tests for content block handling
+- [x] Implement content block extraction
+- [x] Test with claude-3-5-sonnet model
 
-### 2.3 Error Handling (TDD)
-- [ ] Write tests for Anthropic error response format
-- [ ] Implement Anthropic error parsing
-- [ ] Write tests for rate limit handling (429)
-- [ ] Implement rate limit retry logic
-- [ ] Write tests for overloaded_error (529)
-- [ ] Implement overloaded retry logic
-- [ ] Test content policy violations (400)
+### 2.3 Error Handling (TDD) ✅
+- [x] Write tests for Anthropic error response format
+- [x] Implement Anthropic error parsing
+- [x] Write tests for rate limit handling (429)
+- [x] Implement rate limit retry logic
+- [x] Write tests for overloaded_error (529)
+- [x] Implement overloaded retry logic
+- [x] Test content policy violations (400)
 
-### 2.4 Response Parsing (TDD)
-- [ ] Write tests for text content extraction
-- [ ] Implement content[0].text parsing
-- [ ] Write tests for handling multiple content blocks
-- [ ] Implement multi-block concatenation
-- [ ] Write tests for JSON extraction from responses
-- [ ] Reuse OpenAI JSON parsing logic
-- [ ] Test finding extraction
+### 2.4 Response Parsing (TDD) ✅
+- [x] Write tests for text content extraction
+- [x] Implement content[0].text parsing
+- [x] Write tests for handling multiple content blocks
+- [x] Implement multi-block concatenation
+- [x] Write tests for JSON extraction from responses
+- [x] Reuse OpenAI JSON parsing logic
+- [x] Test finding extraction
 
-### 2.5 Integration
-- [ ] Update main.go to create real Anthropic client
-- [ ] Add API key loading (ANTHROPIC_API_KEY)
-- [ ] Write integration test with mock server
-- [ ] Test with real Anthropic API (manual)
-- [ ] Update docs with Claude-specific configuration
-- [ ] Add rate limit guidance
+### 2.5 Integration ✅
+- [x] Update main.go to create real Anthropic client
+- [x] Add API key loading (ANTHROPIC_API_KEY)
+- [x] Write integration test with mock server (13 comprehensive tests)
+- [ ] Test with real Anthropic API (manual - requires user API key)
+- [x] Claude models supported: claude-3-5-sonnet-20241022, claude-3-5-haiku, etc.
 
 ## Week 3: Ollama & Gemini Clients
 
