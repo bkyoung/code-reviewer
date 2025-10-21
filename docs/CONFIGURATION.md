@@ -67,13 +67,15 @@ providers:
 
   openai:
     enabled: true
-    model: "gpt-4o-mini"  # Options: gpt-4o, gpt-4o-mini, gpt-4-turbo
+    model: "gpt-4o-mini"  # Options: gpt-4o, gpt-4o-mini, gpt-4-turbo, o1-preview, o1-mini
     apiKey: "${OPENAI_API_KEY}"
 ```
 
 **Available Providers:**
 - `static` - Test provider with canned responses (no API key needed)
 - `openai` - OpenAI GPT models (requires API key)
+  - Standard models: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo` (support temperature, seed, determinism)
+  - Reasoning models: `o1-preview`, `o1-mini` (limited parameters, no temperature/seed support)
 - `anthropic` - Anthropic Claude models (requires API key)
 - `gemini` - Google Gemini models (requires API key)
 - `ollama` - Local models via Ollama (no API key, requires Ollama running)
@@ -143,6 +145,8 @@ determinism:
 **When to disable:**
 - Exploring different review perspectives
 - Generating creative suggestions
+
+**Note:** OpenAI o1-series reasoning models (`o1-preview`, `o1-mini`) do not support temperature or seed parameters. Determinism settings are automatically ignored for these models.
 
 ### Merge Configuration
 
