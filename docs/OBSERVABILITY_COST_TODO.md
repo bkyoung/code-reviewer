@@ -18,33 +18,33 @@ Currently the HTTP clients lack:
 
 This batch adds these capabilities while maintaining clean architecture and testability.
 
-## Week 1: Observability Infrastructure (Days 1-3)
+## Week 1: Observability Infrastructure (Days 1-3) ✅ COMPLETE
 
-### 1.1 Logging Infrastructure (TDD) ⏳
-- [ ] Create `internal/adapter/llm/http/logger.go`
-- [ ] Define Logger interface with methods: LogRequest, LogResponse, LogError
-- [ ] Write tests for request logging (redacts API keys)
-- [ ] Implement request logger with structured output
-- [ ] Write tests for response logging (includes duration, tokens)
-- [ ] Implement response logger
-- [ ] Write tests for API key redaction (show only last 4 chars)
-- [ ] Implement redaction logic
-- [ ] Add log level support (debug, info, error)
+### 1.1 Logging Infrastructure (TDD) ✅
+- [x] Create `internal/adapter/llm/http/logger.go`
+- [x] Define Logger interface with methods: LogRequest, LogResponse, LogError
+- [x] Write tests for request logging (redacts API keys)
+- [x] Implement request logger with structured output
+- [x] Write tests for response logging (includes duration, tokens)
+- [x] Implement response logger
+- [x] Write tests for API key redaction (show only last 4 chars)
+- [x] Implement redaction logic
+- [x] Add log level support (debug, info, error)
 
-### 1.2 Metrics Infrastructure (TDD) ⏳
-- [ ] Create `internal/adapter/llm/http/metrics.go`
-- [ ] Define Metrics interface with methods: RecordRequest, RecordDuration, RecordTokens
-- [ ] Write tests for duration tracking
-- [ ] Implement duration tracking with time.Now()
-- [ ] Write tests for token counting
-- [ ] Implement token counter
-- [ ] Write tests for error counting by type
-- [ ] Implement error counter
+### 1.2 Metrics Infrastructure (TDD) ✅
+- [x] Create `internal/adapter/llm/http/metrics.go`
+- [x] Define Metrics interface with methods: RecordRequest, RecordDuration, RecordTokens
+- [x] Write tests for duration tracking
+- [x] Implement duration tracking with time.Now()
+- [x] Write tests for token counting
+- [x] Implement token counter
+- [x] Write tests for error counting by type
+- [x] Implement error counter
 
 ### 1.3 Integration with Existing Clients ⏳
-- [ ] Update OpenAI client to use logger
-- [ ] Update OpenAI client to track duration
-- [ ] Update OpenAI client to track tokens
+- [x] Update OpenAI client to use logger
+- [x] Update OpenAI client to track duration
+- [x] Update OpenAI client to track tokens
 - [ ] Update Anthropic client to use logger
 - [ ] Update Anthropic client to track duration
 - [ ] Update Anthropic client to track tokens
@@ -55,25 +55,25 @@ This batch adds these capabilities while maintaining clean architecture and test
 - [ ] Update Gemini client to track duration
 - [ ] Update Gemini client to track tokens
 
-## Week 2: Cost Tracking (Days 4-6)
+## Week 2: Cost Tracking (Days 4-6) ✅ COMPLETE (Infrastructure)
 
-### 2.1 Cost Calculation Infrastructure (TDD) ⏳
-- [ ] Create `internal/adapter/llm/http/pricing.go`
-- [ ] Define Pricing interface with GetCost(model, tokensIn, tokensOut) method
-- [ ] Write tests for OpenAI pricing (gpt-4o, gpt-4o-mini, o1, etc.)
-- [ ] Implement OpenAI pricing calculator
-- [ ] Write tests for Anthropic pricing (claude-3-5-sonnet, haiku, etc.)
-- [ ] Implement Anthropic pricing calculator
-- [ ] Write tests for Ollama pricing (free/local)
-- [ ] Implement Ollama pricing (returns $0)
-- [ ] Write tests for Gemini pricing (gemini-1.5-pro, flash, etc.)
-- [ ] Implement Gemini pricing calculator
-- [ ] Document pricing data sources and update dates
+### 2.1 Cost Calculation Infrastructure (TDD) ✅
+- [x] Create `internal/adapter/llm/http/pricing.go`
+- [x] Define Pricing interface with GetCost(model, tokensIn, tokensOut) method
+- [x] Write tests for OpenAI pricing (gpt-4o, gpt-4o-mini, o1, etc.)
+- [x] Implement OpenAI pricing calculator
+- [x] Write tests for Anthropic pricing (claude-3-5-sonnet, haiku, etc.)
+- [x] Implement Anthropic pricing calculator
+- [x] Write tests for Ollama pricing (free/local)
+- [x] Implement Ollama pricing (returns $0)
+- [x] Write tests for Gemini pricing (gemini-1.5-pro, flash, etc.)
+- [x] Implement Gemini pricing calculator
+- [x] Document pricing data sources and update dates
 
 ### 2.2 Cost Tracking in Responses ⏳
 - [ ] Add Cost field to domain.Review struct
-- [ ] Update OpenAI client to calculate and return cost
-- [ ] Write tests for OpenAI cost calculation
+- [x] Update OpenAI client to calculate and return cost
+- [x] Write tests for OpenAI cost calculation
 - [ ] Update Anthropic client to calculate and return cost
 - [ ] Write tests for Anthropic cost calculation
 - [ ] Update Ollama client to return $0 cost
