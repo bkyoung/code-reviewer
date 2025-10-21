@@ -1,6 +1,7 @@
 package determinism_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/brandon/code-reviewer/internal/determinism"
@@ -43,5 +44,27 @@ func TestGenerateSeed(t *testing.T) {
 		seed := determinism.GenerateSeed("main", "feature")
 
 		assert.NotEqual(t, uint64(0), seed, "seed should not be zero")
+	})
+
+	t.Run("seed fits in int64 range for LLM API compatibility", func(t *testing.T) {
+		// Test multiple inputs to ensure masking works consistently
+		testCases := []struct {
+			base   string
+			target string
+		}{
+			{"main", "feature"},
+			{"develop", "hotfix"},
+			{"release-1.0", "release-2.0"},
+			{"", ""},
+			{"very-long-branch-name-that-might-produce-large-hash", "another-very-long-branch-name"},
+		}
+
+		for _, tc := range testCases {
+			seed := determinism.GenerateSeed(tc.base, tc.target)
+
+			// Verify seed is within int64 range [0, math.MaxInt64]
+			assert.LessOrEqual(t, seed, uint64(math.MaxInt64),
+				"seed must fit in int64 for OpenAI and other LLM APIs (base=%s, target=%s)", tc.base, tc.target)
+		}
 	})
 }
