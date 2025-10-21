@@ -19,6 +19,8 @@ import (
 	"github.com/brandon/code-reviewer/internal/adapter/output/json"
 	"github.com/brandon/code-reviewer/internal/adapter/output/markdown"
 	"github.com/brandon/code-reviewer/internal/adapter/output/sarif"
+	storeAdapter "github.com/brandon/code-reviewer/internal/adapter/store"
+	"github.com/brandon/code-reviewer/internal/adapter/store/sqlite"
 	"github.com/brandon/code-reviewer/internal/config"
 	"github.com/brandon/code-reviewer/internal/determinism"
 	"github.com/brandon/code-reviewer/internal/redaction"
@@ -73,6 +75,27 @@ func run() error {
 		redactor = redaction.NewEngine()
 	}
 
+	// Initialize store if enabled
+	var reviewStore review.Store
+	if cfg.Store.Enabled {
+		// Create store directory if it doesn't exist
+		storeDir := filepath.Dir(cfg.Store.Path)
+		if err := os.MkdirAll(storeDir, 0755); err != nil {
+			log.Printf("warning: failed to create store directory: %v", err)
+		} else {
+			// Initialize SQLite store
+			sqliteStore, err := sqlite.NewStore(cfg.Store.Path)
+			if err != nil {
+				log.Printf("warning: failed to initialize store: %v", err)
+			} else {
+				// Wrap in adapter bridge
+				reviewStore = storeAdapter.NewBridge(sqliteStore)
+				// Ensure store is closed on exit
+				defer reviewStore.Close()
+			}
+		}
+	}
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
 		Git:           gitEngine,
 		Providers:     providers,
@@ -83,6 +106,7 @@ func run() error {
 		Redactor:      redactor,
 		SeedGenerator: determinism.GenerateSeed,
 		PromptBuilder: review.DefaultPromptBuilder,
+		Store:         reviewStore,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
