@@ -1,7 +1,8 @@
 # HTTP API Client Implementation Checklist
 
-Status: Planning
+Status: Week 1 Complete - OpenAI Implemented
 Started: 2025-10-21
+Updated: 2025-10-21
 
 ## Goal
 Replace stub/static LLM clients with real HTTP implementations for OpenAI, Anthropic, Gemini, and Ollama, enabling actual code review functionality with production LLM APIs.
@@ -23,60 +24,60 @@ This batch implements production HTTP clients with proper error handling, retrie
 3. **Ollama** (local, no API key required)
 4. **Gemini** (Google)
 
-## Week 1: OpenAI HTTP Client
+## Week 1: OpenAI HTTP Client ✅ COMPLETE
 
-### 1.1 HTTP Client Infrastructure (TDD)
-- [ ] Create `internal/adapter/llm/openai/client.go`
-- [ ] Define HTTPClient interface for testing
-- [ ] Write tests for NewHTTPClient with API key
-- [ ] Implement NewHTTPClient constructor
-- [ ] Write tests for API key validation
-- [ ] Implement API key validation
-- [ ] Add timeout configuration (default 60s)
+### 1.1 HTTP Client Infrastructure (TDD) ✅
+- [x] Create `internal/adapter/llm/openai/client.go`
+- [x] Define HTTPClient interface for testing
+- [x] Write tests for NewHTTPClient with API key
+- [x] Implement NewHTTPClient constructor
+- [x] Write tests for API key validation
+- [x] Implement API key validation
+- [x] Add timeout configuration (default 60s)
 
-### 1.2 Request/Response Types (TDD)
-- [ ] Define ChatCompletionRequest struct (matches OpenAI API)
-- [ ] Define ChatCompletionResponse struct
-- [ ] Define Message struct (role, content)
-- [ ] Write tests for JSON marshaling/unmarshaling
-- [ ] Add validation for required fields
-- [ ] Test error response handling
+### 1.2 Request/Response Types (TDD) ✅
+- [x] Define ChatCompletionRequest struct (matches OpenAI API)
+- [x] Define ChatCompletionResponse struct
+- [x] Define Message struct (role, content)
+- [x] Write tests for JSON marshaling/unmarshaling
+- [x] Add validation for required fields
+- [x] Test error response handling
 
-### 1.3 HTTP Implementation (TDD)
-- [ ] Write test for successful API call
-- [ ] Implement Review() method calling OpenAI Chat Completion API
-- [ ] Write tests for error responses (401, 429, 500, 503)
-- [ ] Implement error handling with typed errors
-- [ ] Write tests for timeout scenarios
-- [ ] Implement timeout handling
-- [ ] Write tests for malformed responses
-- [ ] Implement response validation
+### 1.3 HTTP Implementation (TDD) ✅
+- [x] Write test for successful API call
+- [x] Implement Review() method calling OpenAI Chat Completion API
+- [x] Write tests for error responses (401, 429, 500, 503)
+- [x] Implement error handling with typed errors
+- [x] Write tests for timeout scenarios
+- [x] Implement timeout handling
+- [x] Write tests for malformed responses
+- [x] Implement response validation
 
-### 1.4 Retry Logic (TDD)
-- [ ] Write tests for 429 rate limit with exponential backoff
-- [ ] Implement exponential backoff (2s, 4s, 8s, 16s, 32s)
-- [ ] Write tests for 503 service unavailable retry
-- [ ] Implement 503 retry logic (max 3 retries)
-- [ ] Write tests for non-retryable errors (400, 401, 403)
-- [ ] Implement retry decision logic
-- [ ] Add configurable max retries
+### 1.4 Retry Logic (TDD) ✅
+- [x] Write tests for 429 rate limit with exponential backoff
+- [x] Implement exponential backoff (2s, 4s, 8s, 16s, 32s)
+- [x] Write tests for 503 service unavailable retry
+- [x] Implement 503 retry logic (max 3 retries)
+- [x] Write tests for non-retryable errors (400, 401, 403)
+- [x] Implement retry decision logic
+- [x] Add configurable max retries
 
-### 1.5 Response Parsing (TDD)
-- [ ] Write tests for parsing review from completion text
-- [ ] Implement JSON extraction from markdown code blocks
-- [ ] Write tests for handling partial/malformed JSON
-- [ ] Implement graceful degradation (return text summary)
-- [ ] Write tests for finding extraction
-- [ ] Implement finding parsing with validation
-- [ ] Test with various response formats
+### 1.5 Response Parsing (TDD) ✅
+- [x] Write tests for parsing review from completion text
+- [x] Implement JSON extraction from markdown code blocks
+- [x] Write tests for handling partial/malformed JSON
+- [x] Implement graceful degradation (return text summary)
+- [x] Write tests for finding extraction
+- [x] Implement finding parsing with validation
+- [x] Test with various response formats
 
-### 1.6 Integration
-- [ ] Update main.go to use HTTPClient instead of StaticClient
-- [ ] Add API key loading from config/env
-- [ ] Write integration test with mock HTTP server
-- [ ] Test with real OpenAI API (manual)
-- [ ] Update configuration documentation
-- [ ] Add example .env file
+### 1.6 Integration ✅
+- [x] Update main.go to use HTTPClient instead of StaticClient
+- [x] Add API key loading from config/env
+- [x] Write integration test with mock HTTP server
+- [ ] Test with real OpenAI API (manual - requires user API key)
+- [x] Update configuration documentation
+- [x] Add example .env file
 
 ## Week 2: Anthropic (Claude) HTTP Client
 
