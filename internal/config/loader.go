@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -54,7 +55,56 @@ func Load(opts LoaderOptions) (Config, error) {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	// Expand environment variables in config values
+	cfg = expandEnvVars(cfg)
+
 	return cfg, nil
+}
+
+// expandEnvVars expands ${VAR} and $VAR syntax in configuration strings.
+func expandEnvVars(cfg Config) Config {
+	// Expand provider API keys
+	for name, provider := range cfg.Providers {
+		provider.APIKey = expandEnvString(provider.APIKey)
+		provider.Model = expandEnvString(provider.Model)
+		cfg.Providers[name] = provider
+	}
+
+	// Expand other string fields
+	cfg.Git.RepositoryDir = expandEnvString(cfg.Git.RepositoryDir)
+	cfg.Output.Directory = expandEnvString(cfg.Output.Directory)
+	cfg.Store.Path = expandEnvString(cfg.Store.Path)
+
+	return cfg
+}
+
+// expandEnvString replaces ${VAR} or $VAR with environment variable values.
+func expandEnvString(s string) string {
+	if s == "" {
+		return s
+	}
+
+	// Replace ${VAR} syntax
+	re := regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
+	s = re.ReplaceAllStringFunc(s, func(match string) string {
+		varName := match[2 : len(match)-1] // Remove ${ and }
+		if val := os.Getenv(varName); val != "" {
+			return val
+		}
+		return match // Keep original if not found
+	})
+
+	// Replace $VAR syntax (without braces)
+	re = regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
+	s = re.ReplaceAllStringFunc(s, func(match string) string {
+		varName := match[1:] // Remove $
+		if val := os.Getenv(varName); val != "" {
+			return val
+		}
+		return match // Keep original if not found
+	})
+
+	return s
 }
 
 func locateConfigFile(name string, paths []string) string {
