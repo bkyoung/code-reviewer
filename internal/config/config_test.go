@@ -48,3 +48,75 @@ func TestLoadReadsFromFileAndEnv(t *testing.T) {
 		t.Fatalf("expected env override, got %s", cfg.Output.Directory)
 	}
 }
+
+func TestObservabilityConfigDefaults(t *testing.T) {
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{},
+		FileName:    "nonexistent",
+		EnvPrefix:   "CR",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Verify default observability settings
+	if !cfg.Observability.Logging.Enabled {
+		t.Error("expected logging to be enabled by default")
+	}
+	if cfg.Observability.Logging.Level != "info" {
+		t.Errorf("expected default log level 'info', got %s", cfg.Observability.Logging.Level)
+	}
+	if cfg.Observability.Logging.Format != "human" {
+		t.Errorf("expected default log format 'human', got %s", cfg.Observability.Logging.Format)
+	}
+	if !cfg.Observability.Logging.RedactAPIKeys {
+		t.Error("expected API key redaction to be enabled by default")
+	}
+	if !cfg.Observability.Metrics.Enabled {
+		t.Error("expected metrics to be enabled by default")
+	}
+}
+
+func TestObservabilityConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+observability:
+  logging:
+    enabled: false
+    level: debug
+    format: json
+    redactAPIKeys: false
+  metrics:
+    enabled: false
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Verify file overrides defaults
+	if cfg.Observability.Logging.Enabled {
+		t.Error("expected logging to be disabled from file config")
+	}
+	if cfg.Observability.Logging.Level != "debug" {
+		t.Errorf("expected log level 'debug', got %s", cfg.Observability.Logging.Level)
+	}
+	if cfg.Observability.Logging.Format != "json" {
+		t.Errorf("expected log format 'json', got %s", cfg.Observability.Logging.Format)
+	}
+	if cfg.Observability.Logging.RedactAPIKeys {
+		t.Error("expected API key redaction to be disabled from file config")
+	}
+	if cfg.Observability.Metrics.Enabled {
+		t.Error("expected metrics to be disabled from file config")
+	}
+}

@@ -2,14 +2,15 @@ package config
 
 // Config represents the full application configuration.
 type Config struct {
-	Providers   map[string]ProviderConfig `yaml:"providers"`
-	Merge       MergeConfig               `yaml:"merge"`
-	Git         GitConfig                 `yaml:"git"`
-	Output      OutputConfig              `yaml:"output"`
-	Budget      BudgetConfig              `yaml:"budget"`
-	Redaction   RedactionConfig           `yaml:"redaction"`
-	Determinism DeterminismConfig         `yaml:"determinism"`
-	Store       StoreConfig               `yaml:"store"`
+	Providers     map[string]ProviderConfig `yaml:"providers"`
+	Merge         MergeConfig               `yaml:"merge"`
+	Git           GitConfig                 `yaml:"git"`
+	Output        OutputConfig              `yaml:"output"`
+	Budget        BudgetConfig              `yaml:"budget"`
+	Redaction     RedactionConfig           `yaml:"redaction"`
+	Determinism   DeterminismConfig         `yaml:"determinism"`
+	Store         StoreConfig               `yaml:"store"`
+	Observability ObservabilityConfig       `yaml:"observability"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -58,6 +59,25 @@ type StoreConfig struct {
 	Path    string `yaml:"path"`
 }
 
+// ObservabilityConfig configures logging, metrics, and cost tracking.
+type ObservabilityConfig struct {
+	Logging LoggingConfig `yaml:"logging"`
+	Metrics MetricsConfig `yaml:"metrics"`
+}
+
+// LoggingConfig configures request/response logging.
+type LoggingConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	Level         string `yaml:"level"`         // debug, info, error
+	Format        string `yaml:"format"`        // json, human
+	RedactAPIKeys bool   `yaml:"redactAPIKeys"` // Redact API keys in logs
+}
+
+// MetricsConfig configures performance and cost metrics tracking.
+type MetricsConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 // Merge combines multiple configuration instances, prioritising the latter ones.
 func Merge(configs ...Config) Config {
 	result := Config{}
@@ -77,6 +97,7 @@ func merge(base, overlay Config) Config {
 	result.Determinism = chooseDeterminism(base.Determinism, overlay.Determinism)
 	result.Merge = chooseMerge(base.Merge, overlay.Merge)
 	result.Store = chooseStore(base.Store, overlay.Store)
+	result.Observability = chooseObservability(base.Observability, overlay.Observability)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -143,4 +164,20 @@ func chooseStore(base, overlay StoreConfig) StoreConfig {
 		return overlay
 	}
 	return base
+}
+
+func chooseObservability(base, overlay ObservabilityConfig) ObservabilityConfig {
+	result := base
+
+	// Merge logging config
+	if overlay.Logging.Enabled || overlay.Logging.Level != "" || overlay.Logging.Format != "" {
+		result.Logging = overlay.Logging
+	}
+
+	// Merge metrics config
+	if overlay.Metrics.Enabled {
+		result.Metrics = overlay.Metrics
+	}
+
+	return result
 }

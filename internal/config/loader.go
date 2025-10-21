@@ -142,6 +142,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("store.enabled", true)
 	v.SetDefault("store.path", defaultStorePath())
 
+	// Observability defaults (Phase 3)
+	v.SetDefault("observability.logging.enabled", true)
+	v.SetDefault("observability.logging.level", "info")
+	v.SetDefault("observability.logging.format", "human")
+	v.SetDefault("observability.logging.redactAPIKeys", true)
+	v.SetDefault("observability.metrics.enabled", true)
+
 	// Provider defaults (Phase 1 + Phase 2)
 	v.SetDefault("providers.openai.enabled", false)
 	v.SetDefault("providers.openai.model", "gpt-4o")
