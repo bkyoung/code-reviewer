@@ -135,6 +135,27 @@ func (s *Store) CreateRun(ctx context.Context, run store.Run) error {
 	return nil
 }
 
+// UpdateRunCost updates the total cost for a run.
+func (s *Store) UpdateRunCost(ctx context.Context, runID string, totalCost float64) error {
+	query := `UPDATE runs SET total_cost = ? WHERE run_id = ?`
+
+	result, err := s.db.ExecContext(ctx, query, totalCost, runID)
+	if err != nil {
+		return fmt.Errorf("failed to update run cost: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("run not found: %s", runID)
+	}
+
+	return nil
+}
+
 // GetRun retrieves a run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (store.Run, error) {
 	query := `

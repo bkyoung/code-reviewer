@@ -33,6 +33,11 @@ func (b *Bridge) CreateRun(ctx context.Context, run review.StoreRun) error {
 	return b.store.CreateRun(ctx, storeRun)
 }
 
+// UpdateRunCost updates the total cost for a run.
+func (b *Bridge) UpdateRunCost(ctx context.Context, runID string, totalCost float64) error {
+	return b.store.UpdateRunCost(ctx, runID, totalCost)
+}
+
 // SaveReview converts and saves a review record.
 func (b *Bridge) SaveReview(ctx context.Context, review review.StoreReview) error {
 	storeReview := store.ReviewRecord{

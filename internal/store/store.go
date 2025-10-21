@@ -9,6 +9,7 @@ import (
 type Store interface {
 	// Run management
 	CreateRun(ctx context.Context, run Run) error
+	UpdateRunCost(ctx context.Context, runID string, totalCost float64) error
 	GetRun(ctx context.Context, runID string) (Run, error)
 	ListRuns(ctx context.Context, limit int) ([]Run, error)
 

@@ -66,6 +66,7 @@ type Redactor interface {
 // Store defines the outbound port for persisting review history.
 type Store interface {
 	CreateRun(ctx context.Context, run StoreRun) error
+	UpdateRunCost(ctx context.Context, runID string, totalCost float64) error
 	SaveReview(ctx context.Context, review StoreReview) error
 	SaveFindings(ctx context.Context, findings []StoreFinding) error
 	Close() error
@@ -227,6 +228,25 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		providerReq.Prompt = redactedPrompt
 	}
 
+	// Create run record BEFORE launching provider goroutines so that reviews can reference it
+	if o.deps.Store != nil && runID != "" {
+		run := StoreRun{
+			RunID:      runID,
+			Timestamp:  now,
+			Scope:      fmt.Sprintf("%s..%s", req.BaseRef, req.TargetRef),
+			ConfigHash: calculateConfigHash(req),
+			TotalCost:  0.0, // Will be updated after all reviews complete
+			BaseRef:    req.BaseRef,
+			TargetRef:  req.TargetRef,
+			Repository: req.Repository,
+		}
+
+		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
+			// Log warning but continue - store failures shouldn't break reviews
+			fmt.Printf("warning: failed to create run record: %v\n", err)
+		}
+	}
+
 	var wg sync.WaitGroup
 	resultsChan := make(chan struct {
 		review    domain.Review
@@ -371,23 +391,11 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		return Result{}, fmt.Errorf("%d provider(s) failed: %s", len(errs), strings.Join(errMsgs, "; "))
 	}
 
-	// Create run record now that we have total cost
+	// Update run record with total cost now that all reviews are complete
 	if o.deps.Store != nil && runID != "" {
-		run := StoreRun{
-			RunID:      runID,
-			Timestamp:  now,
-			Scope:      fmt.Sprintf("%s..%s", req.BaseRef, req.TargetRef),
-			ConfigHash: calculateConfigHash(req),
-			TotalCost:  totalCost,
-			BaseRef:    req.BaseRef,
-			TargetRef:  req.TargetRef,
-			Repository: req.Repository,
-		}
-
-		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
+		if err := o.deps.Store.UpdateRunCost(ctx, runID, totalCost); err != nil {
 			// Log warning but continue - store failures shouldn't break reviews
-			// In production, this would use proper logging
-			fmt.Printf("warning: failed to create run record: %v\n", err)
+			fmt.Printf("warning: failed to update run cost: %v\n", err)
 		}
 	}
 

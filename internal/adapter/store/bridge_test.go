@@ -25,6 +25,16 @@ func (m *mockStore) CreateRun(ctx context.Context, run store.Run) error {
 	return nil
 }
 
+func (m *mockStore) UpdateRunCost(ctx context.Context, runID string, totalCost float64) error {
+	for i := range m.runs {
+		if m.runs[i].RunID == runID {
+			m.runs[i].TotalCost = totalCost
+			return nil
+		}
+	}
+	return nil // Not found, but don't error in tests
+}
+
 func (m *mockStore) GetRun(ctx context.Context, runID string) (store.Run, error) {
 	return store.Run{}, nil
 }
