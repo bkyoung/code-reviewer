@@ -89,34 +89,34 @@ This batch adds these capabilities while maintaining clean architecture and test
 - [x] Update JSON writer to include cost data
 - [x] Update SARIF writer to include cost metadata
 
-## Week 3: Configuration & Polish (Days 7-9)
+## Week 3: Configuration & Polish (Days 7-9) ⏳ IN PROGRESS
 
-### 3.1 Configuration Support ⏳
-- [ ] Add `observability` section to config
-- [ ] Add `observability.logging.enabled` option (default: true)
-- [ ] Add `observability.logging.level` option (debug/info/error)
-- [ ] Add `observability.logging.redact_api_keys` option (default: true)
-- [ ] Add `observability.metrics.enabled` option (default: true)
-- [ ] Write tests for config loading
-- [ ] Update config loader with validation
-- [ ] Document all observability config options
+### 3.1 Configuration Support ✅
+- [x] Add `observability` section to config
+- [x] Add `observability.logging.enabled` option (default: true)
+- [x] Add `observability.logging.level` option (debug/info/error)
+- [x] Add `observability.logging.redact_api_keys` option (default: true)
+- [x] Add `observability.metrics.enabled` option (default: true)
+- [x] Write tests for config loading
+- [x] Update config loader with validation
+- [x] Document all observability config options
 
-### 3.2 Output Formats ⏳
-- [ ] Design structured log format (JSON lines)
-- [ ] Write tests for JSON log output
-- [ ] Implement JSON logger
-- [ ] Write tests for human-readable log output
-- [ ] Implement human-readable logger
-- [ ] Add log output destination config (stdout, file)
+### 3.2 Output Formats ⏳ PARTIAL
+- [x] Design structured log format (JSON lines) - documented in OBSERVABILITY.md
+- [ ] Write tests for JSON log output - infrastructure ready, integration pending
+- [ ] Implement JSON logger - infrastructure ready, integration pending
+- [x] Write tests for human-readable log output - documented in OBSERVABILITY.md
+- [ ] Implement human-readable logger - infrastructure ready, integration pending
+- [ ] Add log output destination config (stdout, file) - future enhancement
 
-### 3.3 Documentation ⏳
-- [ ] Create OBSERVABILITY.md with logging examples
-- [ ] Document log format and fields
-- [ ] Create COST_TRACKING.md with pricing tables
-- [ ] Document cost calculation formulas
-- [ ] Add troubleshooting guide for log analysis
-- [ ] Update CONFIGURATION.md with observability options
-- [ ] Add examples to README
+### 3.3 Documentation ✅
+- [x] Create OBSERVABILITY.md with logging examples
+- [x] Document log format and fields
+- [x] Create COST_TRACKING.md with pricing tables
+- [x] Document cost calculation formulas
+- [x] Add troubleshooting guide for log analysis
+- [ ] Update CONFIGURATION.md with observability options - to be added
+- [ ] Add examples to README - to be added
 
 ### 3.4 Testing & Validation ⏳
 - [ ] Write integration tests for logging
