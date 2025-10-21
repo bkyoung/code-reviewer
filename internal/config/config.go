@@ -9,6 +9,7 @@ type Config struct {
 	Budget      BudgetConfig              `yaml:"budget"`
 	Redaction   RedactionConfig           `yaml:"redaction"`
 	Determinism DeterminismConfig         `yaml:"determinism"`
+	Store       StoreConfig               `yaml:"store"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -51,6 +52,12 @@ type DeterminismConfig struct {
 	UseSeed     bool    `yaml:"useSeed"`
 }
 
+// StoreConfig configures the persistence layer.
+type StoreConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+}
+
 // Merge combines multiple configuration instances, prioritising the latter ones.
 func Merge(configs ...Config) Config {
 	result := Config{}
@@ -69,6 +76,7 @@ func merge(base, overlay Config) Config {
 	result.Redaction = chooseRedaction(base.Redaction, overlay.Redaction)
 	result.Determinism = chooseDeterminism(base.Determinism, overlay.Determinism)
 	result.Merge = chooseMerge(base.Merge, overlay.Merge)
+	result.Store = chooseStore(base.Store, overlay.Store)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -125,6 +133,13 @@ func chooseDeterminism(base, overlay DeterminismConfig) DeterminismConfig {
 
 func chooseMerge(base, overlay MergeConfig) MergeConfig {
 	if overlay.Enabled || overlay.Provider != "" || overlay.Model != "" || overlay.Strategy != "" || len(overlay.Weights) > 0 {
+		return overlay
+	}
+	return base
+}
+
+func chooseStore(base, overlay StoreConfig) StoreConfig {
+	if overlay.Enabled || overlay.Path != "" {
 		return overlay
 	}
 	return base

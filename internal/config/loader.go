@@ -88,6 +88,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("merge.enabled", true)
 	v.SetDefault("merge.strategy", "consensus")
 
+	// Store defaults (Phase 3)
+	v.SetDefault("store.enabled", true)
+	v.SetDefault("store.path", defaultStorePath())
+
 	// Provider defaults (Phase 1 + Phase 2)
 	v.SetDefault("providers.openai.enabled", false)
 	v.SetDefault("providers.openai.model", "gpt-4o")
@@ -99,4 +103,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("providers.ollama.model", "llama2")
 	v.SetDefault("providers.static.enabled", true)
 	v.SetDefault("providers.static.model", "static-v1")
+}
+
+func defaultStorePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "./reviews.db"
+	}
+	return filepath.Join(home, ".config", "cr", "reviews.db")
 }
