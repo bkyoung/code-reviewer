@@ -9,7 +9,6 @@ import (
 
 	"github.com/brandon/code-reviewer/internal/adapter/output/markdown"
 	"github.com/brandon/code-reviewer/internal/domain"
-	"github.com/brandon/code-reviewer/internal/usecase/review"
 )
 
 func TestWriterProducesDeterministicMarkdown(t *testing.T) {
@@ -39,7 +38,7 @@ func TestWriterProducesDeterministicMarkdown(t *testing.T) {
 		},
 	}
 
-	path, err := writer.Write(ctx, review.MarkdownArtifact{
+	path, err := writer.Write(ctx, domain.MarkdownArtifact{
 		OutputDir:    dir,
 		Repository:   "repo",
 		BaseRef:      "master",

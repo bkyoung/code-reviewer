@@ -31,14 +31,14 @@ This document outlines a phased implementation plan for the Multi-LLM Code Revie
 
 ### **Deliverables:**
 
-* **\[ \] Additional Providers:** Implement at least two more LLM providers (e.g., Gemini, Ollama for local support).  
-* **\[ \] Parallel Orchestrator:** Upgrade the orchestrator to run all enabled providers concurrently using goroutines and channels.  
-* **\[ \] Basic Merger Service:** Implement a simple merger that de-duplicates findings based on a content hash.  
-* **\[ \] Determinism Engine:** Integrate deterministic seeding into the orchestrator and Provider interface. Set temperature=0.0 in API calls.  
-* **\[ \] JSON & SARIF Output:** Extend the OutputManager to support JSON and SARIF formats.  
-* **\[ \] Redaction Engine (v1):** Implement regex-based secret redaction.
+* **\[x\] Additional Providers:** Implement at least two more LLM providers (Anthropic/Claude, Google Gemini, Ollama for local support).
+* **\[x\] Parallel Orchestrator:** Upgrade the orchestrator to run all enabled providers concurrently using goroutines and channels.
+* **\[x\] Basic Merger Service:** Implement a simple merger that de-duplicates findings based on a content hash.
+* **\[x\] Determinism Engine:** Integrate deterministic seeding into the orchestrator and Provider interface. Set temperature=0.0 in API calls.
+* **\[x\] JSON & SARIF Output:** Extend the OutputManager to support JSON and SARIF formats.
+* **\[x\] Redaction Engine (v1):** Implement regex-based secret redaction.
 
-**Outcome:** The tool can now run 3+ models in parallel, produce a de-duplicated merged review, and generate identical output for identical inputs. CI integration via SARIF is now possible.
+**Outcome:** The tool can now run 4 models in parallel (OpenAI, Anthropic, Gemini, Ollama), produce a de-duplicated merged review, and generate identical output for identical inputs. CI integration via SARIF is now possible.
 
 ## **4\. Phase 3: Intelligence & Feedback Loop (Weeks 7-9)**
 

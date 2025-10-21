@@ -10,7 +10,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/brandon/code-reviewer/internal/domain"
 )
 
 type clock func() string
@@ -26,7 +26,7 @@ func NewWriter(now clock) *Writer {
 }
 
 // Write persists a Markdown artifact to disk.
-func (w *Writer) Write(ctx context.Context, artifact review.MarkdownArtifact) (string, error) {
+func (w *Writer) Write(ctx context.Context, artifact domain.MarkdownArtifact) (string, error) {
 	if err := os.MkdirAll(artifact.OutputDir, 0o755); err != nil {
 		return "", fmt.Errorf("create output dir: %w", err)
 	}
@@ -47,7 +47,7 @@ func (w *Writer) Write(ctx context.Context, artifact review.MarkdownArtifact) (s
 	return path, nil
 }
 
-func buildContent(artifact review.MarkdownArtifact) string {
+func buildContent(artifact domain.MarkdownArtifact) string {
 	var builder strings.Builder
 	caser := cases.Title(language.English)
 	builder.WriteString("# Code Review Report\n\n")

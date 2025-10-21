@@ -88,3 +88,24 @@ func hashFinding(input FindingInput) string {
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
+
+// MarkdownArtifact encapsulates the Markdown generation inputs.
+type MarkdownArtifact struct {
+	OutputDir    string
+	Repository   string
+	BaseRef      string
+	TargetRef    string
+	Diff         Diff
+	Review       Review
+	ProviderName string
+}
+
+// JSONArtifact encapsulates the JSON generation inputs.
+type JSONArtifact struct {
+	OutputDir    string
+	Repository   string
+	BaseRef      string
+	TargetRef    string
+	Review       Review
+	ProviderName string
+}

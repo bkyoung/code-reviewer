@@ -3,7 +3,9 @@ package review
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/brandon/code-reviewer/internal/domain"
 )
@@ -19,9 +21,34 @@ type Provider interface {
 	Review(ctx context.Context, req ProviderRequest) (domain.Review, error)
 }
 
+// Merger defines the outbound port for merging reviews.
+type Merger interface {
+	Merge(reviews []domain.Review) domain.Review
+}
+
 // MarkdownWriter persists provider output to disk.
 type MarkdownWriter interface {
-	Write(ctx context.Context, artifact MarkdownArtifact) (string, error)
+	Write(ctx context.Context, artifact domain.MarkdownArtifact) (string, error)
+}
+
+// JSONWriter persists provider output to disk.
+type JSONWriter interface {
+	Write(ctx context.Context, artifact domain.JSONArtifact) (string, error)
+}
+
+// SARIFWriter persists provider output to disk in SARIF format.
+type SARIFWriter interface {
+	Write(ctx context.Context, artifact SARIFArtifact) (string, error)
+}
+
+// SARIFArtifact encapsulates the SARIF generation inputs.
+type SARIFArtifact struct {
+	OutputDir    string
+	Repository   string
+	BaseRef      string
+	TargetRef    string
+	Review       domain.Review
+	ProviderName string
 }
 
 // SeedFunc generates deterministic seeds per review scope.
@@ -30,11 +57,20 @@ type SeedFunc func(baseRef, targetRef string) uint64
 // PromptBuilder constructs the provider request payload.
 type PromptBuilder func(diff domain.Diff, req BranchRequest) (ProviderRequest, error)
 
+// Redactor defines the outbound port for secret redaction.
+type Redactor interface {
+	Redact(input string) (string, error)
+}
+
 // OrchestratorDeps captures the inbound dependencies for the orchestrator.
 type OrchestratorDeps struct {
 	Git           GitEngine
-	Provider      Provider
+	Providers     map[string]Provider
+	Merger        Merger
 	Markdown      MarkdownWriter
+	JSON          JSONWriter
+	SARIF         SARIFWriter
+	Redactor      Redactor
 	SeedGenerator SeedFunc
 	PromptBuilder PromptBuilder
 }
@@ -55,21 +91,12 @@ type BranchRequest struct {
 	IncludeUncommitted bool
 }
 
-// MarkdownArtifact encapsulates the Markdown generation inputs.
-type MarkdownArtifact struct {
-	OutputDir    string
-	Repository   string
-	BaseRef      string
-	TargetRef    string
-	Diff         domain.Diff
-	Review       domain.Review
-	ProviderName string
-}
-
 // Result captures the orchestrator outcome.
 type Result struct {
-	MarkdownPath   string
-	ProviderReview domain.Review
+	MarkdownPaths map[string]string
+	JSONPaths     map[string]string
+	SARIFPaths    map[string]string
+	Reviews       []domain.Review
 }
 
 // Orchestrator implements the core review flow for Phase 1.
@@ -82,10 +109,40 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 	return &Orchestrator{deps: deps}
 }
 
-// ReviewBranch executes a single-provider review for a Git branch diff.
+// validateDependencies checks that all required dependencies are present.
+func (o *Orchestrator) validateDependencies() error {
+	if o.deps.Git == nil {
+		return errors.New("git engine is required")
+	}
+	if o.deps.Providers == nil || len(o.deps.Providers) == 0 {
+		return errors.New("at least one provider is required")
+	}
+	if o.deps.Merger == nil {
+		return errors.New("merger is required")
+	}
+	if o.deps.Markdown == nil {
+		return errors.New("markdown writer is required")
+	}
+	if o.deps.JSON == nil {
+		return errors.New("json writer is required")
+	}
+	if o.deps.SARIF == nil {
+		return errors.New("sarif writer is required")
+	}
+	if o.deps.PromptBuilder == nil {
+		return errors.New("prompt builder is required")
+	}
+	if o.deps.SeedGenerator == nil {
+		return errors.New("seed generator is required")
+	}
+	// Redactor is optional
+	return nil
+}
+
+// ReviewBranch executes a multi-provider review for a Git branch diff.
 func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Result, error) {
-	if o.deps.Git == nil || o.deps.Provider == nil || o.deps.Markdown == nil || o.deps.PromptBuilder == nil || o.deps.SeedGenerator == nil {
-		return Result{}, errors.New("orchestrator dependencies missing")
+	if err := o.validateDependencies(); err != nil {
+		return Result{}, err
 	}
 
 	if err := validateRequest(req); err != nil {
@@ -106,27 +163,197 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		providerReq.Seed = seed
 	}
 
-	review, err := o.deps.Provider.Review(ctx, providerReq)
-	if err != nil {
-		return Result{}, err
+	// Apply redaction if redactor is available
+	if o.deps.Redactor != nil {
+		redactedPrompt, err := o.deps.Redactor.Redact(providerReq.Prompt)
+		if err != nil {
+			return Result{}, fmt.Errorf("redaction failed: %w", err)
+		}
+		providerReq.Prompt = redactedPrompt
 	}
 
-	markdownPath, err := o.deps.Markdown.Write(ctx, MarkdownArtifact{
+	var wg sync.WaitGroup
+	resultsChan := make(chan struct {
+		review    domain.Review
+		path      string
+		jsonPath  string
+		sarifPath string
+		err       error
+	}, len(o.deps.Providers))
+
+	for name, provider := range o.deps.Providers {
+		wg.Add(1)
+		go func(name string, provider Provider) {
+			defer func() {
+				if r := recover(); r != nil {
+					resultsChan <- struct {
+						review    domain.Review
+						path      string
+						jsonPath  string
+						sarifPath string
+						err       error
+					}{err: fmt.Errorf("provider %s panicked: %v", name, r)}
+				}
+				wg.Done()
+			}()
+
+			review, err := provider.Review(ctx, providerReq)
+			if err != nil {
+				resultsChan <- struct {
+					review    domain.Review
+					path      string
+					jsonPath  string
+					sarifPath string
+					err       error
+				}{err: fmt.Errorf("provider %s failed: %w", name, err)}
+				return
+			}
+
+			markdownPath, err := o.deps.Markdown.Write(ctx, domain.MarkdownArtifact{
+				OutputDir:    req.OutputDir,
+				Repository:   req.Repository,
+				BaseRef:      req.BaseRef,
+				TargetRef:    req.TargetRef,
+				Diff:         diff,
+				Review:       review,
+				ProviderName: review.ProviderName,
+			})
+			if err != nil {
+				resultsChan <- struct {
+					review    domain.Review
+					path      string
+					jsonPath  string
+					sarifPath string
+					err       error
+				}{err: fmt.Errorf("markdown write failed for %s: %w", name, err)}
+				return
+			}
+
+			jsonPath, err := o.deps.JSON.Write(ctx, domain.JSONArtifact{
+				OutputDir:    req.OutputDir,
+				Repository:   req.Repository,
+				BaseRef:      req.BaseRef,
+				TargetRef:    req.TargetRef,
+				Review:       review,
+				ProviderName: review.ProviderName,
+			})
+			if err != nil {
+				resultsChan <- struct {
+					review    domain.Review
+					path      string
+					jsonPath  string
+					sarifPath string
+					err       error
+				}{err: fmt.Errorf("json write failed for %s: %w", name, err)}
+				return
+			}
+
+			sarifPath, err := o.deps.SARIF.Write(ctx, SARIFArtifact{
+				OutputDir:    req.OutputDir,
+				Repository:   req.Repository,
+				BaseRef:      req.BaseRef,
+				TargetRef:    req.TargetRef,
+				Review:       review,
+				ProviderName: review.ProviderName,
+			})
+			if err != nil {
+				resultsChan <- struct {
+					review    domain.Review
+					path      string
+					jsonPath  string
+					sarifPath string
+					err       error
+				}{err: fmt.Errorf("sarif write failed for %s: %w", name, err)}
+				return
+			}
+
+			resultsChan <- struct {
+				review    domain.Review
+				path      string
+				jsonPath  string
+				sarifPath string
+				err       error
+			}{review: review, path: markdownPath, jsonPath: jsonPath, sarifPath: sarifPath}
+		}(name, provider)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	var reviews []domain.Review
+	markdownPaths := make(map[string]string)
+	jsonPaths := make(map[string]string)
+	sarifPaths := make(map[string]string)
+	var errs []error
+
+	for res := range resultsChan {
+		if res.err != nil {
+			errs = append(errs, res.err)
+		} else {
+			reviews = append(reviews, res.review)
+			markdownPaths[res.review.ProviderName] = res.path
+			jsonPaths[res.review.ProviderName] = res.jsonPath
+			sarifPaths[res.review.ProviderName] = res.sarifPath
+		}
+	}
+
+	if len(errs) > 0 {
+		// Aggregate all errors into a single error message
+		var errMsgs []string
+		for _, err := range errs {
+			errMsgs = append(errMsgs, err.Error())
+		}
+		return Result{}, fmt.Errorf("%d provider(s) failed: %s", len(errs), strings.Join(errMsgs, "; "))
+	}
+
+	mergedReview := o.deps.Merger.Merge(reviews)
+
+	mergedMarkdownPath, err := o.deps.Markdown.Write(ctx, domain.MarkdownArtifact{
 		OutputDir:    req.OutputDir,
 		Repository:   req.Repository,
 		BaseRef:      req.BaseRef,
 		TargetRef:    req.TargetRef,
 		Diff:         diff,
-		Review:       review,
-		ProviderName: review.ProviderName,
+		Review:       mergedReview,
+		ProviderName: mergedReview.ProviderName,
 	})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("markdown write failed for merged review: %w", err)
 	}
 
+	mergedJSONPath, err := o.deps.JSON.Write(ctx, domain.JSONArtifact{
+		OutputDir:    req.OutputDir,
+		Repository:   req.Repository,
+		BaseRef:      req.BaseRef,
+		TargetRef:    req.TargetRef,
+		Review:       mergedReview,
+		ProviderName: mergedReview.ProviderName,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("json write failed for merged review: %w", err)
+	}
+
+	mergedSARIFPath, err := o.deps.SARIF.Write(ctx, SARIFArtifact{
+		OutputDir:    req.OutputDir,
+		Repository:   req.Repository,
+		BaseRef:      req.BaseRef,
+		TargetRef:    req.TargetRef,
+		Review:       mergedReview,
+		ProviderName: mergedReview.ProviderName,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("sarif write failed for merged review: %w", err)
+	}
+
+	markdownPaths["merged"] = mergedMarkdownPath
+	jsonPaths["merged"] = mergedJSONPath
+	sarifPaths["merged"] = mergedSARIFPath
+
 	return Result{
-		MarkdownPath:   markdownPath,
-		ProviderReview: review,
+		MarkdownPaths: markdownPaths,
+		JSONPaths:     jsonPaths,
+		SARIFPaths:    sarifPaths,
+		Reviews:       append(reviews, mergedReview),
 	}, nil
 }
 

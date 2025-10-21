@@ -75,6 +75,28 @@ func locateConfigFile(name string, paths []string) string {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("output.directory", "out")
+
+	// Determinism defaults (Phase 2)
 	v.SetDefault("determinism.enabled", true)
 	v.SetDefault("determinism.temperature", 0.0)
+	v.SetDefault("determinism.useSeed", true)
+
+	// Redaction defaults (Phase 2)
+	v.SetDefault("redaction.enabled", true)
+
+	// Merge defaults (Phase 2)
+	v.SetDefault("merge.enabled", true)
+	v.SetDefault("merge.strategy", "consensus")
+
+	// Provider defaults (Phase 1 + Phase 2)
+	v.SetDefault("providers.openai.enabled", false)
+	v.SetDefault("providers.openai.model", "gpt-4o")
+	v.SetDefault("providers.anthropic.enabled", false)
+	v.SetDefault("providers.anthropic.model", "claude-3-5-sonnet-20241022")
+	v.SetDefault("providers.gemini.enabled", false)
+	v.SetDefault("providers.gemini.model", "gemini-pro")
+	v.SetDefault("providers.ollama.enabled", false)
+	v.SetDefault("providers.ollama.model", "llama2")
+	v.SetDefault("providers.static.enabled", true)
+	v.SetDefault("providers.static.model", "static-v1")
 }

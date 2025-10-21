@@ -1,0 +1,150 @@
+package sarif_test
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/brandon/code-reviewer/internal/adapter/output/sarif"
+	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestWriter_Write(t *testing.T) {
+	now := func() string { return "2025-10-20T12-00-00" }
+
+	t.Run("writes SARIF file successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		writer := sarif.NewWriter(now)
+		artifact := review.SARIFArtifact{
+			OutputDir:    tmpDir,
+			Repository:   "test-repo",
+			BaseRef:      "main",
+			TargetRef:    "feature",
+			Review:       createTestReview(),
+			ProviderName: "openai",
+		}
+
+		path, err := writer.Write(context.Background(), artifact)
+		require.NoError(t, err)
+
+		expectedPath := filepath.Join(tmpDir, "test-repo_feature", "2025-10-20T12-00-00", "review-openai.sarif")
+		assert.Equal(t, expectedPath, path)
+
+		// Verify file exists
+		_, err = os.Stat(path)
+		require.NoError(t, err)
+
+		// Verify it's valid JSON
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		var sarifDoc map[string]interface{}
+		err = json.Unmarshal(content, &sarifDoc)
+		require.NoError(t, err)
+
+		// Verify SARIF structure
+		assert.Equal(t, "2.1.0", sarifDoc["version"])
+		assert.NotNil(t, sarifDoc["runs"])
+	})
+
+	t.Run("creates output directory if it doesn't exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outputDir := filepath.Join(tmpDir, "nested", "path")
+
+		writer := sarif.NewWriter(now)
+		artifact := review.SARIFArtifact{
+			OutputDir:    outputDir,
+			Repository:   "test-repo",
+			BaseRef:      "main",
+			TargetRef:    "feature",
+			Review:       createTestReview(),
+			ProviderName: "openai",
+		}
+
+		path, err := writer.Write(context.Background(), artifact)
+		require.NoError(t, err)
+
+		// Verify file exists
+		_, err = os.Stat(path)
+		require.NoError(t, err)
+	})
+
+	t.Run("converts findings to SARIF results", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		finding := domain.NewFinding(domain.FindingInput{
+			File:        "main.go",
+			LineStart:   10,
+			LineEnd:     15,
+			Severity:    "high",
+			Category:    "security",
+			Description: "SQL injection vulnerability",
+			Suggestion:  "Use parameterized queries",
+			Evidence:    true,
+		})
+
+		testReview := domain.Review{
+			ProviderName: "openai",
+			ModelName:    "gpt-4",
+			Summary:      "Test review",
+			Findings:     []domain.Finding{finding},
+		}
+
+		writer := sarif.NewWriter(now)
+		artifact := review.SARIFArtifact{
+			OutputDir:    tmpDir,
+			Repository:   "test-repo",
+			BaseRef:      "main",
+			TargetRef:    "feature",
+			Review:       testReview,
+			ProviderName: "openai",
+		}
+
+		path, err := writer.Write(context.Background(), artifact)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		var sarifDoc map[string]interface{}
+		err = json.Unmarshal(content, &sarifDoc)
+		require.NoError(t, err)
+
+		// Verify results exist
+		runs := sarifDoc["runs"].([]interface{})
+		require.Len(t, runs, 1)
+
+		run := runs[0].(map[string]interface{})
+		results := run["results"].([]interface{})
+		require.Len(t, results, 1)
+
+		result := results[0].(map[string]interface{})
+		assert.Equal(t, "SQL injection vulnerability", result["message"].(map[string]interface{})["text"])
+	})
+}
+
+func createTestReview() domain.Review {
+	finding := domain.NewFinding(domain.FindingInput{
+		File:        "internal/test.go",
+		LineStart:   1,
+		LineEnd:     5,
+		Severity:    "low",
+		Category:    "style",
+		Description: "Test finding",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	return domain.Review{
+		ProviderName: "openai",
+		ModelName:    "gpt-4",
+		Summary:      "This is a test review.",
+		Findings:     []domain.Finding{finding},
+	}
+}
