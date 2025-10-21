@@ -439,3 +439,88 @@ func TestHTTPClient_Call_RegularModel_UsesTemperatureAndSeed(t *testing.T) {
 func uint64Ptr(v uint64) *uint64 {
 	return &v
 }
+
+func TestHTTPClient_WithObservability(t *testing.T) {
+	// Mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "gpt-4o-mini",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "test response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("sk-test-key-1234567890", "gpt-4o-mini")
+	client.SetBaseURL(server.URL)
+
+	// Set up observability
+	logger := llmhttp.NewDefaultLogger(llmhttp.LogLevelDebug, llmhttp.LogFormatHuman)
+	metrics := llmhttp.NewDefaultMetrics()
+	pricing := llmhttp.NewDefaultPricing()
+
+	client.SetLogger(logger)
+	client.SetMetrics(metrics)
+	client.SetPricing(pricing)
+
+	resp, err := client.Call(context.Background(), "test prompt", openai.CallOptions{MaxTokens: 1024})
+
+	require.NoError(t, err)
+	assert.Equal(t, "test response", resp.Text)
+	assert.Equal(t, 100, resp.TokensIn)
+	assert.Equal(t, 50, resp.TokensOut)
+	assert.Greater(t, resp.Cost, 0.0, "Cost should be calculated")
+
+	// Verify metrics
+	stats := metrics.GetStats()
+	assert.Equal(t, 1, stats.TotalRequests)
+	assert.Equal(t, 100, stats.TotalTokensIn)
+	assert.Equal(t, 50, stats.TotalTokensOut)
+	assert.Greater(t, stats.TotalCost, 0.0)
+	assert.Greater(t, stats.TotalDuration, time.Duration(0))
+
+	// Verify provider-specific stats
+	openaiStats := stats.ByProvider["openai"]
+	assert.Equal(t, 1, openaiStats.Requests)
+	assert.Equal(t, 100, openaiStats.TokensIn)
+	assert.Equal(t, 50, openaiStats.TokensOut)
+	assert.Greater(t, openaiStats.Cost, 0.0)
+}
+
+func TestHTTPClient_WithObservability_Error(t *testing.T) {
+	// Mock server returning error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(openai.ErrorResponse{
+			Error: openai.ErrorDetail{
+				Message: "Rate limit exceeded",
+				Type:    "rate_limit_error",
+				Code:    "rate_limit_exceeded",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("sk-test-key", "gpt-4o-mini")
+	client.SetBaseURL(server.URL)
+
+	// Set up observability
+	metrics := llmhttp.NewDefaultMetrics()
+	client.SetMetrics(metrics)
+
+	_, err := client.Call(context.Background(), "test prompt", openai.CallOptions{MaxTokens: 1024})
+
+	require.Error(t, err)
+
+	// Verify error was recorded in metrics
+	stats := metrics.GetStats()
+	assert.Equal(t, 1, stats.ErrorCount)
+	assert.Equal(t, 1, stats.ByProvider["openai"].Errors)
+}
