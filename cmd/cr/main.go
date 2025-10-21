@@ -167,9 +167,13 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 		if model == "" {
 			model = "claude-3-5-sonnet-20241022"
 		}
-		// TODO: Implement real HTTP client for Anthropic API
-		// For now, using nil client (will need stub implementation)
-		providers["anthropic"] = anthropic.NewProvider(model, nil)
+		// Use real HTTP client if API key is provided
+		apiKey := cfg.APIKey
+		if apiKey == "" {
+			log.Println("Anthropic: No API key provided, skipping provider")
+		} else {
+			providers["anthropic"] = anthropic.NewProvider(model, anthropic.NewHTTPClient(apiKey, model))
+		}
 	}
 
 	// Google Gemini provider
