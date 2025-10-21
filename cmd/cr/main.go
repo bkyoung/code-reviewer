@@ -150,8 +150,15 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
-		// Using static client for now - replace with real client when API integration is ready
-		providers["openai"] = openai.NewProvider(model, openai.NewStaticClient())
+		// Use real HTTP client if API key is provided
+		apiKey := cfg.APIKey
+		if apiKey == "" {
+			// Fallback to static client if no API key
+			log.Println("OpenAI: No API key provided, using static client")
+			providers["openai"] = openai.NewProvider(model, openai.NewStaticClient())
+		} else {
+			providers["openai"] = openai.NewProvider(model, openai.NewHTTPClient(apiKey, model))
+		}
 	}
 
 	// Anthropic/Claude provider
