@@ -57,3 +57,43 @@ func TestWriter_Write(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, review, writtenReview)
 }
+
+func TestWriter_Write_IncludesCostField(t *testing.T) {
+	// Given
+	tempDir := t.TempDir()
+	now := func() string { return "20251020T120000Z" }
+	writer := json.NewWriter(now)
+
+	review := domain.Review{
+		ProviderName: "openai",
+		ModelName:    "gpt-4o",
+		Summary:      "Test summary",
+		Cost:         0.0523,
+		Findings:     []domain.Finding{},
+	}
+
+	artifact := domain.JSONArtifact{
+		OutputDir:    tempDir,
+		Repository:   "test-repo",
+		BaseRef:      "main",
+		TargetRef:    "feature",
+		Review:       review,
+		ProviderName: "openai",
+	}
+
+	// When
+	path, err := writer.Write(context.Background(), artifact)
+
+	// Then
+	assert.NoError(t, err)
+
+	// Verify cost field is in JSON
+	content, err := os.ReadFile(path)
+	assert.NoError(t, err)
+
+	var writtenReview domain.Review
+	err = stdjson.Unmarshal(content, &writtenReview)
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0523, writtenReview.Cost)
+	assert.Equal(t, review, writtenReview)
+}

@@ -108,6 +108,11 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 					},
 				},
 				"results": results,
+				"properties": map[string]interface{}{
+					"cost":    artifact.Review.Cost,
+					"summary": artifact.Review.Summary,
+					"model":   artifact.Review.ModelName,
+				},
 			},
 		},
 	}

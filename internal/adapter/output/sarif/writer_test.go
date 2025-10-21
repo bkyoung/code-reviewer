@@ -148,3 +148,45 @@ func createTestReview() domain.Review {
 		Findings:     []domain.Finding{finding},
 	}
 }
+
+func TestWriter_Write_IncludesCostInProperties(t *testing.T) {
+	tmpDir := t.TempDir()
+	now := func() string { return "2025-10-20T12-00-00" }
+
+	testReview := domain.Review{
+		ProviderName: "openai",
+		ModelName:    "gpt-4o",
+		Summary:      "Test review",
+		Cost:         0.0523,
+		Findings:     []domain.Finding{},
+	}
+
+	writer := sarif.NewWriter(now)
+	artifact := review.SARIFArtifact{
+		OutputDir:    tmpDir,
+		Repository:   "test-repo",
+		BaseRef:      "main",
+		TargetRef:    "feature",
+		Review:       testReview,
+		ProviderName: "openai",
+	}
+
+	path, err := writer.Write(context.Background(), artifact)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var sarifDoc map[string]interface{}
+	err = json.Unmarshal(content, &sarifDoc)
+	require.NoError(t, err)
+
+	// Verify cost is in run properties
+	runs := sarifDoc["runs"].([]interface{})
+	require.Len(t, runs, 1)
+
+	run := runs[0].(map[string]interface{})
+	properties := run["properties"].(map[string]interface{})
+	assert.Equal(t, 0.0523, properties["cost"])
+	assert.Equal(t, "Test review", properties["summary"])
+}
