@@ -48,7 +48,8 @@ This document outlines a phased implementation plan for the Multi-LLM Code Revie
 
 * **\[x\] SQLite Store:** Set up the SQLite database schema and Store interface.
 * **\[x\] Precision Priors:** Implement the logic in the Store to calculate and update precision scores (Beta distribution) based on user feedback.
-* **\[ \] Persistence Logic:** Integrate the store to save all run history, findings, and metadata.
+* **\[x\] Persistence Logic:** Integrate the store to save all run history, findings, and metadata.
+* **\[~\] HTTP API Clients:** Implement real HTTP clients for OpenAI, Anthropic, Gemini, Ollama (in progress).
 * **\[ \] TUI (Bubble Tea):** Build the interactive TUI.
 * **\[ \] Feedback Capture:** In the TUI, implement the ability for users to mark findings as accepted or rejected.
 * **\[ \] Intelligent Merger (v2):** Upgrade the Merger Service to use the precision priors from the database to rank and weight findings during synthesis.
