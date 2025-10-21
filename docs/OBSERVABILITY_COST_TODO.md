@@ -41,19 +41,19 @@ This batch adds these capabilities while maintaining clean architecture and test
 - [x] Write tests for error counting by type
 - [x] Implement error counter
 
-### 1.3 Integration with Existing Clients ⏳
+### 1.3 Integration with Existing Clients ✅
 - [x] Update OpenAI client to use logger
 - [x] Update OpenAI client to track duration
 - [x] Update OpenAI client to track tokens
-- [ ] Update Anthropic client to use logger
-- [ ] Update Anthropic client to track duration
-- [ ] Update Anthropic client to track tokens
-- [ ] Update Ollama client to use logger
-- [ ] Update Ollama client to track duration
-- [ ] Update Ollama client to track tokens
-- [ ] Update Gemini client to use logger
-- [ ] Update Gemini client to track duration
-- [ ] Update Gemini client to track tokens
+- [x] Update Anthropic client to use logger
+- [x] Update Anthropic client to track duration
+- [x] Update Anthropic client to track tokens
+- [x] Update Ollama client to use logger
+- [x] Update Ollama client to track duration
+- [x] Update Ollama client to track tokens
+- [x] Update Gemini client to use logger
+- [x] Update Gemini client to track duration
+- [x] Update Gemini client to track tokens
 
 ## Week 2: Cost Tracking (Days 4-6) ✅ COMPLETE (Infrastructure)
 
@@ -70,24 +70,24 @@ This batch adds these capabilities while maintaining clean architecture and test
 - [x] Implement Gemini pricing calculator
 - [x] Document pricing data sources and update dates
 
-### 2.2 Cost Tracking in Responses ⏳
-- [ ] Add Cost field to domain.Review struct
+### 2.2 Cost Tracking in Responses ✅
+- [x] Add Cost field to domain.Review struct
 - [x] Update OpenAI client to calculate and return cost
 - [x] Write tests for OpenAI cost calculation
-- [ ] Update Anthropic client to calculate and return cost
-- [ ] Write tests for Anthropic cost calculation
-- [ ] Update Ollama client to return $0 cost
-- [ ] Write tests for Ollama cost (free)
-- [ ] Update Gemini client to calculate and return cost
-- [ ] Write tests for Gemini cost calculation
+- [x] Update Anthropic client to calculate and return cost
+- [x] Write tests for Anthropic cost calculation
+- [x] Update Ollama client to return $0 cost
+- [x] Write tests for Ollama cost (free)
+- [x] Update Gemini client to calculate and return cost
+- [x] Write tests for Gemini cost calculation
 
-### 2.3 Cost Aggregation in Orchestrator ⏳
-- [ ] Update orchestrator to sum costs from all providers
-- [ ] Add TotalCost field to merged review output
-- [ ] Write tests for cost aggregation
-- [ ] Update Markdown writer to include cost summary
-- [ ] Update JSON writer to include cost data
-- [ ] Update SARIF writer to include cost metadata
+### 2.3 Cost Aggregation in Orchestrator ✅
+- [x] Update orchestrator to sum costs from all providers
+- [x] Add TotalCost field to merged review output
+- [x] Write tests for cost aggregation
+- [x] Update Markdown writer to include cost summary
+- [x] Update JSON writer to include cost data
+- [x] Update SARIF writer to include cost metadata
 
 ## Week 3: Configuration & Polish (Days 7-9)
 
