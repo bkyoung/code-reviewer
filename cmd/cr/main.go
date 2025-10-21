@@ -180,22 +180,29 @@ func buildProviders(providersConfig map[string]config.ProviderConfig) map[string
 	if cfg, ok := providersConfig["gemini"]; ok && cfg.Enabled {
 		model := cfg.Model
 		if model == "" {
-			model = "gemini-pro"
+			model = "gemini-1.5-pro"
 		}
-		// TODO: Implement real HTTP client for Gemini API
-		// For now, using nil client (will need stub implementation)
-		providers["gemini"] = gemini.NewProvider(model, nil)
+		// Use real HTTP client if API key is provided
+		apiKey := cfg.APIKey
+		if apiKey == "" {
+			log.Println("Gemini: No API key provided, skipping provider")
+		} else {
+			providers["gemini"] = gemini.NewProvider(model, gemini.NewHTTPClient(apiKey, model))
+		}
 	}
 
 	// Ollama provider (local LLM)
 	if cfg, ok := providersConfig["ollama"]; ok && cfg.Enabled {
 		model := cfg.Model
 		if model == "" {
-			model = "llama2"
+			model = "codellama"
 		}
-		// TODO: Implement real HTTP client for Ollama API
-		// For now, using nil client (will need stub implementation)
-		providers["ollama"] = ollama.NewProvider(model, nil)
+		// Use configured host or default to localhost
+		host := os.Getenv("OLLAMA_HOST")
+		if host == "" {
+			host = "http://localhost:11434"
+		}
+		providers["ollama"] = ollama.NewProvider(model, ollama.NewHTTPClient(host, model))
 	}
 
 	// Static provider (for testing)
