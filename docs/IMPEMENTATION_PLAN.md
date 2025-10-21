@@ -46,12 +46,12 @@ This document outlines a phased implementation plan for the Multi-LLM Code Revie
 
 ### **Deliverables:**
 
-* **\[ \] SQLite Store:** Set up the SQLite database schema and Store interface.  
-* **\[ \] Persistence Logic:** Integrate the store to save all run history, findings, and metadata.  
-* **\[ \] TUI (Bubble Tea):** Build the interactive TUI.  
-* **\[ \] Feedback Capture:** In the TUI, implement the ability for users to mark findings as accepted or rejected.  
-* **\[ \] Precision Priors:** Implement the logic in the Store to calculate and update precision scores (Beta distribution) based on user feedback.  
-* **\[ \] Intelligent Merger (v2):** Upgrade the Merger Service to use the precision priors from the database to rank and weight findings during synthesis.  
+* **\[x\] SQLite Store:** Set up the SQLite database schema and Store interface.
+* **\[x\] Precision Priors:** Implement the logic in the Store to calculate and update precision scores (Beta distribution) based on user feedback.
+* **\[ \] Persistence Logic:** Integrate the store to save all run history, findings, and metadata.
+* **\[ \] TUI (Bubble Tea):** Build the interactive TUI.
+* **\[ \] Feedback Capture:** In the TUI, implement the ability for users to mark findings as accepted or rejected.
+* **\[ \] Intelligent Merger (v2):** Upgrade the Merger Service to use the precision priors from the database to rank and weight findings during synthesis.
 * **\[ \] Redaction Engine (v2):** Add entropy-based secret detection.
 
 **Outcome:** The tool now learns from user feedback, improving the quality and relevance of its merged reviews over time. The interactive TUI provides a much richer user experience.
