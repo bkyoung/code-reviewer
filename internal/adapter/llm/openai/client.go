@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -351,37 +350,16 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 
 // parseReviewJSON extracts review data from JSON response.
 func parseReviewJSON(text string) (Response, error) {
-	// Try to find JSON in markdown code blocks first
-	jsonText := extractJSONFromMarkdown(text)
-	if jsonText == "" {
-		jsonText = text // Try parsing the whole response as JSON
-	}
-
-	// Parse into structured response
-	var result struct {
-		Summary  string           `json:"summary"`
-		Findings []domain.Finding `json:"findings"`
-	}
-
-	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
-		return Response{}, fmt.Errorf("failed to parse JSON: %w", err)
+	// Use shared JSON parsing utility
+	summary, findings, err := llmhttp.ParseReviewResponse(text)
+	if err != nil {
+		return Response{}, err
 	}
 
 	return Response{
-		Summary:  result.Summary,
-		Findings: result.Findings,
+		Summary:  summary,
+		Findings: findings,
 	}, nil
-}
-
-// extractJSONFromMarkdown attempts to extract JSON from markdown code blocks.
-func extractJSONFromMarkdown(text string) string {
-	// Match ```json ... ``` or ``` ... ```
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*({.*?})\\s*```")
-	matches := re.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		return matches[1]
-	}
-	return ""
 }
 
 // Close cleans up resources.
