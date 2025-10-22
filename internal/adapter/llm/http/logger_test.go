@@ -280,3 +280,119 @@ func TestDefaultLogger_NoRedaction_WhenDisabled(t *testing.T) {
 	result := logger.RedactAPIKey("sk-1234567890abcdef")
 	assert.Equal(t, "sk-1234567890abcdef", result, "Should not redact when disabled")
 }
+
+func TestDefaultLogger_LogWarning_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatJSON, true)
+	logger.LogWarning(context.Background(), "failed to save review", map[string]interface{}{
+		"runID":    "run-123",
+		"provider": "openai",
+		"error":    "database connection failed",
+	})
+
+	output := buf.String()
+	jsonStart := strings.Index(output, "{")
+	require.NotEqual(t, -1, jsonStart, "Should contain JSON")
+
+	var logData map[string]interface{}
+	err := json.Unmarshal([]byte(output[jsonStart:]), &logData)
+	require.NoError(t, err)
+
+	assert.Equal(t, "warning", logData["level"])
+	assert.Equal(t, "failed to save review", logData["message"])
+	assert.Equal(t, "run-123", logData["runID"])
+	assert.Equal(t, "openai", logData["provider"])
+	assert.Equal(t, "database connection failed", logData["error"])
+	assert.Contains(t, logData, "timestamp")
+}
+
+func TestDefaultLogger_LogInfo_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatJSON, true)
+	logger.LogInfo(context.Background(), "review completed successfully", map[string]interface{}{
+		"runID":     "run-456",
+		"provider":  "anthropic",
+		"totalCost": 0.05,
+	})
+
+	output := buf.String()
+	jsonStart := strings.Index(output, "{")
+	require.NotEqual(t, -1, jsonStart, "Should contain JSON")
+
+	var logData map[string]interface{}
+	err := json.Unmarshal([]byte(output[jsonStart:]), &logData)
+	require.NoError(t, err)
+
+	assert.Equal(t, "info", logData["level"])
+	assert.Equal(t, "review completed successfully", logData["message"])
+	assert.Equal(t, "run-456", logData["runID"])
+	assert.Equal(t, "anthropic", logData["provider"])
+	assert.Equal(t, 0.05, logData["totalCost"])
+	assert.Contains(t, logData, "timestamp")
+}
+
+func TestDefaultLogger_LogWarning_RespectLogLevel(t *testing.T) {
+	tests := []struct {
+		name           string
+		logLevel       http.LogLevel
+		shouldLog      bool
+	}{
+		{"Debug level logs warnings", http.LogLevelDebug, true},
+		{"Info level logs warnings", http.LogLevelInfo, true},
+		{"Error level skips warnings", http.LogLevelError, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer log.SetOutput(os.Stderr)
+
+			logger := http.NewDefaultLogger(tt.logLevel, http.LogFormatHuman, true)
+			logger.LogWarning(context.Background(), "test warning", map[string]interface{}{"key": "value"})
+
+			output := buf.String()
+			if tt.shouldLog {
+				assert.Contains(t, output, "test warning")
+			} else {
+				assert.Empty(t, output, "Should not log warnings at Error level")
+			}
+		})
+	}
+}
+
+func TestDefaultLogger_LogInfo_RespectLogLevel(t *testing.T) {
+	tests := []struct {
+		name           string
+		logLevel       http.LogLevel
+		shouldLog      bool
+	}{
+		{"Debug level logs info", http.LogLevelDebug, true},
+		{"Info level logs info", http.LogLevelInfo, true},
+		{"Error level skips info", http.LogLevelError, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer log.SetOutput(os.Stderr)
+
+			logger := http.NewDefaultLogger(tt.logLevel, http.LogFormatHuman, true)
+			logger.LogInfo(context.Background(), "test info", map[string]interface{}{"key": "value"})
+
+			output := buf.String()
+			if tt.shouldLog {
+				assert.Contains(t, output, "test info")
+			} else {
+				assert.Empty(t, output, "Should not log info at Error level")
+			}
+		})
+	}
+}

@@ -2,12 +2,13 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 )
 
-// Logger provides structured logging for LLM API calls.
+// Logger provides structured logging for LLM API calls and generic application logging.
 type Logger interface {
 	// LogRequest logs an outgoing API request (API key redacted)
 	LogRequest(ctx context.Context, req RequestLog)
@@ -17,6 +18,12 @@ type Logger interface {
 
 	// LogError logs an API error
 	LogError(ctx context.Context, err ErrorLog)
+
+	// LogWarning logs a warning message with structured fields
+	LogWarning(ctx context.Context, message string, fields map[string]interface{})
+
+	// LogInfo logs an informational message with structured fields
+	LogInfo(ctx context.Context, message string, fields map[string]interface{})
 }
 
 // RequestLog contains request information for logging.
@@ -154,6 +161,86 @@ func (l *DefaultLogger) LogError(ctx context.Context, err ErrorLog) {
 		log.Printf("[ERROR] %s/%s: API call failed (status=%d, %s): %v",
 			err.Provider, err.Model, err.StatusCode, retryableStr, err.Error)
 	}
+}
+
+// LogWarning logs a warning message with structured fields.
+func (l *DefaultLogger) LogWarning(ctx context.Context, message string, fields map[string]interface{}) {
+	if l.level > LogLevelInfo {
+		return // Skip warnings if log level is Error
+	}
+
+	timestamp := time.Now().UTC()
+
+	if l.format == LogFormatJSON {
+		l.logWarningJSON(timestamp, message, fields)
+	} else {
+		l.logWarningHuman(timestamp, message, fields)
+	}
+}
+
+// LogInfo logs an informational message with structured fields.
+func (l *DefaultLogger) LogInfo(ctx context.Context, message string, fields map[string]interface{}) {
+	if l.level > LogLevelInfo {
+		return // Skip info if log level is Error
+	}
+
+	timestamp := time.Now().UTC()
+
+	if l.format == LogFormatJSON {
+		l.logInfoJSON(timestamp, message, fields)
+	} else {
+		l.logInfoHuman(timestamp, message, fields)
+	}
+}
+
+// logWarningJSON logs a warning in JSON format
+func (l *DefaultLogger) logWarningJSON(timestamp time.Time, message string, fields map[string]interface{}) {
+	logEntry := map[string]interface{}{
+		"level":     "warning",
+		"timestamp": timestamp.Format(time.RFC3339),
+		"message":   message,
+	}
+
+	// Merge custom fields
+	for k, v := range fields {
+		logEntry[k] = v
+	}
+
+	// Marshal and log
+	if jsonBytes, err := json.Marshal(logEntry); err == nil {
+		log.Println(string(jsonBytes))
+	}
+}
+
+// logInfoJSON logs an info message in JSON format
+func (l *DefaultLogger) logInfoJSON(timestamp time.Time, message string, fields map[string]interface{}) {
+	logEntry := map[string]interface{}{
+		"level":     "info",
+		"timestamp": timestamp.Format(time.RFC3339),
+		"message":   message,
+	}
+
+	// Merge custom fields
+	for k, v := range fields {
+		logEntry[k] = v
+	}
+
+	// Marshal and log
+	if jsonBytes, err := json.Marshal(logEntry); err == nil {
+		log.Println(string(jsonBytes))
+	}
+}
+
+// logWarningHuman logs a warning in human-readable format
+func (l *DefaultLogger) logWarningHuman(timestamp time.Time, message string, fields map[string]interface{}) {
+	// TODO: Implement human format
+	log.Printf("[WARN] %s", message)
+}
+
+// logInfoHuman logs an info message in human-readable format
+func (l *DefaultLogger) logInfoHuman(timestamp time.Time, message string, fields map[string]interface{}) {
+	// TODO: Implement human format
+	log.Printf("[INFO] %s", message)
 }
 
 // RedactAPIKey shows only the last 4 characters of an API key with explicit redaction markers.
