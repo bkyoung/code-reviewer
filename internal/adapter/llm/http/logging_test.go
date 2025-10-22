@@ -70,3 +70,51 @@ func TestTruncateForLogging_PreventsSensitiveDataLeakage(t *testing.T) {
 		strings.Contains(result, "sk-proj-1234567890abcdefghijklmnopqrstuvwxyz"),
 		"Should not log full secrets if they're beyond truncation point")
 }
+
+func TestRedactURLSecrets_GeminiAPIKey(t *testing.T) {
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+	result := http.RedactURLSecrets(url)
+
+	assert.NotContains(t, result, "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "API key should be redacted")
+	assert.Contains(t, result, "key=[REDACTED]", "Should show that key parameter was redacted")
+	assert.Contains(t, result, "generativelanguage.googleapis.com", "Domain should still be visible")
+}
+
+func TestRedactURLSecrets_MultipleQueryParams(t *testing.T) {
+	url := "https://api.example.com/endpoint?key=secret123&foo=bar&apiKey=secret456"
+	result := http.RedactURLSecrets(url)
+
+	assert.NotContains(t, result, "secret123", "key parameter should be redacted")
+	assert.NotContains(t, result, "secret456", "apiKey parameter should be redacted")
+	assert.Contains(t, result, "foo=bar", "Non-sensitive parameters should remain")
+	assert.Contains(t, result, "key=[REDACTED]", "Redacted key should be indicated")
+	assert.Contains(t, result, "apiKey=[REDACTED]", "Redacted apiKey should be indicated")
+}
+
+func TestRedactURLSecrets_NoSecrets(t *testing.T) {
+	url := "https://api.example.com/endpoint?foo=bar&baz=qux"
+	result := http.RedactURLSecrets(url)
+
+	assert.Equal(t, url, result, "URLs without secrets should remain unchanged")
+}
+
+func TestRedactURLSecrets_NoQueryString(t *testing.T) {
+	url := "https://api.example.com/endpoint"
+	result := http.RedactURLSecrets(url)
+
+	assert.Equal(t, url, result, "URLs without query strings should remain unchanged")
+}
+
+func TestRedactURLSecrets_EmptyString(t *testing.T) {
+	result := http.RedactURLSecrets("")
+	assert.Equal(t, "", result, "Empty string should remain empty")
+}
+
+func TestRedactURLSecrets_InErrorMessage(t *testing.T) {
+	errMsg := `Post "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX": context canceled`
+	result := http.RedactURLSecrets(errMsg)
+
+	assert.NotContains(t, result, "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "API key should be redacted from error message")
+	assert.Contains(t, result, "key=[REDACTED]", "Should show that key was redacted")
+	assert.Contains(t, result, "context canceled", "Error details should remain")
+}

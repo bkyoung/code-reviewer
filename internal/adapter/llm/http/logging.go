@@ -1,6 +1,9 @@
 package http
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
 
 const (
 	// MaxLoggedResponseLength is the maximum length of response text to include in logs.
@@ -44,4 +47,46 @@ func redactPattern(text, pattern, replacement string) string {
 // Use this function when logging LLM responses that may contain user data.
 func SafeLogResponse(response string) string {
 	return TruncateForLogging(response)
+}
+
+// RedactURLSecrets redacts API keys and other secrets from URLs in error messages.
+// This prevents API keys from being exposed when URLs with query parameters
+// (like Gemini's ?key= parameter) appear in error messages or logs.
+//
+// Common patterns redacted:
+//   - key=XXX (Gemini API key)
+//   - apiKey=XXX
+//   - api_key=XXX
+//   - token=XXX
+//   - access_token=XXX
+//
+// Example:
+//
+//	input:  "https://api.example.com/endpoint?key=secret123&foo=bar"
+//	output: "https://api.example.com/endpoint?key=[REDACTED]&foo=bar"
+func RedactURLSecrets(text string) string {
+	if text == "" {
+		return text
+	}
+
+	// Redact sensitive query parameters
+	// Pattern matches: key=VALUE or apiKey=VALUE etc.
+	// Captures everything until & or " or end of string
+	patterns := []string{
+		`key=([^&"\s]+)`,
+		`apiKey=([^&"\s]+)`,
+		`api_key=([^&"\s]+)`,
+		`token=([^&"\s]+)`,
+		`access_token=([^&"\s]+)`,
+	}
+
+	result := text
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		// Extract the parameter name (everything before =)
+		paramName := pattern[:len(pattern)-len(`=([^&"\s]+)`)]
+		result = re.ReplaceAllString(result, paramName+"=[REDACTED]")
+	}
+
+	return result
 }

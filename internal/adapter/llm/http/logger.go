@@ -146,6 +146,9 @@ func (l *DefaultLogger) LogError(ctx context.Context, err ErrorLog) {
 		return
 	}
 
+	// Redact API keys from URLs in error messages
+	errorMsg := RedactURLSecrets(err.Error.Error())
+
 	retryableStr := "non-retryable"
 	if err.Retryable {
 		retryableStr = "retryable"
@@ -155,12 +158,12 @@ func (l *DefaultLogger) LogError(ctx context.Context, err ErrorLog) {
 		// JSON format for machine parsing
 		log.Printf(`{"level":"error","type":"error","provider":"%s","model":"%s","timestamp":"%s","duration_ms":%d,"error":"%s","error_type":%d,"status_code":%d,"retryable":%t}`,
 			err.Provider, err.Model, err.Timestamp.Format(time.RFC3339),
-			err.Duration.Milliseconds(), err.Error.Error(), err.ErrorType,
+			err.Duration.Milliseconds(), errorMsg, err.ErrorType,
 			err.StatusCode, err.Retryable)
 	} else {
 		// Human-readable format
-		log.Printf("[ERROR] %s/%s: API call failed (status=%d, %s): %v",
-			err.Provider, err.Model, err.StatusCode, retryableStr, err.Error)
+		log.Printf("[ERROR] %s/%s: API call failed (status=%d, %s): %s",
+			err.Provider, err.Model, err.StatusCode, retryableStr, errorMsg)
 	}
 }
 

@@ -329,3 +329,69 @@ func TestExpandEnvVars_ProviderHTTPOverrides(t *testing.T) {
 	assert.NotNil(t, expanded.Providers["ollama"].MaxRetries)
 	assert.Equal(t, 3, *expanded.Providers["ollama"].MaxRetries)
 }
+
+func TestExpandEnvString_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "expand tilde at start",
+			input:    "~/.config/cr/reviews.db",
+			expected: home + "/.config/cr/reviews.db",
+		},
+		{
+			name:     "expand tilde alone",
+			input:    "~",
+			expected: home,
+		},
+		{
+			name:     "expand tilde with trailing slash",
+			input:    "~/",
+			expected: home + "/",
+		},
+		{
+			name:     "do not expand tilde in middle",
+			input:    "/path/~/file",
+			expected: "/path/~/file", // Tilde only expands at start
+		},
+		{
+			name:     "do not expand escaped tilde",
+			input:    "\\~/.config",
+			expected: "\\~/.config", // Escaped tilde stays literal
+		},
+		{
+			name:     "expand tilde with env var",
+			input:    "~/data/${TEST_VAR}",
+			expected: home + "/data/${TEST_VAR}", // Both should work together
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := expandEnvString(tt.input)
+			assert.Equal(t, tt.expected, result, "input: %s", tt.input)
+		})
+	}
+}
+
+func TestExpandEnvVars_StorePathTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	assert.NoError(t, err)
+
+	cfg := Config{
+		Store: StoreConfig{
+			Enabled: true,
+			Path:    "~/.config/cr/reviews.db",
+		},
+	}
+
+	expanded := expandEnvVars(cfg)
+
+	expected := home + "/.config/cr/reviews.db"
+	assert.Equal(t, expected, expanded.Store.Path, "Tilde in store.path should be expanded to home directory")
+}

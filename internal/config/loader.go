@@ -118,10 +118,26 @@ func expandEnvVars(cfg Config) Config {
 	return cfg
 }
 
-// expandEnvString replaces ${VAR} or $VAR with environment variable values.
+// expandEnvString replaces ${VAR} or $VAR with environment variable values
+// and expands ~ to the user's home directory when it appears at the start.
 func expandEnvString(s string) string {
 	if s == "" {
 		return s
+	}
+
+	// Expand tilde at start of path (shell convention)
+	// Only expand if tilde is at the beginning and not escaped
+	if len(s) > 0 && s[0] == '~' && (len(s) == 1 || s[1] == '/') {
+		if home, err := os.UserHomeDir(); err == nil {
+			if len(s) == 1 {
+				s = home
+			} else if len(s) == 2 && s[1] == '/' {
+				// Special case: "~/" becomes "$HOME/"
+				s = home + "/"
+			} else {
+				s = filepath.Join(home, s[2:])
+			}
+		}
 	}
 
 	// Replace ${VAR} syntax
