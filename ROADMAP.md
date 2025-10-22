@@ -2,20 +2,20 @@
 
 ## Current Status
 
-**v0.1.1 - Production Hardening Complete** ✅
+**v0.1.2 - Structured Logging Complete** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
 - ✅ Full HTTP client implementation with retry logic and error handling
 - ✅ Comprehensive observability (logging, metrics, cost tracking)
-- ✅ Structured logging throughout orchestrator
+- ✅ **True structured logging** - JSON and human-readable formats throughout
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
 - ✅ Configuration system with environment variable support
 - ✅ Secret redaction
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
-- ✅ All unit and integration tests passing (125+ tests)
+- ✅ All unit and integration tests passing (130+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -122,6 +122,28 @@ Comprehensive audit of all 4 LLM HTTP clients (OpenAI, Anthropic, Gemini, Ollama
 - Comprehensive test coverage for logger adapter
 
 **Impact**: Better production observability, consistent log formats, easier log aggregation and filtering.
+
+### ✅ Structured Logging Fix (v0.1.2)
+**Fixed**: 2025-10-22
+**Locations**: `internal/adapter/llm/http/logger.go`, `internal/adapter/observability/logger.go`
+**Severity**: MEDIUM (incomplete feature from v0.1.1)
+
+**Problem**: ReviewLogger received an llmhttp.Logger but never used it, falling back to unstructured `log.Printf`. The llmhttp.Logger interface lacked generic LogWarning/LogInfo methods needed by the orchestrator.
+
+**Solution**: Extended llmhttp.Logger interface with LogWarning/LogInfo methods, implemented both JSON and human-readable formats in DefaultLogger, updated ReviewLogger to delegate properly.
+
+**Changes**:
+- Extended Logger interface with LogWarning and LogInfo methods
+- Implemented JSON format: `{"level":"warning","timestamp":"...","message":"...","field1":"value1"}`
+- Implemented human format: `[WARN] 2025-10-22T10:30:45Z message field1=value1 field2=value2`
+- ReviewLogger now delegates to injected logger instead of using log.Printf
+- Log level filtering (Debug/Info/Error) works correctly
+- Comprehensive test coverage (60+ logger tests, 130+ total tests)
+- Zero data races verified with race detector
+
+**Impact**: True structured logging throughout application. Logs now use consistent formats (JSON or human-readable) with proper timestamps and structured fields, making production debugging and log aggregation significantly easier.
+
+**Feedback sources**: OpenAI o4-mini and Anthropic Claude reviews (Oct 22, 2025)
 
 ## Future Features (Deferred)
 
@@ -230,12 +252,19 @@ When adding new features:
 - Observability and cost tracking
 - Review persistence (SQLite)
 
-### v0.1.1 (Current)
+### v0.1.1 (Released)
 - Production hardening
-- Structured logging throughout
+- Quick wins (magic numbers, SARIF validation, API key format)
 - Edge case handling in retry logic
 - Code quality improvements
 - Zero data races
+
+### v0.1.2 (Current)
+- Complete structured logging implementation
+- Extended Logger interface with generic methods
+- JSON and human-readable log formats
+- Full delegation from ReviewLogger to llmhttp.Logger
+- 130+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history

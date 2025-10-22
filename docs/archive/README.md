@@ -75,6 +75,20 @@ This directory contains completed implementation checklists and historical plann
   - Task 5: Final verification
   - Task 6: Documentation updates
 
+### Structured Logging Fix (v0.1.2)
+- **STRUCTURED_LOGGING_FIX_DESIGN.md** - Technical design for v0.1.2 structured logging (✅ Complete)
+  - Extended Logger interface with LogWarning/LogInfo methods
+  - Implemented JSON and human-readable formats
+  - ReviewLogger delegation to injected logger
+  - Comprehensive test coverage
+
+- **STRUCTURED_LOGGING_FIX_CHECKLIST.md** - Implementation checklist (✅ Complete)
+  - Phase 1: Interface extension and JSON format
+  - Phase 2: Human-readable format
+  - Phase 3: ReviewLogger delegation
+  - Phase 4: Integration testing and verification
+  - Phase 5: Documentation updates
+
 ## Historical Planning Documents
 
 - **IMPEMENTATION_PLAN.md** - Original multi-phase implementation plan
@@ -108,3 +122,4 @@ The following design documents remain in the main docs directory as they documen
 
 - **2025-10-21**: Initial archive created after completing observability and store integration
 - **2025-10-22**: Added production hardening design and checklist (v0.1.1 release)
+- **2025-10-22**: Added structured logging fix design and checklist (v0.1.2 release)
