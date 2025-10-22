@@ -2,18 +2,21 @@
 
 ## Current Status
 
-**v0.1.0 - Core Functionality Complete** ✅
+**v0.1.1 - Production Hardening Complete** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
 - ✅ Full HTTP client implementation with retry logic and error handling
 - ✅ Comprehensive observability (logging, metrics, cost tracking)
+- ✅ Structured logging throughout orchestrator
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
 - ✅ Configuration system with environment variable support
 - ✅ Secret redaction
 - ✅ Deterministic reviews for CI/CD
-- ✅ All unit and integration tests passing (120+ tests)
+- ✅ Production-ready retry logic with edge case handling
+- ✅ All unit and integration tests passing (125+ tests)
+- ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
 
@@ -45,35 +48,6 @@ The code reviewer now has:
 
 This section tracks issues identified through code reviews and technical debt items to be addressed in future releases.
 
-### High Priority
-
-#### 1. Response Body Leak Prevention
-**Source**: Anthropic code review feedback
-**Location**: `internal/adapter/llm/anthropic/client.go:161-186`
-**Status**: Needs verification
-
-Audit all error paths in retry logic to ensure response bodies are properly closed. While current implementation appears correct, complex retry logic could potentially leak resources.
-
-**Action**: Audit with `-race` detector and ensure `defer resp.Body.Close()` is on all paths.
-
-#### 2. Structured Logging Throughout
-**Source**: OpenAI code review feedback
-**Locations**: `cmd/cr/main.go:88,93`, `internal/usecase/review/orchestrator.go:244,349,398`
-**Status**: Partially implemented
-
-Replace `fmt.Printf` usage with structured logging through the observability logger. Currently using unstructured logging for warnings, which makes log aggregation and filtering harder.
-
-**Impact**: Better production observability and consistent log format.
-
-#### 3. RetryWithBackoff Edge Case
-**Source**: Anthropic code review feedback
-**Location**: `internal/adapter/llm/http/retry.go:71-77`
-**Status**: Low severity edge case
-
-If context is cancelled before the first operation attempt, `lastErr` could be nil. Should initialize `lastErr` to a non-nil value or handle context cancellation explicitly.
-
-**Fix**: Initialize `lastErr = errors.New("no attempts made")` or return `ctx.Err()` when context is cancelled.
-
 ### Medium Priority
 
 #### 4. Extract Shared JSON Parsing Logic
@@ -99,38 +73,6 @@ ID generation functions may be duplicated between orchestrator and store utiliti
 
 Env var expansion (`${VAR}`) may not be applied to all config sections (merge, redaction, budget). Ensure `expandEnvString` is called recursively on all string fields.
 
-### Low Priority
-
-#### 7. Magic Number Documentation
-**Source**: Anthropic code review feedback
-**Location**: `internal/determinism/seed.go:23-25`
-**Status**: Readability improvement
-
-Use named constant for `0x7FFFFFFFFFFFFFFF`:
-```go
-const maxInt64Mask = 0x7FFFFFFFFFFFFFFF // Ensures result fits in int64 range
-seed = seed & maxInt64Mask
-```
-
-#### 8. SARIF Cost Validation
-**Source**: Anthropic code review feedback
-**Location**: `internal/adapter/output/sarif/writer.go:110-115`
-**Status**: Edge case handling
-
-Validate cost is not NaN or Inf before adding to properties, as JSON marshaling may fail silently:
-```go
-if !math.IsNaN(artifact.Review.Cost) && !math.IsInf(artifact.Review.Cost, 0) {
-    properties["cost"] = artifact.Review.Cost
-}
-```
-
-#### 9. API Key Redaction Format
-**Source**: Anthropic code review feedback
-**Location**: `internal/adapter/llm/http/logger.go:157-166`
-**Status**: UX improvement
-
-Current format `****cdef` could be clearer. Consider `[REDACTED-cdef]` or `<redacted:cdef>` to make redaction more obvious.
-
 ## Recently Fixed Issues
 
 ### ✅ OpenAI Retry Bug - Request Body Consumed
@@ -150,6 +92,36 @@ Current format `****cdef` could be clearer. Consider `[REDACTED-cdef]` or `<reda
 **Problem**: CreateRun was called AFTER provider goroutines tried to save reviews, causing foreign key constraint violations.
 
 **Solution**: Moved CreateRun before launching goroutines, added UpdateRunCost method to update total cost after all reviews complete.
+
+### ✅ Production Hardening Sprint (v0.1.1)
+**Fixed**: 2025-10-22
+**Scope**: Multiple locations across codebase
+
+#### Quick Wins
+1. **Magic Number Documentation** - Added named constant `maxInt64Mask` in `internal/determinism/seed.go` for better code readability
+2. **SARIF Cost Validation** - Added NaN/Inf validation in `internal/adapter/output/sarif/writer.go` to prevent JSON marshaling errors
+3. **API Key Redaction Format** - Improved format from `****cdef` to `[REDACTED-cdef]` in `internal/adapter/llm/http/logger.go`
+
+#### RetryWithBackoff Edge Case
+**Location**: `internal/adapter/llm/http/retry.go`
+
+Added test coverage for context cancellation before first attempt. Verified correct error handling when context is already cancelled.
+
+#### Response Body Leak Prevention Audit
+**Locations**: All HTTP clients
+
+Comprehensive audit of all 4 LLM HTTP clients (OpenAI, Anthropic, Gemini, Ollama). Verified all clients properly use `defer resp.Body.Close()` pattern. Ran race detector tests - zero data races found.
+
+#### Structured Logging Throughout
+**Locations**: `internal/usecase/review/logger.go`, `internal/adapter/observability/logger.go`, `cmd/cr/main.go`, `internal/usecase/review/orchestrator.go`
+
+- Created `review.Logger` interface in use case layer
+- Implemented `observability.ReviewLogger` adapter
+- Replaced all `fmt.Printf` calls in orchestrator with conditional structured logging
+- Graceful fallback to `log.Printf` when logger is nil
+- Comprehensive test coverage for logger adapter
+
+**Impact**: Better production observability, consistent log formats, easier log aggregation and filtering.
 
 ## Future Features (Deferred)
 
@@ -252,11 +224,18 @@ When adding new features:
 
 ## Release Planning
 
-### v0.1.0 (Current)
+### v0.1.0 (Released)
 - Core review functionality
-- Multi-provider support
+- Multi-provider support (OpenAI, Anthropic, Gemini, Ollama)
 - Observability and cost tracking
-- Review persistence
+- Review persistence (SQLite)
+
+### v0.1.1 (Current)
+- Production hardening
+- Structured logging throughout
+- Edge case handling in retry logic
+- Code quality improvements
+- Zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history

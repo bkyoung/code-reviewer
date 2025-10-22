@@ -58,6 +58,23 @@ This directory contains completed implementation checklists and historical plann
   - Week 1: SQLite store implementation ✅
   - Weeks 2-4: TUI implementation (deferred, see ROADMAP.md)
 
+### Production Hardening (v0.1.1)
+- **PRODUCTION_HARDENING_DESIGN.md** - Technical design for v0.1.1 production hardening (✅ Complete)
+  - Magic number documentation
+  - SARIF cost validation
+  - API key redaction format
+  - RetryWithBackoff edge case handling
+  - Response body leak prevention audit
+  - Structured logging throughout orchestrator
+
+- **PRODUCTION_HARDENING_CHECKLIST.md** - Implementation checklist (✅ Complete)
+  - Task 1: Quick wins (3 improvements)
+  - Task 2: RetryWithBackoff edge case
+  - Task 3: Response body leak audit
+  - Task 4: Structured logging
+  - Task 5: Final verification
+  - Task 6: Documentation updates
+
 ## Historical Planning Documents
 
 - **IMPEMENTATION_PLAN.md** - Original multi-phase implementation plan
@@ -90,3 +107,4 @@ The following design documents remain in the main docs directory as they documen
 ## Version History
 
 - **2025-10-21**: Initial archive created after completing observability and store integration
+- **2025-10-22**: Added production hardening design and checklist (v0.1.1 release)
