@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/brandon/code-reviewer/internal/domain"
@@ -31,41 +32,52 @@ func (m *mockGitEngine) CurrentBranch(ctx context.Context) (string, error) {
 }
 
 type mockProvider struct {
+	mu       sync.Mutex
 	requests []review.ProviderRequest
 	response domain.Review
 	err      error
 }
 
 type mockMerger struct {
+	mu    sync.Mutex
 	calls [][]domain.Review
 }
 
 func (m *mockMerger) Merge(reviews []domain.Review) domain.Review {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, reviews)
 	return domain.Review{ProviderName: "merged", ModelName: "consensus"}
 }
 
 func (m *mockProvider) Review(ctx context.Context, req review.ProviderRequest) (domain.Review, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.requests = append(m.requests, req)
 	return m.response, m.err
 }
 
 type mockMarkdownWriter struct {
+	mu    sync.Mutex
 	calls []domain.MarkdownArtifact
 	err   error
 }
 
 type mockJSONWriter struct {
+	mu    sync.Mutex
 	calls []domain.JSONArtifact
 	err   error
 }
 
 type mockSARIFWriter struct {
+	mu    sync.Mutex
 	calls []review.SARIFArtifact
 	err   error
 }
 
 func (m *mockJSONWriter) Write(ctx context.Context, artifact domain.JSONArtifact) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, artifact)
 	if m.err != nil {
 		return "", m.err
@@ -74,6 +86,8 @@ func (m *mockJSONWriter) Write(ctx context.Context, artifact domain.JSONArtifact
 }
 
 func (m *mockMarkdownWriter) Write(ctx context.Context, artifact domain.MarkdownArtifact) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, artifact)
 	if m.err != nil {
 		return "", m.err
@@ -82,6 +96,8 @@ func (m *mockMarkdownWriter) Write(ctx context.Context, artifact domain.Markdown
 }
 
 func (m *mockSARIFWriter) Write(ctx context.Context, artifact review.SARIFArtifact) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, artifact)
 	if m.err != nil {
 		return "", m.err

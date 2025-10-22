@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/brandon/code-reviewer/internal/domain"
@@ -13,6 +14,7 @@ import (
 
 // mockStore implements review.Store for testing
 type mockStore struct {
+	mu              sync.Mutex
 	runs            []review.StoreRun
 	reviews         []review.StoreReview
 	findings        []review.StoreFinding
@@ -25,6 +27,8 @@ type mockStore struct {
 }
 
 func (m *mockStore) CreateRun(ctx context.Context, run review.StoreRun) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.createRunErr != nil {
 		return m.createRunErr
 	}
@@ -36,6 +40,8 @@ func (m *mockStore) CreateRun(ctx context.Context, run review.StoreRun) error {
 }
 
 func (m *mockStore) UpdateRunCost(ctx context.Context, runID string, totalCost float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Find the run and update its cost
 	for i := range m.runs {
 		if m.runs[i].RunID == runID {
@@ -47,6 +53,8 @@ func (m *mockStore) UpdateRunCost(ctx context.Context, runID string, totalCost f
 }
 
 func (m *mockStore) SaveReview(ctx context.Context, r review.StoreReview) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.saveReviewErr != nil {
 		return m.saveReviewErr
 	}
@@ -58,6 +66,8 @@ func (m *mockStore) SaveReview(ctx context.Context, r review.StoreReview) error 
 }
 
 func (m *mockStore) SaveFindings(ctx context.Context, findings []review.StoreFinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.saveFindingsErr != nil {
 		return m.saveFindingsErr
 	}
@@ -69,6 +79,8 @@ func (m *mockStore) SaveFindings(ctx context.Context, findings []review.StoreFin
 }
 
 func (m *mockStore) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closed = true
 	return m.closeErr
 }
