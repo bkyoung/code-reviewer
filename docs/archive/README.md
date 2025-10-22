@@ -89,6 +89,20 @@ This directory contains completed implementation checklists and historical plann
   - Phase 4: Integration testing and verification
   - Phase 5: Documentation updates
 
+### Code Quality Improvements (v0.1.3)
+- **CODE_QUALITY_IMPROVEMENTS_DESIGN.md** - Technical design for v0.1.3 code quality (✅ Complete)
+  - Investigated JSON parsing duplication across all 4 LLM clients
+  - Investigated ID generation "duplication" (determined intentional)
+  - Designed shared JSON utilities in http package
+  - Documented clean architecture principles
+
+- **CODE_QUALITY_IMPROVEMENTS_CHECKLIST.md** - Implementation checklist (✅ Complete)
+  - Phase 1: Create shared JSON utilities with tests (17 tests)
+  - Phase 2: Update all 4 LLM clients (OpenAI, Anthropic, Gemini, Ollama)
+  - Phase 3: Document ID generation with sync test
+  - Phase 4: Full verification (tests, race detector, build, CI)
+  - Phase 5: Documentation updates
+
 ## Historical Planning Documents
 
 - **IMPEMENTATION_PLAN.md** - Original multi-phase implementation plan
@@ -123,3 +137,4 @@ The following design documents remain in the main docs directory as they documen
 - **2025-10-21**: Initial archive created after completing observability and store integration
 - **2025-10-22**: Added production hardening design and checklist (v0.1.1 release)
 - **2025-10-22**: Added structured logging fix design and checklist (v0.1.2 release)
+- **2025-10-22**: Added code quality improvements design and checklist (v0.1.3 release)

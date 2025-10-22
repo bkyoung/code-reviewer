@@ -2,20 +2,22 @@
 
 ## Current Status
 
-**v0.1.2 - Structured Logging Complete** ✅
+**v0.1.3 - Code Quality Improvements Complete** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
 - ✅ Full HTTP client implementation with retry logic and error handling
 - ✅ Comprehensive observability (logging, metrics, cost tracking)
-- ✅ **True structured logging** - JSON and human-readable formats throughout
+- ✅ True structured logging - JSON and human-readable formats throughout
+- ✅ **Shared JSON parsing utilities** - Zero duplication across LLM clients
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
 - ✅ Configuration system with environment variable support
 - ✅ Secret redaction
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
-- ✅ All unit and integration tests passing (130+ tests)
+- ✅ **Clean architecture integrity** - Intentional duplication documented
+- ✅ All unit and integration tests passing (135+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -50,23 +52,7 @@ This section tracks issues identified through code reviews and technical debt it
 
 ### Medium Priority
 
-#### 4. Extract Shared JSON Parsing Logic
-**Source**: OpenAI code review feedback
-**Locations**: All LLM clients
-**Status**: Code duplication
-
-Each provider duplicates JSON extraction and parsing logic from markdown code blocks. Should extract to `internal/adapter/llm/http/json_extractor.go`.
-
-**Benefits**: DRY principle, easier maintenance, consistent parsing behavior.
-
-#### 5. Deduplicate ID Generation
-**Source**: OpenAI code review feedback
-**Locations**: `internal/usecase/review/orchestrator.go`, `internal/store/util.go`
-**Status**: Needs investigation
-
-ID generation functions may be duplicated between orchestrator and store utilities. Verify and consolidate if appropriate.
-
-#### 6. Environment Variable Expansion for All Config
+#### 4. Environment Variable Expansion for All Config
 **Source**: OpenAI code review feedback
 **Location**: `internal/config/loader.go`
 **Status**: Incomplete feature
@@ -144,6 +130,47 @@ Comprehensive audit of all 4 LLM HTTP clients (OpenAI, Anthropic, Gemini, Ollama
 **Impact**: True structured logging throughout application. Logs now use consistent formats (JSON or human-readable) with proper timestamps and structured fields, making production debugging and log aggregation significantly easier.
 
 **Feedback sources**: OpenAI o4-mini and Anthropic Claude reviews (Oct 22, 2025)
+
+### ✅ Code Quality Improvements (v0.1.3)
+**Fixed**: 2025-10-22
+**Scope**: Multiple locations across codebase
+**Severity**: MEDIUM (code duplication and architecture clarity)
+
+**Problem 1: JSON Parsing Duplication**
+All 4 LLM clients (OpenAI, Anthropic, Gemini, Ollama) duplicated JSON extraction and parsing logic from markdown code blocks. Each client had its own `parseReviewJSON` and `extractJSONFromMarkdown` functions with slightly different regex patterns, causing maintenance burden.
+
+**Solution 1: Shared JSON Utilities**
+- Created `internal/adapter/llm/http/json.go` with shared utilities
+- `ExtractJSONFromMarkdown`: Handles both ```json and ``` code blocks
+- `ParseReviewResponse`: Parses JSON into summary and findings
+- Updated all 4 clients to use shared parsing
+- Removed ~80 lines of duplicated code across clients
+- Comprehensive test coverage (17 tests for JSON parsing)
+
+**Problem 2: ID Generation "Duplication"**
+ID generation functions appeared duplicated between `internal/usecase/review/store_helpers.go` and `internal/store/util.go`, flagged as potential code duplication.
+
+**Solution 2: Documentation & Testing**
+After investigation, determined duplication is INTENTIONAL and correct:
+- Maintains clean architecture (use case layer cannot import adapter layer)
+- Prevents circular dependencies
+- Added comprehensive documentation explaining design decision
+- Created sync test `TestIDGenerationMatchesStorePackage` to ensure implementations stay aligned
+- Test will fail if implementations accidentally diverge
+
+**Changes**:
+- Created shared JSON parsing utilities in http package
+- Updated OpenAI, Anthropic, Gemini, Ollama clients
+- Removed 4 `extractJSONFromMarkdown` functions
+- Simplified all `parseReviewJSON` implementations
+- Removed unused regexp imports from all clients
+- Added ID generation sync test with 18+ assertions
+- Documented clean architecture principles for ID generation
+- All 135+ tests passing with zero data races
+
+**Impact**: Zero JSON parsing duplication across LLM clients. Easier maintenance and consistent parsing behavior. Clean architecture integrity documented and protected by tests. Better code clarity and reduced maintenance burden.
+
+**Feedback sources**: OpenAI code review feedback (Oct 22, 2025)
 
 ## Future Features (Deferred)
 
@@ -259,12 +286,19 @@ When adding new features:
 - Code quality improvements
 - Zero data races
 
-### v0.1.2 (Current)
+### v0.1.2 (Released)
 - Complete structured logging implementation
 - Extended Logger interface with generic methods
 - JSON and human-readable log formats
 - Full delegation from ReviewLogger to llmhttp.Logger
 - 130+ tests passing with zero data races
+
+### v0.1.3 (Current)
+- Shared JSON parsing utilities
+- Zero code duplication across LLM clients
+- ID generation duplication documented as intentional (clean architecture)
+- Sync test prevents implementation divergence
+- 135+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history
