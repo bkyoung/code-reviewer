@@ -231,6 +231,72 @@ The shared JSON extraction regex used non-greedy matching `([\\s\\S]*?)` which s
 
 **Discovery**: Manual testing by user after v0.1.5 release revealed Gemini consistently returned empty findings while other providers worked correctly.
 
+### ✅ Gemini Extended Thinking Token Exhaustion (v0.1.5 bugfix)
+**Fixed**: 2025-10-22
+**Locations**: `internal/usecase/review/prompt.go`, `internal/adapter/llm/gemini/client.go`
+**Severity**: CRITICAL (Gemini 2.5 Pro returned 0 output tokens, empty responses)
+
+**Problem**: After fixing JSON parsing, Gemini 2.5 Pro still returned empty responses. Investigation revealed:
+- `finishReason: "MAX_TOKENS"` - Hit token limit before generating output
+- `thoughtsTokenCount: 4095` - Used almost all 4096 tokens for internal reasoning
+- `tokensOut: 0` - No tokens left for actual response
+- `content.parts: []` - Empty parts array (no text generated)
+
+Gemini 2.5 Pro has **extended thinking** capabilities (like OpenAI o1/o4) where the model uses tokens for internal reasoning before generating the response. With `defaultMaxTokens = 4096`, Gemini exhausted its token budget on thinking alone.
+
+**Solution**:
+1. Increased `defaultMaxTokens` from 4096 to **16384** to accommodate extended thinking models
+2. Added enhanced logging when Gemini returns empty responses (logs full API response body)
+3. Extracted Gemini system instruction to named constant `systemInstruction` for maintainability
+4. Documented extended thinking requirements in code comments
+
+**Changes**:
+- Update defaultMaxTokens with detailed comment explaining extended thinking needs
+- Add empty response warning log with finishReason, tokensOut, and raw response body
+- Extract system instruction to package-level constant
+- All 160+ tests passing with zero data races
+
+**Impact**: Gemini 2.5 Pro can now both think (up to ~4k tokens) and generate complete JSON responses (up to ~12k tokens). The increased limit remains compatible with all other providers (Claude Sonnet supports up to 8k output tokens).
+
+**Discovery**: Manual testing after JSON parsing fix revealed Gemini still returned empty responses. Log analysis showed MAX_TOKENS finish reason with 4095 tokens used for thinking.
+
+### ✅ Code Quality Improvements from LLM Review Feedback (v0.1.5)
+**Fixed**: 2025-10-22
+**Locations**: `internal/adapter/llm/http/json.go`, `internal/adapter/llm/http/config_helpers_test.go`, `.gitignore`
+**Severity**: MEDIUM (code quality and test coverage)
+
+**Issues Identified by LLM Code Review**:
+1. **ExtractJSONFromMarkdown lacks documentation** - Greedy matching behavior not documented
+2. **config_helpers.go lacks unit tests** - No dedicated tests for ParseTimeout and BuildRetryConfig edge cases
+3. **Database file in version control** - `~/.config/cr/reviews.db` was committed (security/merge risk)
+
+**Solution**:
+1. **Enhanced GoDoc for ExtractJSONFromMarkdown**:
+   - Document greedy matching behavior (first to LAST backticks)
+   - Explain why greedy matching needed for nested code blocks
+   - Document assumption that LLMs return single JSON blocks
+   - Clarify trade-offs of greedy approach
+
+2. **Added 15 comprehensive unit tests for config_helpers.go**:
+   - `ParseTimeout`: Test all fallback chain paths (provider > global > default)
+   - Edge cases: invalid durations, nil pointers, empty strings, zero/negative values
+   - `BuildRetryConfig`: Test all configuration precedence scenarios
+   - Mixed overrides and fallbacks
+
+3. **Database file cleanup**:
+   - Removed `~/.config/cr/reviews.db` from version control
+   - Added `*.db`, `*.sqlite`, `*.sqlite3` to `.gitignore`
+
+**Changes**:
+- Comprehensive GoDoc with examples for ExtractJSONFromMarkdown
+- 15 new unit tests in config_helpers_test.go
+- Updated .gitignore to prevent database files
+- All 175+ tests passing with zero data races
+
+**Impact**: Better code documentation for maintainability. Comprehensive test coverage for configuration helpers ensures fallback chains work correctly. Database files can no longer be accidentally committed.
+
+**Feedback sources**: Anthropic, OpenAI, and Gemini code reviews (Oct 22, 2025) identified these improvements during self-review of v0.1.5 changes.
+
 ## Future Features (Deferred)
 
 ### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
