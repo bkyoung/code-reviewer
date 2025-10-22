@@ -63,17 +63,37 @@ func Load(opts LoaderOptions) (Config, error) {
 
 // expandEnvVars expands ${VAR} and $VAR syntax in configuration strings.
 func expandEnvVars(cfg Config) Config {
-	// Expand provider API keys
+	// Expand provider API keys and models
 	for name, provider := range cfg.Providers {
 		provider.APIKey = expandEnvString(provider.APIKey)
 		provider.Model = expandEnvString(provider.Model)
 		cfg.Providers[name] = provider
 	}
 
-	// Expand other string fields
+	// Expand merge config
+	cfg.Merge.Provider = expandEnvString(cfg.Merge.Provider)
+	cfg.Merge.Model = expandEnvString(cfg.Merge.Model)
+	cfg.Merge.Strategy = expandEnvString(cfg.Merge.Strategy)
+
+	// Expand git config
 	cfg.Git.RepositoryDir = expandEnvString(cfg.Git.RepositoryDir)
+
+	// Expand output config
 	cfg.Output.Directory = expandEnvString(cfg.Output.Directory)
+
+	// Expand budget config
+	cfg.Budget.DegradationPolicy = expandEnvStringSlice(cfg.Budget.DegradationPolicy)
+
+	// Expand redaction config
+	cfg.Redaction.DenyGlobs = expandEnvStringSlice(cfg.Redaction.DenyGlobs)
+	cfg.Redaction.AllowGlobs = expandEnvStringSlice(cfg.Redaction.AllowGlobs)
+
+	// Expand store config
 	cfg.Store.Path = expandEnvString(cfg.Store.Path)
+
+	// Expand observability config
+	cfg.Observability.Logging.Level = expandEnvString(cfg.Observability.Logging.Level)
+	cfg.Observability.Logging.Format = expandEnvString(cfg.Observability.Logging.Format)
 
 	return cfg
 }
@@ -105,6 +125,18 @@ func expandEnvString(s string) string {
 	})
 
 	return s
+}
+
+// expandEnvStringSlice expands environment variables in a slice of strings.
+func expandEnvStringSlice(slice []string) []string {
+	if len(slice) == 0 {
+		return slice
+	}
+	result := make([]string, len(slice))
+	for i, s := range slice {
+		result[i] = expandEnvString(s)
+	}
+	return result
 }
 
 func locateConfigFile(name string, paths []string) string {
