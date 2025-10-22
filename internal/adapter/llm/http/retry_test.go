@@ -225,6 +225,57 @@ func TestRetryWithBackoff_ContextCanceled(t *testing.T) {
 	assert.LessOrEqual(t, attempts, 3, "should respect context cancellation")
 }
 
+func TestRetryWithBackoff_ContextCancelledBeforeFirstAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before retry starts
+
+	operation := func(ctx context.Context) error {
+		t.Fatal("operation should not be called when context is already cancelled")
+		return nil
+	}
+
+	config := llmhttp.RetryConfig{
+		MaxRetries:     3,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     100 * time.Millisecond,
+		Multiplier:     2.0,
+	}
+
+	err := llmhttp.RetryWithBackoff(ctx, operation, config)
+
+	require.Error(t, err, "should return error when context cancelled before first attempt")
+	assert.ErrorIs(t, err, context.Canceled, "should return context.Canceled error")
+}
+
+func TestRetryWithBackoff_ContextCancelledBetweenRetries(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+
+	operation := func(ctx context.Context) error {
+		attempts++
+		if attempts == 1 {
+			cancel() // Cancel after first attempt
+			return llmhttp.NewRateLimitError("test", "rate limited")
+		}
+		t.Fatal("should not retry after context cancelled")
+		return nil
+	}
+
+	config := llmhttp.RetryConfig{
+		MaxRetries:     3,
+		InitialBackoff: 1 * time.Millisecond,
+		MaxBackoff:     10 * time.Millisecond,
+		Multiplier:     2.0,
+	}
+
+	err := llmhttp.RetryWithBackoff(ctx, operation, config)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, attempts, "should stop after context cancelled")
+	// Should return either the context error or the last operation error
+	// Both are acceptable as the context was cancelled after the operation returned
+}
+
 func TestRetryWithBackoff_GenericError(t *testing.T) {
 	attempts := 0
 	operation := func(ctx context.Context) error {
