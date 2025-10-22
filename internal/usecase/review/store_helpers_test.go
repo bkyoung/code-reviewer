@@ -5,8 +5,10 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/brandon/code-reviewer/internal/store"
 	"github.com/brandon/code-reviewer/internal/usecase/review"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -221,6 +223,58 @@ func TestOrchestrator_SaveReviewToStore(t *testing.T) {
 		hash2 := store.findings[0].FindingHash
 		assert.Equal(t, hash1, hash2, "finding hash should be deterministic")
 	})
+}
+
+// TestIDGenerationMatchesStorePackage ensures review package ID generation
+// stays in sync with store package implementations.
+//
+// NOTE: ID generation functions are intentionally duplicated between the
+// review and store packages to avoid circular dependencies (clean architecture).
+// The store package implements interfaces defined by the review package,
+// so the review package cannot import store utilities.
+//
+// This test ensures the implementations don't accidentally diverge.
+func TestIDGenerationMatchesStorePackage(t *testing.T) {
+	mockStore := &mockStore{}
+	orchestrator := createTestOrchestrator(mockStore)
+
+	// Use store package to generate expected IDs
+	timestamp := time.Date(2025, 10, 22, 10, 30, 0, 0, time.UTC)
+	expectedRunID := store.GenerateRunID(timestamp, "main", "feature")
+	expectedReviewID := store.GenerateReviewID(expectedRunID, "openai")
+	expectedFindingID := store.GenerateFindingID(expectedReviewID, 0)
+
+	// Create a review and save it using the orchestrator's internal ID generation
+	domainReview := domain.Review{
+		ProviderName: "openai",
+		ModelName:    "gpt-4o-mini",
+		Summary:      "Test summary",
+		Findings: []domain.Finding{
+			{
+				File:        "main.go",
+				LineStart:   10,
+				LineEnd:     15,
+				Category:    "style",
+				Severity:    "low",
+				Description: "Test finding",
+			},
+		},
+	}
+
+	// Save using the orchestrator (which uses internal ID generation)
+	err := orchestrator.SaveReviewToStore(context.Background(), expectedRunID, domainReview)
+	require.NoError(t, err)
+
+	// Verify the orchestrator's internal ID generation matches store package
+	require.Len(t, mockStore.reviews, 1)
+	actualReviewID := mockStore.reviews[0].ReviewID
+	assert.Equal(t, expectedReviewID, actualReviewID,
+		"generateReviewID in review package must match store.GenerateReviewID")
+
+	require.Len(t, mockStore.findings, 1)
+	actualFindingID := mockStore.findings[0].FindingID
+	assert.Equal(t, expectedFindingID, actualFindingID,
+		"generateFindingID in review package must match store.GenerateFindingID")
 }
 
 // Helper to create a test orchestrator with minimal deps

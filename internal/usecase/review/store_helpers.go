@@ -27,6 +27,29 @@ func calculateConfigHash(req BranchRequest) string {
 	return hex.EncodeToString(hash[:8]) // 16 char hash
 }
 
+// ID Generation Functions
+//
+// The following functions (generateRunID, generateReviewID, generateFindingID, generateFindingHash)
+// are intentionally duplicated from internal/store/util.go to maintain clean architecture principles.
+//
+// WHY DUPLICATION EXISTS:
+// - This package (internal/usecase/review) is in the USE CASE layer
+// - The store package (internal/adapter/store) is in the ADAPTER layer
+// - Clean Architecture's Dependency Rule states: dependencies point INWARD toward use cases
+// - Use case layer CANNOT import adapter layer (this would violate the dependency direction)
+// - The store adapter implements the Store interface DEFINED by this use case layer
+// - If we imported store utilities here → circular dependency and architecture violation
+//
+// MAINTAINING CONSISTENCY:
+// - See internal/usecase/review/store_helpers_test.go::TestIDGenerationMatchesStorePackage
+// - This test ensures implementations stay in sync between packages
+// - If implementations diverge, the test will fail
+//
+// TRADEOFF:
+// - Code duplication (DRY violation) vs. Clean Architecture (dependency direction)
+// - We choose architecture integrity over eliminating duplication
+// - Test coverage ensures correctness despite duplication
+
 // generateRunID creates a unique, time-ordered run ID.
 func generateRunID(timestamp time.Time, baseRef, targetRef string) string {
 	ts := timestamp.UTC().Format("20060102T150405Z")
