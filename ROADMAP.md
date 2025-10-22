@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**v0.1.4 - Complete Environment Variable Support** ✅
+**v0.1.5 - Configurable HTTP Settings** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
@@ -11,6 +11,7 @@ The code reviewer now has:
 - ✅ True structured logging - JSON and human-readable formats throughout
 - ✅ Shared JSON parsing utilities - Zero duplication across LLM clients
 - ✅ **Complete environment variable expansion** - All config sections supported
+- ✅ **Configurable HTTP settings** - Global and per-provider timeout, retry, backoff config
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
 - ✅ Configuration system with full env var support (${VAR} and $VAR syntax)
@@ -18,7 +19,7 @@ The code reviewer now has:
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
 - ✅ Clean architecture integrity - Intentional duplication documented
-- ✅ All unit and integration tests passing (140+ tests)
+- ✅ All unit and integration tests passing (160+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -33,12 +34,14 @@ The code reviewer now has:
 - [ ] Performance testing with large diffs
 
 ### 2. Configuration Enhancements
-**Priority: Low**
+**Status: Complete** ✅
 
-- [ ] Add `http.timeout` config option (currently hardcoded to 60s)
-- [ ] Add `http.maxRetries` config option (currently hardcoded to 5)
-- [ ] Add `http.retryBackoff` config option for customizing backoff strategy
-- [ ] Add provider-specific timeout overrides
+- ✅ Add `http.timeout` config option (default: 60s)
+- ✅ Add `http.maxRetries` config option (default: 5)
+- ✅ Add `http.initialBackoff` and `http.maxBackoff` config options
+- ✅ Add `http.backoffMultiplier` config option
+- ✅ Add provider-specific timeout, retry, and backoff overrides
+- ✅ Environment variable expansion for all HTTP config fields
 
 ### 3. Resilience Features
 **Priority: Low**
@@ -325,12 +328,19 @@ When adding new features:
 - Sync test prevents implementation divergence
 - 135+ tests passing with zero data races
 
-### v0.1.4 (Current)
+### v0.1.4 (Released)
 - Complete environment variable expansion
 - Support for all config sections (merge, budget, redaction, observability)
 - Array/slice env var expansion (expandEnvStringSlice)
 - Comprehensive test coverage (6 new tests, 20+ assertions)
 - 140+ tests passing with zero data races
+
+### v0.1.5 (Current)
+- Configurable HTTP settings (timeout, retries, backoff)
+- Global HTTP config with per-provider overrides
+- Environment variable expansion for HTTP config
+- Module path correction (github.com/bkyoung/code-reviewer)
+- 160+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history
