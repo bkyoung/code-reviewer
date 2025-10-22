@@ -200,6 +200,37 @@ Environment variable expansion (`${VAR}` and `$VAR` syntax) was only applied to 
 
 **Feedback source**: OpenAI code review feedback (Oct 22, 2025)
 
+### ✅ Gemini JSON Parsing Fix (v0.1.5 bugfix)
+**Fixed**: 2025-10-22
+**Locations**: `internal/adapter/llm/gemini/client.go`, `internal/adapter/llm/http/json.go`, `internal/adapter/llm/http/json_test.go`
+**Severity**: HIGH (Gemini returned empty findings in all manual tests)
+
+**Problem 1: Missing System Instruction**
+Gemini API client had no system instruction telling it to return JSON format. Unlike OpenAI and Anthropic which have implicit JSON formatting, Gemini requires explicit instructions in the `systemInstruction` field.
+
+**Problem 2: Nested Code Blocks in Suggestions**
+The shared JSON extraction regex used non-greedy matching `([\\s\\S]*?)` which stopped at the FIRST closing backticks. When Gemini suggestions contained nested code blocks (e.g., "Use this code:\\n\\n```go\\nfunc main() {}\\n```"), the regex truncated the JSON at the nested closing backticks instead of the outer ones, causing "unexpected end of JSON input" errors.
+
+**Solution**:
+1. Added `SystemInstruction` field to `GenerateContentRequest` struct
+2. Added explicit JSON schema instruction to Gemini client with example format
+3. Changed regex from non-greedy `([\\s\\S]*?)` to greedy `([\\s\\S]*)` to match to LAST backticks
+4. Added comprehensive warning logging when JSON parsing fails (logs full response for debugging)
+5. Added test `TestExtractJSONFromMarkdown_NestedCodeBlocks` to verify fix
+6. Updated `TestExtractJSONFromMarkdown_MultipleCodeBlocks` expectations
+
+**Changes**:
+- Added SystemInstruction field to gemini/types.go
+- Updated Gemini client Call method with explicit JSON format instruction
+- Changed jsonBlockRegex from non-greedy to greedy matching
+- Added warning log with full response text when parsing fails
+- Updated test expectations for greedy matching behavior
+- All 160+ tests passing with zero data races
+
+**Impact**: Gemini now returns structured findings like other providers. The greedy regex correctly handles real-world LLM responses where suggestions contain nested code blocks. Better debugging capability through comprehensive logging when parsing fails.
+
+**Discovery**: Manual testing by user after v0.1.5 release revealed Gemini consistently returned empty findings while other providers worked correctly.
+
 ## Future Features (Deferred)
 
 ### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
