@@ -17,7 +17,22 @@ var (
 )
 
 // ExtractJSONFromMarkdown extracts JSON from markdown code blocks.
-// Supports both ```json and ``` code blocks.
+//
+// Supports both ```json and ``` code blocks. Uses greedy matching to extract
+// content from the first opening backticks to the LAST closing backticks.
+//
+// This greedy approach is necessary to handle nested code blocks within JSON
+// content. For example, when LLM suggestions contain example code like:
+//   "suggestion": "Use this code:\n\n```go\nfunc main() {}\n```"
+//
+// The greedy regex correctly extracts the entire JSON block by matching to the
+// outermost closing backticks, not the inner ones from the code example.
+//
+// Assumption: LLMs are instructed to return a single JSON code block. If multiple
+// separate code blocks are present, the greedy match will include all content
+// between the first and last backticks, which may result in invalid JSON.
+// This trade-off is acceptable for the typical LLM response patterns we observe.
+//
 // Returns extracted JSON or original text if no code block found.
 func ExtractJSONFromMarkdown(text string) string {
 	matches := jsonBlockRegex.FindStringSubmatch(text)

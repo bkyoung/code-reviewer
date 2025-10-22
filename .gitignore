@@ -2,3 +2,8 @@
 /reviews
 /cr
 /out/**
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
