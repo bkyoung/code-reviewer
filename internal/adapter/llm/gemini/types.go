@@ -2,9 +2,10 @@ package gemini
 
 // GenerateContentRequest represents a request to Gemini's generateContent API.
 type GenerateContentRequest struct {
-	Contents         []Content         `json:"contents"`
-	GenerationConfig *GenerationConfig `json:"generationConfig,omitempty"`
-	SafetySettings   []SafetySetting   `json:"safetySettings,omitempty"`
+	Contents          []Content         `json:"contents"`
+	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
+	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"`
+	SafetySettings    []SafetySetting   `json:"safetySettings,omitempty"`
 }
 
 // Content represents content in the request/response.

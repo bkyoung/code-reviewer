@@ -112,8 +112,29 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		c.metrics.RecordRequest("gemini", c.model)
 	}
 
-	// Build request
+	// Build request with system instruction for JSON format
 	reqBody := GenerateContentRequest{
+		SystemInstruction: &Content{
+			Parts: []Part{
+				{Text: `You are a code review assistant. Analyze the code and provide feedback in JSON format.
+
+Return your response as JSON wrapped in a markdown code block like this:
+` + "```json\n" + `{
+  "summary": "Brief overview of the code changes",
+  "findings": [
+    {
+      "severity": "error|warning|info",
+      "category": "bug|style|performance|security|maintainability",
+      "message": "Description of the issue",
+      "file": "path/to/file.ext",
+      "line": 42,
+      "suggestion": "How to fix it (optional)"
+    }
+  ]
+}
+` + "```"},
+			},
+		},
 		Contents: []Content{
 			{
 				Parts: []Part{
@@ -361,6 +382,18 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 	// Parse the response text to extract JSON review
 	review, err := parseReviewJSON(apiResp.Text)
 	if err != nil {
+		// Log the parsing failure to help with debugging
+		if c.logger != nil {
+			// Show first 200 chars of response for debugging
+			previewLen := 200
+			if len(apiResp.Text) < previewLen {
+				previewLen = len(apiResp.Text)
+			}
+			c.logger.LogWarning(ctx, "Gemini JSON parsing failed, returning raw text as summary", map[string]interface{}{
+				"error":        err.Error(),
+				"responseText": apiResp.Text[:previewLen],
+			})
+		}
 		// If JSON parsing fails, return text as summary
 		return Response{
 			Model:    c.model,
