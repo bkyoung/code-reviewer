@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -350,31 +349,15 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 // parseReviewJSON extracts and parses the JSON review from the response text.
 // The LLM may return JSON wrapped in markdown code blocks.
 func parseReviewJSON(text string) (Response, error) {
-	// Try to extract JSON from markdown code blocks
-	jsonPattern := regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
-	matches := jsonPattern.FindStringSubmatch(text)
-
-	var jsonText string
-	if len(matches) > 1 {
-		jsonText = strings.TrimSpace(matches[1])
-	} else {
-		// Try parsing the raw text as JSON
-		jsonText = strings.TrimSpace(text)
-	}
-
-	// Parse the JSON
-	var result struct {
-		Summary  string           `json:"summary"`
-		Findings []domain.Finding `json:"findings"`
-	}
-
-	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
-		return Response{}, fmt.Errorf("failed to parse JSON: %w", err)
+	// Use shared JSON parsing utility
+	summary, findings, err := llmhttp.ParseReviewResponse(text)
+	if err != nil {
+		return Response{}, err
 	}
 
 	return Response{
 		Model:    "", // Will be set by caller
-		Summary:  result.Summary,
-		Findings: result.Findings,
+		Summary:  summary,
+		Findings: findings,
 	}, nil
 }
