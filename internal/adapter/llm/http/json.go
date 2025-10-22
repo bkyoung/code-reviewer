@@ -11,7 +11,9 @@ import (
 
 var (
 	// Compile regex once and reuse (thread-safe)
-	jsonBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*?)```")
+	// Updated to handle nested code blocks: match from ```json (or ```) at start
+	// to the LAST ``` in the text (greedy match), not the first
+	jsonBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*)```")
 )
 
 // ExtractJSONFromMarkdown extracts JSON from markdown code blocks.

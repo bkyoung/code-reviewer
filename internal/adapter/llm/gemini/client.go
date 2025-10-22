@@ -384,14 +384,10 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 	if err != nil {
 		// Log the parsing failure to help with debugging
 		if c.logger != nil {
-			// Show first 200 chars of response for debugging
-			previewLen := 200
-			if len(apiResp.Text) < previewLen {
-				previewLen = len(apiResp.Text)
-			}
 			c.logger.LogWarning(ctx, "Gemini JSON parsing failed, returning raw text as summary", map[string]interface{}{
-				"error":        err.Error(),
-				"responseText": apiResp.Text[:previewLen],
+				"error":          err.Error(),
+				"responseLength": len(apiResp.Text),
+				"fullResponse":   apiResp.Text, // Log the FULL response for debugging
 			})
 		}
 		// If JSON parsing fails, return text as summary
