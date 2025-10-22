@@ -35,7 +35,8 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Println(err)
+		// Redact API keys from URLs in error messages before logging
+		log.Println(llmhttp.RedactURLSecrets(err.Error()))
 		os.Exit(1)
 	}
 }
