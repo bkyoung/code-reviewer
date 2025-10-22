@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -233,14 +234,32 @@ func (l *DefaultLogger) logInfoJSON(timestamp time.Time, message string, fields 
 
 // logWarningHuman logs a warning in human-readable format
 func (l *DefaultLogger) logWarningHuman(timestamp time.Time, message string, fields map[string]interface{}) {
-	// TODO: Implement human format
-	log.Printf("[WARN] %s", message)
+	// Build key=value pairs from fields
+	var pairs []string
+	for k, v := range fields {
+		pairs = append(pairs, fmt.Sprintf("%s=%v", k, v))
+	}
+
+	if len(pairs) > 0 {
+		log.Printf("[WARN] %s %s %s", timestamp.Format(time.RFC3339), message, strings.Join(pairs, " "))
+	} else {
+		log.Printf("[WARN] %s %s", timestamp.Format(time.RFC3339), message)
+	}
 }
 
 // logInfoHuman logs an info message in human-readable format
 func (l *DefaultLogger) logInfoHuman(timestamp time.Time, message string, fields map[string]interface{}) {
-	// TODO: Implement human format
-	log.Printf("[INFO] %s", message)
+	// Build key=value pairs from fields
+	var pairs []string
+	for k, v := range fields {
+		pairs = append(pairs, fmt.Sprintf("%s=%v", k, v))
+	}
+
+	if len(pairs) > 0 {
+		log.Printf("[INFO] %s %s %s", timestamp.Format(time.RFC3339), message, strings.Join(pairs, " "))
+	} else {
+		log.Printf("[INFO] %s %s", timestamp.Format(time.RFC3339), message)
+	}
 }
 
 // RedactAPIKey shows only the last 4 characters of an API key with explicit redaction markers.

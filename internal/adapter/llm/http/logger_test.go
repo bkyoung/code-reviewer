@@ -396,3 +396,79 @@ func TestDefaultLogger_LogInfo_RespectLogLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultLogger_LogWarning_Human(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
+	logger.LogWarning(context.Background(), "failed to save review", map[string]interface{}{
+		"runID":    "run-123",
+		"provider": "openai",
+		"error":    "database connection failed",
+	})
+
+	output := buf.String()
+	assert.Contains(t, output, "[WARN]")
+	assert.Contains(t, output, "failed to save review")
+	assert.Contains(t, output, "runID=run-123")
+	assert.Contains(t, output, "provider=openai")
+	assert.Contains(t, output, "error=database connection failed")
+}
+
+func TestDefaultLogger_LogInfo_Human(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
+	logger.LogInfo(context.Background(), "review completed successfully", map[string]interface{}{
+		"runID":     "run-456",
+		"provider":  "anthropic",
+		"totalCost": 0.05,
+	})
+
+	output := buf.String()
+	assert.Contains(t, output, "[INFO]")
+	assert.Contains(t, output, "review completed successfully")
+	assert.Contains(t, output, "runID=run-456")
+	assert.Contains(t, output, "provider=anthropic")
+	assert.Contains(t, output, "totalCost=0.05")
+}
+
+func TestDefaultLogger_LogWarning_Human_EmptyFields(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
+	logger.LogWarning(context.Background(), "simple warning", map[string]interface{}{})
+
+	output := buf.String()
+	assert.Contains(t, output, "[WARN]")
+	assert.Contains(t, output, "simple warning")
+	// Should not have extra key=value pairs
+	assert.NotContains(t, output, "=")
+}
+
+func TestDefaultLogger_LogInfo_Human_MultipleFields(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	logger := http.NewDefaultLogger(http.LogLevelInfo, http.LogFormatHuman, true)
+	logger.LogInfo(context.Background(), "operation completed", map[string]interface{}{
+		"duration": "2.5s",
+		"items":    42,
+		"status":   "success",
+	})
+
+	output := buf.String()
+	assert.Contains(t, output, "[INFO]")
+	assert.Contains(t, output, "operation completed")
+	// Should contain all fields (order may vary due to map iteration)
+	assert.Contains(t, output, "duration=2.5s")
+	assert.Contains(t, output, "items=42")
+	assert.Contains(t, output, "status=success")
+}
