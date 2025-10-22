@@ -6,6 +6,10 @@ import (
 	"fmt"
 )
 
+// maxInt64Mask is used to clear the sign bit, ensuring the result fits in positive int64 range.
+// Value: 0x7FFFFFFFFFFFFFFF = 9223372036854775807 = math.MaxInt64
+const maxInt64Mask = 0x7FFFFFFFFFFFFFFF
+
 // GenerateSeed creates a deterministic uint64 seed from base and target refs.
 // The seed is derived from a SHA-256 hash of the concatenated refs, ensuring
 // reproducibility for the same inputs.
@@ -23,7 +27,7 @@ func GenerateSeed(baseRef, targetRef string) uint64 {
 
 	// Mask off the high bit to ensure the value fits in int64
 	// This keeps the seed in range [0, 9223372036854775807] (math.MaxInt64)
-	seed = seed & 0x7FFFFFFFFFFFFFFF
+	seed = seed & maxInt64Mask
 
 	return seed
 }
