@@ -2,22 +2,23 @@
 
 ## Current Status
 
-**v0.1.3 - Code Quality Improvements Complete** ✅
+**v0.1.4 - Complete Environment Variable Support** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
 - ✅ Full HTTP client implementation with retry logic and error handling
 - ✅ Comprehensive observability (logging, metrics, cost tracking)
 - ✅ True structured logging - JSON and human-readable formats throughout
-- ✅ **Shared JSON parsing utilities** - Zero duplication across LLM clients
+- ✅ Shared JSON parsing utilities - Zero duplication across LLM clients
+- ✅ **Complete environment variable expansion** - All config sections supported
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
-- ✅ Configuration system with environment variable support
+- ✅ Configuration system with full env var support (${VAR} and $VAR syntax)
 - ✅ Secret redaction
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
-- ✅ **Clean architecture integrity** - Intentional duplication documented
-- ✅ All unit and integration tests passing (135+ tests)
+- ✅ Clean architecture integrity - Intentional duplication documented
+- ✅ All unit and integration tests passing (140+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -50,14 +51,9 @@ The code reviewer now has:
 
 This section tracks issues identified through code reviews and technical debt items to be addressed in future releases.
 
-### Medium Priority
+**No medium or high priority technical debt items remaining.** 🎉
 
-#### 4. Environment Variable Expansion for All Config
-**Source**: OpenAI code review feedback
-**Location**: `internal/config/loader.go`
-**Status**: Incomplete feature
-
-Env var expansion (`${VAR}`) may not be applied to all config sections (merge, redaction, budget). Ensure `expandEnvString` is called recursively on all string fields.
+All known code quality issues and configuration inconsistencies have been addressed through v0.1.1-v0.1.4.
 
 ## Recently Fixed Issues
 
@@ -171,6 +167,35 @@ After investigation, determined duplication is INTENTIONAL and correct:
 **Impact**: Zero JSON parsing duplication across LLM clients. Easier maintenance and consistent parsing behavior. Clean architecture integrity documented and protected by tests. Better code clarity and reduced maintenance burden.
 
 **Feedback sources**: OpenAI code review feedback (Oct 22, 2025)
+
+### ✅ Complete Environment Variable Expansion (v0.1.4)
+**Fixed**: 2025-10-22
+**Location**: `internal/config/loader.go`
+**Severity**: MEDIUM (incomplete feature)
+
+**Problem**:
+Environment variable expansion (`${VAR}` and `$VAR` syntax) was only applied to providers, git, output, and store config sections. The merge, budget, redaction, and observability sections did not support env var expansion, creating inconsistent behavior and limiting CI/CD flexibility.
+
+**Solution**:
+- Created `expandEnvStringSlice` function for array/slice expansion
+- Updated `expandEnvVars` to handle all missing string fields:
+  - Merge config: provider, model, strategy
+  - Budget config: degradationPolicy ([]string)
+  - Redaction config: denyGlobs, allowGlobs ([]string)
+  - Observability config: logging.level, logging.format
+- Comprehensive test coverage (6 new test functions, 20+ assertions)
+
+**Changes**:
+- Add expandEnvStringSlice helper function
+- Expand merge.provider, merge.model, merge.strategy
+- Expand budget.degradationPolicy array
+- Expand redaction.denyGlobs and redaction.allowGlobs arrays
+- Expand observability.logging.level and observability.logging.format
+- All 140+ tests passing with zero data races
+
+**Impact**: Complete and consistent environment variable support across all configuration sections. Users can now externalize any config value via environment variables, making the tool fully CI/CD ready with flexible environment-specific configurations.
+
+**Feedback source**: OpenAI code review feedback (Oct 22, 2025)
 
 ## Future Features (Deferred)
 
@@ -293,12 +318,19 @@ When adding new features:
 - Full delegation from ReviewLogger to llmhttp.Logger
 - 130+ tests passing with zero data races
 
-### v0.1.3 (Current)
+### v0.1.3 (Released)
 - Shared JSON parsing utilities
 - Zero code duplication across LLM clients
 - ID generation duplication documented as intentional (clean architecture)
 - Sync test prevents implementation divergence
 - 135+ tests passing with zero data races
+
+### v0.1.4 (Current)
+- Complete environment variable expansion
+- Support for all config sections (merge, budget, redaction, observability)
+- Array/slice env var expansion (expandEnvStringSlice)
+- Comprehensive test coverage (6 new tests, 20+ assertions)
+- 140+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history

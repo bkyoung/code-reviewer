@@ -103,6 +103,13 @@ This directory contains completed implementation checklists and historical plann
   - Phase 4: Full verification (tests, race detector, build, CI)
   - Phase 5: Documentation updates
 
+### Environment Variable Expansion (v0.1.4)
+- **ENV_VAR_EXPANSION_DESIGN.md** - Technical design for v0.1.4 env var expansion (✅ Complete)
+  - Identified missing env var expansion in merge, budget, redaction, observability
+  - Designed expandEnvStringSlice for array/slice expansion
+  - Comprehensive test strategy for all config sections
+  - TDD approach with Red-Green-Refactor cycle
+
 ## Historical Planning Documents
 
 - **IMPEMENTATION_PLAN.md** - Original multi-phase implementation plan
@@ -138,3 +145,4 @@ The following design documents remain in the main docs directory as they documen
 - **2025-10-22**: Added production hardening design and checklist (v0.1.1 release)
 - **2025-10-22**: Added structured logging fix design and checklist (v0.1.2 release)
 - **2025-10-22**: Added code quality improvements design and checklist (v0.1.3 release)
+- **2025-10-22**: Added environment variable expansion design (v0.1.4 release)
