@@ -452,6 +452,39 @@ func TestHTTPClient_Call_O3Model(t *testing.T) {
 	assert.Equal(t, "o3 response", resp.Text)
 }
 
+func TestHTTPClient_Call_O3ModelExactName(t *testing.T) {
+	// Test that exact model name "o3" (no suffix) is also recognized
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify exact "o3" model name uses max_completion_tokens
+		assert.Equal(t, 2500, req.MaxCompletionTokens, "o3 exact name should use max_completion_tokens")
+		assert.Equal(t, 0, req.MaxTokens, "o3 exact name should not set max_tokens")
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "o3",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "o3 exact response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("test-key", "o3", testProviderConfig(), testHTTPConfig())
+	client.SetBaseURL(server.URL)
+
+	resp, err := client.Call(context.Background(), "test", openai.CallOptions{MaxTokens: 2500})
+	require.NoError(t, err)
+	assert.Equal(t, "o3 exact response", resp.Text)
+}
+
 func TestHTTPClient_Call_RegularModel_UsesTemperatureAndSeed(t *testing.T) {
 	// Verify regular models (non-o1) still use temperature, seed, and max_tokens
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

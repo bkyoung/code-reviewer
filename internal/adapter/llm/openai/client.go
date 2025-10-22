@@ -26,9 +26,10 @@ const (
 // temperature, seed, or response_format parameters.
 func isO1Model(model string) bool {
 	modelLower := strings.ToLower(model)
-	return strings.HasPrefix(modelLower, "o1-") ||
-	       strings.HasPrefix(modelLower, "o3-") ||
-	       strings.HasPrefix(modelLower, "o4-")
+	// Check for exact matches (e.g., "o1", "o3", "o4") or prefixes (e.g., "o1-mini", "o3-mini")
+	return modelLower == "o1" || strings.HasPrefix(modelLower, "o1-") ||
+	       modelLower == "o3" || strings.HasPrefix(modelLower, "o3-") ||
+	       modelLower == "o4" || strings.HasPrefix(modelLower, "o4-")
 }
 
 // HTTPClient is an HTTP client for the OpenAI API.
