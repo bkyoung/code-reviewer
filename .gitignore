@@ -2,6 +2,7 @@
 /reviews
 /cr
 /out/**
+/~
 
 # Database files
 *.db
