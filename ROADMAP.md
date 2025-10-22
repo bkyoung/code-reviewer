@@ -19,7 +19,7 @@ The code reviewer now has:
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
 - ✅ Clean architecture integrity - Intentional duplication documented
-- ✅ All unit and integration tests passing (160+ tests)
+- ✅ All unit and integration tests passing (180+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -297,6 +297,124 @@ Gemini 2.5 Pro has **extended thinking** capabilities (like OpenAI o1/o4) where 
 
 **Feedback sources**: Anthropic, OpenAI, and Gemini code reviews (Oct 22, 2025) identified these improvements during self-review of v0.1.5 changes.
 
+### ✅ OpenAI Reasoning Model Support and Code Review Remediation (v0.1.5)
+**Fixed**: 2025-10-22
+**Locations**: Multiple files across codebase
+**Severity**: CRITICAL (OpenAI o3/o4 models failing) + MEDIUM (security and code quality)
+
+This work included three phases of fixes based on comprehensive code review feedback from all three LLM providers:
+
+#### Phase 1: Critical Security & Bug Fixes
+
+**1. Response Logging Security Issue**
+**Location**: `internal/adapter/llm/gemini/client.go`, new file `internal/adapter/llm/http/logging.go`
+**Severity**: HIGH (security/privacy risk)
+
+**Problem**: Gemini client was logging full API responses (including user source code and potentially secrets) to log aggregators without truncation.
+
+**Solution**:
+- Created `internal/adapter/llm/http/logging.go` with truncation utilities
+- `TruncateForLogging()` limits logged responses to 200 characters max
+- `SafeLogResponse()` wrapper for safe logging throughout codebase
+- Updated Gemini client to use SafeLogResponse() at two logging locations
+- Comprehensive test coverage (6 new tests)
+
+**Impact**: Prevents accidental exposure of sensitive data (source code, API keys, secrets) in production logs and log aggregators.
+
+**2. Negative Duration Validation**
+**Location**: `internal/adapter/llm/http/config_helpers.go`
+**Severity**: CRITICAL (runtime panic risk)
+
+**Problem**: `ParseTimeout` and `parseDuration` accepted negative duration values which cause runtime panics when set on `http.Client.Timeout`.
+
+**Solution**:
+- Added `d >= 0` validation to ParseTimeout and parseDuration
+- Added safe fallbacks (60s for timeout, 2s for backoff) if defaultVal is somehow negative
+- Comprehensive test coverage (3 new tests for negative value handling)
+
+**Impact**: Application now gracefully handles invalid config instead of crashing with runtime panics.
+
+**3. Provider-Specific Token Limits**
+**Location**: `internal/usecase/review/prompt.go`
+**Severity**: HIGH (HTTP 400 errors from providers)
+
+**Problem**: `defaultMaxTokens = 16384` exceeded limits for some providers:
+- Claude Sonnet: max 8k output tokens
+- GPT-4-turbo: max 4k-16k depending on variant
+- Caused HTTP 400 errors with "invalid request" messages
+
+**Solution**:
+- Lowered defaultMaxTokens from 16384 → **8192** (safe across all providers)
+- Added extensive documentation explaining:
+  - Why 8k is safe across all providers
+  - Extended thinking models (o1/o3/o4, Gemini 2.5 Pro) use tokens for reasoning
+  - How to handle MAX_TOKENS errors (higher limits, custom config, smaller diffs)
+  - Trade-offs and recommendations
+
+**Impact**: Works reliably across all providers while still supporting substantial code reviews. Users can configure higher limits for providers that support them.
+
+**4. OpenAI o3/o4 Reasoning Model Support**
+**Location**: `internal/adapter/llm/openai/client.go`
+**Severity**: CRITICAL (o3/o4 models failing with HTTP 400)
+
+**Problem**: OpenAI o3 and o4 reasoning models use `max_completion_tokens` instead of `max_tokens` (like o1). Code only detected o1 models, causing o3/o4 to fail with "Unsupported parameter: 'max_tokens'" errors.
+
+**Solution**:
+- Updated `isO1Model()` to detect o1, o3, and o4 model families
+- Changed implementation from repetitive boolean logic to loop-based approach
+- Uses `reasoningModelFamilies := []string{"o1", "o3", "o4"}` for maintainability
+- Comprehensive test coverage for all model variants
+
+**Impact**: All OpenAI reasoning models (o1, o3, o4 and their variants like o3-mini, o4-mini) now work correctly.
+
+#### Phase 2: Code Quality Improvements
+
+**5. Import Alias Shadowing**
+**Location**: `internal/adapter/llm/http/config_helpers_test.go`
+**Severity**: LOW (code clarity)
+
+**Problem**: Import alias `http` shadowed standard library `net/http`, potentially confusing readers.
+
+**Solution**:
+- Renamed import from `http` to `llmhttp` for consistency
+- Used sed to replace all `http.` references with `llmhttp.` in test file
+- Maintains consistency with other test files in codebase
+
+**Impact**: More readable test code, prevents confusion with standard library.
+
+**6. Refactor isO1Model**
+**Location**: `internal/adapter/llm/openai/client.go`
+**Severity**: LOW (maintainability)
+
+**Problem**: Repetitive boolean logic for o1/o3/o4 checks made it hard to add new model families.
+
+**Solution**:
+- Replaced repetitive boolean with loop-based approach
+- Uses `reasoningModelFamilies` array for extensibility
+- Easier to add new model families (o2, o5, etc.) in the future
+- More readable and follows DRY principle
+
+**Impact**: Improved maintainability, easier to extend for future reasoning models.
+
+#### Summary
+
+**Changes**:
+- Created logging.go with safe truncation utilities (6 tests)
+- Fixed negative duration validation (3 tests)
+- Adjusted token limits with comprehensive documentation
+- Added o3/o4 reasoning model support
+- Fixed import alias shadowing
+- Refactored isO1Model for maintainability
+- All 180+ tests passing with zero data races
+
+**Commits**:
+- 44ee86c: "Fix critical security and performance issues from code review"
+- 84849e6: "Improve code quality and maintainability"
+
+**Impact**: Critical security fix prevents data leakage. All OpenAI reasoning models work correctly. Safer configuration handling prevents runtime panics. Better token limit defaults work across all providers. Improved code quality and maintainability.
+
+**Feedback sources**: Comprehensive code reviews from OpenAI o3, Anthropic Claude, and Gemini 2.5 Pro identified these issues and recommendations (Oct 22, 2025).
+
 ## Future Features (Deferred)
 
 ### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
@@ -437,7 +555,12 @@ When adding new features:
 - Global HTTP config with per-provider overrides
 - Environment variable expansion for HTTP config
 - Module path correction (github.com/bkyoung/code-reviewer)
-- 160+ tests passing with zero data races
+- OpenAI o3/o4 reasoning model support
+- Security fixes (log truncation prevents data leakage)
+- Negative duration validation (prevents runtime panics)
+- Token limit adjustments (8k default for cross-provider compatibility)
+- Code quality improvements (import alias fix, isO1Model refactor)
+- 180+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history
