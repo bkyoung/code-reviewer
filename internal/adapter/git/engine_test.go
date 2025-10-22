@@ -12,8 +12,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
-	"github.com/brandon/code-reviewer/internal/adapter/git"
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/adapter/git"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 func TestEngineGetCumulativeDiffForBranch(t *testing.T) {

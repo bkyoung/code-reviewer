@@ -20,7 +20,7 @@ AI-powered code review tool that uses multiple LLM providers to analyze Git bran
 
 ```bash
 # Clone the repository
-git clone https://github.com/brandon/code-reviewer
+git clone https://github.com/bkyoung/code-reviewer
 cd code-reviewer
 
 # Build the tool

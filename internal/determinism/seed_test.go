@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/determinism"
+	"github.com/bkyoung/code-reviewer/internal/determinism"
 	"github.com/stretchr/testify/assert"
 )
 

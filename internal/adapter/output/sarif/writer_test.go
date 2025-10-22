@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/adapter/output/sarif"
-	"github.com/brandon/code-reviewer/internal/domain"
-	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/bkyoung/code-reviewer/internal/adapter/output/sarif"
+	"github.com/bkyoung/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

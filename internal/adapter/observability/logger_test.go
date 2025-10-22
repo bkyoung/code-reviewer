@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/adapter/observability"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

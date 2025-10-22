@@ -9,26 +9,26 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/brandon/code-reviewer/internal/adapter/cli"
-	"github.com/brandon/code-reviewer/internal/adapter/git"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/anthropic"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/gemini"
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/ollama"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/openai"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/static"
-	"github.com/brandon/code-reviewer/internal/adapter/observability"
-	"github.com/brandon/code-reviewer/internal/adapter/output/json"
-	"github.com/brandon/code-reviewer/internal/adapter/output/markdown"
-	"github.com/brandon/code-reviewer/internal/adapter/output/sarif"
-	storeAdapter "github.com/brandon/code-reviewer/internal/adapter/store"
-	"github.com/brandon/code-reviewer/internal/adapter/store/sqlite"
-	"github.com/brandon/code-reviewer/internal/config"
-	"github.com/brandon/code-reviewer/internal/determinism"
-	"github.com/brandon/code-reviewer/internal/redaction"
-	"github.com/brandon/code-reviewer/internal/usecase/merge"
-	"github.com/brandon/code-reviewer/internal/usecase/review"
-	"github.com/brandon/code-reviewer/internal/version"
+	"github.com/bkyoung/code-reviewer/internal/adapter/cli"
+	"github.com/bkyoung/code-reviewer/internal/adapter/git"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/anthropic"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/gemini"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/ollama"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/openai"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/static"
+	"github.com/bkyoung/code-reviewer/internal/adapter/observability"
+	"github.com/bkyoung/code-reviewer/internal/adapter/output/json"
+	"github.com/bkyoung/code-reviewer/internal/adapter/output/markdown"
+	"github.com/bkyoung/code-reviewer/internal/adapter/output/sarif"
+	storeAdapter "github.com/bkyoung/code-reviewer/internal/adapter/store"
+	"github.com/bkyoung/code-reviewer/internal/adapter/store/sqlite"
+	"github.com/bkyoung/code-reviewer/internal/config"
+	"github.com/bkyoung/code-reviewer/internal/determinism"
+	"github.com/bkyoung/code-reviewer/internal/redaction"
+	"github.com/bkyoung/code-reviewer/internal/usecase/merge"
+	"github.com/bkyoung/code-reviewer/internal/usecase/review"
+	"github.com/bkyoung/code-reviewer/internal/version"
 )
 
 func main() {
@@ -76,7 +76,7 @@ func run() error {
 		reviewLogger = observability.NewReviewLogger(obs.logger)
 	}
 
-	providers := buildProviders(cfg.Providers, obs)
+	providers := buildProviders(cfg.Providers, cfg.HTTP, obs)
 
 	merger := merge.NewService()
 
@@ -199,7 +199,7 @@ func buildObservability(cfg config.ObservabilityConfig) observabilityComponents 
 	}
 }
 
-func buildProviders(providersConfig map[string]config.ProviderConfig, obs observabilityComponents) map[string]review.Provider {
+func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig config.HTTPConfig, obs observabilityComponents) map[string]review.Provider {
 	providers := make(map[string]review.Provider)
 
 	// OpenAI provider
@@ -215,7 +215,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, obs observ
 			log.Println("OpenAI: No API key provided, using static client")
 			providers["openai"] = openai.NewProvider(model, openai.NewStaticClient())
 		} else {
-			client := openai.NewHTTPClient(apiKey, model)
+			client := openai.NewHTTPClient(apiKey, model, cfg, httpConfig)
 			// Wire up observability
 			if obs.logger != nil {
 				client.SetLogger(obs.logger)
@@ -241,7 +241,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, obs observ
 		if apiKey == "" {
 			log.Println("Anthropic: No API key provided, skipping provider")
 		} else {
-			client := anthropic.NewHTTPClient(apiKey, model)
+			client := anthropic.NewHTTPClient(apiKey, model, cfg, httpConfig)
 			// Wire up observability
 			if obs.logger != nil {
 				client.SetLogger(obs.logger)
@@ -267,7 +267,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, obs observ
 		if apiKey == "" {
 			log.Println("Gemini: No API key provided, skipping provider")
 		} else {
-			client := gemini.NewHTTPClient(apiKey, model)
+			client := gemini.NewHTTPClient(apiKey, model, cfg, httpConfig)
 			// Wire up observability
 			if obs.logger != nil {
 				client.SetLogger(obs.logger)
@@ -293,7 +293,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, obs observ
 		if host == "" {
 			host = "http://localhost:11434"
 		}
-		client := ollama.NewHTTPClient(host, model)
+		client := ollama.NewHTTPClient(host, model, cfg, httpConfig)
 		// Wire up observability
 		if obs.logger != nil {
 			client.SetLogger(obs.logger)

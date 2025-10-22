@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/adapter/output/markdown"
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/adapter/output/markdown"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 func TestWriterProducesDeterministicMarkdown(t *testing.T) {

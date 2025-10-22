@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 var (

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brandon/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/stretchr/testify/assert"
 )
 

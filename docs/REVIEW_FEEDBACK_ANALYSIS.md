@@ -203,7 +203,7 @@ func ParseReview(jsonData []byte) (domain.Review, error) {
 
 **Solution**: Import and use functions from `internal/store`:
 ```go
-import "github.com/brandon/code-reviewer/internal/store"
+import "github.com/bkyoung/code-reviewer/internal/store"
 
 reviewID := store.GenerateReviewID(runID, review.ProviderName)
 findingID := store.GenerateFindingID(reviewID, i)

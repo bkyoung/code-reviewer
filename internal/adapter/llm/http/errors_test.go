@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/stretchr/testify/assert"
 )
 

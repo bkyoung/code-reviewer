@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/domain"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/config"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 const (
@@ -23,11 +24,12 @@ const (
 
 // HTTPClient is an HTTP client for the Anthropic API.
 type HTTPClient struct {
-	apiKey  string
-	model   string
-	baseURL string
-	timeout time.Duration
-	client  *http.Client
+	apiKey    string
+	model     string
+	baseURL   string
+	timeout   time.Duration
+	retryConf llmhttp.RetryConfig
+	client    *http.Client
 
 	// Observability components
 	logger  llmhttp.Logger
@@ -36,13 +38,17 @@ type HTTPClient struct {
 }
 
 // NewHTTPClient creates a new Anthropic HTTP client.
-func NewHTTPClient(apiKey, model string) *HTTPClient {
+func NewHTTPClient(apiKey, model string, providerCfg config.ProviderConfig, httpCfg config.HTTPConfig) *HTTPClient {
+	timeout := llmhttp.ParseTimeout(providerCfg.Timeout, httpCfg.Timeout, defaultTimeout)
+	retryConf := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
+
 	return &HTTPClient{
-		apiKey:  apiKey,
-		model:   model,
-		baseURL: defaultBaseURL,
-		timeout: defaultTimeout,
-		client:  &http.Client{Timeout: defaultTimeout},
+		apiKey:    apiKey,
+		model:     model,
+		baseURL:   defaultBaseURL,
+		timeout:   timeout,
+		retryConf: retryConf,
+		client:    &http.Client{Timeout: timeout},
 	}
 }
 
@@ -151,14 +157,8 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", defaultAnthropicVersion)
 
-	// Execute request with retry logic
+	// Execute request with retry logic (using configured retry settings)
 	var resp *http.Response
-	retryConfig := llmhttp.RetryConfig{
-		MaxRetries:     5,
-		InitialBackoff: 2 * time.Second,
-		MaxBackoff:     32 * time.Second,
-		Multiplier:     2.0,
-	}
 
 	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
 		// Recreate request for each retry with fresh context
@@ -195,7 +195,7 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		}
 
 		return nil
-	}, retryConfig)
+	}, c.retryConf)
 
 	duration := time.Since(startTime)
 

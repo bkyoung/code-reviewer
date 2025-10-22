@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 // GitEngine abstracts the cumulative diff retrieval.

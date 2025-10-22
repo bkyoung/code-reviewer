@@ -9,20 +9,39 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brandon/code-reviewer/internal/adapter/llm/gemini"
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/gemini"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// Test helpers for config
+func testProviderConfig() config.ProviderConfig {
+	return config.ProviderConfig{
+		Enabled: true,
+		Model:   "gemini-pro",
+	}
+}
+
+func testHTTPConfig() config.HTTPConfig {
+	return config.HTTPConfig{
+		Timeout:           "60s",
+		MaxRetries:        5,
+		InitialBackoff:    "2s",
+		MaxBackoff:        "32s",
+		BackoffMultiplier: 2.0,
+	}
+}
+
 func TestNewHTTPClient(t *testing.T) {
-	client := gemini.NewHTTPClient("test-api-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-api-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 
 	assert.NotNil(t, client)
 }
 
 func TestNewHTTPClient_EmptyAPIKey(t *testing.T) {
-	client := gemini.NewHTTPClient("", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 
 	// Should still create client, but will fail on actual API calls
 	assert.NotNil(t, client)
@@ -69,7 +88,7 @@ func TestHTTPClient_Call_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-api-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-api-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	resp, err := client.Call(context.Background(), "test prompt", gemini.CallOptions{})
@@ -103,7 +122,7 @@ func TestHTTPClient_Call_WithTemperature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	resp, err := client.Call(context.Background(), "test", gemini.CallOptions{
@@ -129,7 +148,7 @@ func TestHTTPClient_Call_AuthenticationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("invalid-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("invalid-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -172,7 +191,7 @@ func TestHTTPClient_Call_RateLimitError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	resp, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -196,7 +215,7 @@ func TestHTTPClient_Call_InvalidRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -223,7 +242,7 @@ func TestHTTPClient_Call_ContentFiltered(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -242,7 +261,7 @@ func TestHTTPClient_Call_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 	client.SetTimeout(50 * time.Millisecond)
 
@@ -259,7 +278,7 @@ func TestHTTPClient_Call_ContextCanceled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -278,7 +297,7 @@ func TestHTTPClient_Call_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -297,7 +316,7 @@ func TestHTTPClient_Call_EmptyCandidates(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})
@@ -326,7 +345,7 @@ func TestHTTPClient_Call_MultiplePartsConcatenation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro")
+	client := gemini.NewHTTPClient("test-key", "gemini-1.5-pro", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	resp, err := client.Call(context.Background(), "test", gemini.CallOptions{MaxTokens: 1024})

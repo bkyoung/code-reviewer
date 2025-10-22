@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
 // ErrVersionRequested indicates the user requested the CLI version and no further work should be done.

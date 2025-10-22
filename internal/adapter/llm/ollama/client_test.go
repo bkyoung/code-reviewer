@@ -8,14 +8,33 @@ import (
 	"testing"
 	"time"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/ollama"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/ollama"
+	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// Test helpers for config
+func testProviderConfig() config.ProviderConfig {
+	return config.ProviderConfig{
+		Enabled: true,
+		Model:   "codellama",
+	}
+}
+
+func testHTTPConfig() config.HTTPConfig {
+	return config.HTTPConfig{
+		Timeout:           "120s",
+		MaxRetries:        5,
+		InitialBackoff:    "2s",
+		MaxBackoff:        "32s",
+		BackoffMultiplier: 2.0,
+	}
+}
+
 func TestNewHTTPClient(t *testing.T) {
-	client := ollama.NewHTTPClient("http://localhost:11434", "codellama")
+	client := ollama.NewHTTPClient("http://localhost:11434", "codellama", testProviderConfig(), testHTTPConfig())
 
 	assert.NotNil(t, client)
 }
@@ -50,7 +69,7 @@ func TestHTTPClient_Call_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	resp, err := client.Call(context.Background(), "test prompt", ollama.CallOptions{})
 
@@ -79,7 +98,7 @@ func TestHTTPClient_Call_WithTemperature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	resp, err := client.Call(context.Background(), "test", ollama.CallOptions{
 		Temperature: 0.7,
@@ -108,7 +127,7 @@ func TestHTTPClient_Call_WithSeed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	seed := uint64(12345)
 	resp, err := client.Call(context.Background(), "test", ollama.CallOptions{
@@ -121,7 +140,7 @@ func TestHTTPClient_Call_WithSeed(t *testing.T) {
 
 func TestHTTPClient_Call_ConnectionRefused(t *testing.T) {
 	// Use a port that won't have anything running
-	client := ollama.NewHTTPClient("http://localhost:9999", "codellama")
+	client := ollama.NewHTTPClient("http://localhost:9999", "codellama", testProviderConfig(), testHTTPConfig())
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 
@@ -140,7 +159,7 @@ func TestHTTPClient_Call_ModelNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "nonexistent")
+	client := ollama.NewHTTPClient(server.URL, "nonexistent", testProviderConfig(), testHTTPConfig())
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 
@@ -174,7 +193,7 @@ func TestHTTPClient_Call_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	resp, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 
@@ -190,7 +209,7 @@ func TestHTTPClient_Call_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 	client.SetTimeout(50 * time.Millisecond)
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
@@ -206,7 +225,7 @@ func TestHTTPClient_Call_ContextCanceled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -224,7 +243,7 @@ func TestHTTPClient_Call_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 
@@ -243,7 +262,7 @@ func TestHTTPClient_Call_EmptyResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 
@@ -262,7 +281,7 @@ func TestHTTPClient_Call_NotDone(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := ollama.NewHTTPClient(server.URL, "codellama")
+	client := ollama.NewHTTPClient(server.URL, "codellama", testProviderConfig(), testHTTPConfig())
 
 	_, err := client.Call(context.Background(), "test", ollama.CallOptions{})
 

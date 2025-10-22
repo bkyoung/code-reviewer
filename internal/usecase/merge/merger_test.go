@@ -3,8 +3,8 @@ package merge_test
 import (
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/domain"
-	"github.com/brandon/code-reviewer/internal/usecase/merge"
+	"github.com/bkyoung/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/usecase/merge"
 	"github.com/stretchr/testify/assert"
 )
 

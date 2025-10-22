@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/adapter/llm/openai"
-	"github.com/brandon/code-reviewer/internal/domain"
-	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/openai"
+	"github.com/bkyoung/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
 type stubClient struct {

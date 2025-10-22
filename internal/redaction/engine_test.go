@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/redaction"
+	"github.com/bkyoung/code-reviewer/internal/redaction"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

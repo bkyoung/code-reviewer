@@ -317,8 +317,8 @@ Replace unstructured logging with structured logging throughout the codebase.
   import (
       "context"
       "log"
-      llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-      "github.com/brandon/code-reviewer/internal/usecase/review"
+      llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+      "github.com/bkyoung/code-reviewer/internal/usecase/review"
   )
 
   // ReviewLogger adapts llmhttp.Logger to review.Logger interface.
@@ -449,7 +449,7 @@ Replace unstructured logging with structured logging throughout the codebase.
 - [ ] **Read** `cmd/cr/main.go`
 - [ ] **Import** observability package
   ```go
-  import "github.com/brandon/code-reviewer/internal/adapter/observability"
+  import "github.com/bkyoung/code-reviewer/internal/adapter/observability"
   ```
 
 - [ ] **Create** ReviewLogger after observability logger setup

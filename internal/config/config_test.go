@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/config"
+	"github.com/bkyoung/code-reviewer/internal/config"
 )
 
 func TestMergePrioritizesLaterConfigs(t *testing.T) {

@@ -93,7 +93,7 @@ package store
 import (
     "context"
     "time"
-    "github.com/brandon/code-reviewer/internal/domain"
+    "github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 // Store defines the persistence layer interface
@@ -192,7 +192,7 @@ import (
     "context"
     "database/sql"
     _ "github.com/mattn/go-sqlite3"
-    "github.com/brandon/code-reviewer/internal/store"
+    "github.com/bkyoung/code-reviewer/internal/store"
 )
 
 type Store struct {
@@ -235,7 +235,7 @@ import (
     tea "github.com/charmbracelet/bubbletea"
     "github.com/charmbracelet/bubbles/list"
     "github.com/charmbracelet/bubbles/viewport"
-    "github.com/brandon/code-reviewer/internal/store"
+    "github.com/bkyoung/code-reviewer/internal/store"
 )
 
 // Model represents the TUI state machine

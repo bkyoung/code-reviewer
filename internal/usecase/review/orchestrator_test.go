@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/domain"
-	"github.com/brandon/code-reviewer/internal/usecase/review"
+	"github.com/bkyoung/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
 type mockGitEngine struct {

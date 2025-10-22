@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 // StaticClient provides an offline-friendly OpenAI client implementation.

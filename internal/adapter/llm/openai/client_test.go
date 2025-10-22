@@ -8,20 +8,39 @@ import (
 	"testing"
 	"time"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/adapter/llm/openai"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/openai"
+	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// Test helpers for config
+func testProviderConfig() config.ProviderConfig {
+	return config.ProviderConfig{
+		Enabled: true,
+		Model:   "gpt-4o-mini",
+	}
+}
+
+func testHTTPConfig() config.HTTPConfig {
+	return config.HTTPConfig{
+		Timeout:           "60s",
+		MaxRetries:        5,
+		InitialBackoff:    "2s",
+		MaxBackoff:        "32s",
+		BackoffMultiplier: 2.0,
+	}
+}
+
 func TestNewHTTPClient(t *testing.T) {
-	client := openai.NewHTTPClient("test-api-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-api-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 
 	assert.NotNil(t, client)
 }
 
 func TestNewHTTPClient_EmptyAPIKey(t *testing.T) {
-	client := openai.NewHTTPClient("", "gpt-4o-mini")
+	client := openai.NewHTTPClient("", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 
 	// Should still create client, but will fail on actual API calls
 	assert.NotNil(t, client)
@@ -75,7 +94,7 @@ func TestHTTPClient_Call_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-api-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-api-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	response, err := client.Call(context.Background(), "test prompt", openai.CallOptions{
@@ -106,7 +125,7 @@ func TestHTTPClient_Call_AuthenticationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("invalid-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("invalid-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test prompt", openai.CallOptions{})
@@ -161,7 +180,7 @@ func TestHTTPClient_Call_RateLimitError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	response, err := client.Call(context.Background(), "test", openai.CallOptions{})
@@ -198,7 +217,7 @@ func TestHTTPClient_Call_ServiceUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	response, err := client.Call(context.Background(), "test", openai.CallOptions{})
@@ -221,7 +240,7 @@ func TestHTTPClient_Call_InvalidRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", openai.CallOptions{})
@@ -239,7 +258,7 @@ func TestHTTPClient_Call_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 	client.SetTimeout(50 * time.Millisecond)
 
@@ -257,7 +276,7 @@ func TestHTTPClient_Call_ContextCanceled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -276,7 +295,7 @@ func TestHTTPClient_Call_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", openai.CallOptions{})
@@ -299,7 +318,7 @@ func TestHTTPClient_Call_EmptyChoices(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	_, err := client.Call(context.Background(), "test", openai.CallOptions{})
@@ -344,7 +363,7 @@ func TestHTTPClient_Call_O1Model(t *testing.T) {
 	defer server.Close()
 
 	// Test with o1-mini
-	client := openai.NewHTTPClient("test-key", "o1-mini")
+	client := openai.NewHTTPClient("test-key", "o1-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	seed := uint64(12345)
@@ -383,7 +402,7 @@ func TestHTTPClient_Call_O4Model(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "o4-mini")
+	client := openai.NewHTTPClient("test-key", "o4-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	resp, err := client.Call(context.Background(), "test", openai.CallOptions{MaxTokens: 2000})
@@ -421,7 +440,7 @@ func TestHTTPClient_Call_RegularModel_UsesTemperatureAndSeed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	seed := uint64(99999)
@@ -457,7 +476,7 @@ func TestHTTPClient_WithObservability(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("sk-test-key-1234567890", "gpt-4o-mini")
+	client := openai.NewHTTPClient("sk-test-key-1234567890", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	// Set up observability
@@ -508,7 +527,7 @@ func TestHTTPClient_WithObservability_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := openai.NewHTTPClient("sk-test-key", "gpt-4o-mini")
+	client := openai.NewHTTPClient("sk-test-key", "gpt-4o-mini", testProviderConfig(), testHTTPConfig())
 	client.SetBaseURL(server.URL)
 
 	// Set up observability

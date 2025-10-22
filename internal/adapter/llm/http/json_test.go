@@ -3,7 +3,7 @@ package http_test
 import (
 	"testing"
 
-	"github.com/brandon/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -68,7 +68,7 @@ func TestExtractJSONFromMarkdown_NestedBackticks(t *testing.T) {
 	markdown := "```json\n{\"code\": \"`value`\"}\n```"
 	result := http.ExtractJSONFromMarkdown(markdown)
 
-	expected := `{"code": "`+"`value`"+`"}`
+	expected := `{"code": "` + "`value`" + `"}`
 	assert.Equal(t, expected, result)
 }
 

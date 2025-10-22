@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 const defaultMaxTokens = 4096

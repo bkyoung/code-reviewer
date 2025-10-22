@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	llmhttp "github.com/brandon/code-reviewer/internal/adapter/llm/http"
-	"github.com/brandon/code-reviewer/internal/domain"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	"github.com/bkyoung/code-reviewer/internal/config"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 const (
@@ -21,10 +22,11 @@ const (
 
 // HTTPClient is an HTTP client for the Ollama API.
 type HTTPClient struct {
-	baseURL string
-	model   string
-	timeout time.Duration
-	client  *http.Client
+	baseURL   string
+	model     string
+	timeout   time.Duration
+	retryConf llmhttp.RetryConfig
+	client    *http.Client
 
 	// Observability components
 	logger  llmhttp.Logger
@@ -33,12 +35,16 @@ type HTTPClient struct {
 }
 
 // NewHTTPClient creates a new Ollama HTTP client.
-func NewHTTPClient(baseURL, model string) *HTTPClient {
+func NewHTTPClient(baseURL, model string, providerCfg config.ProviderConfig, httpCfg config.HTTPConfig) *HTTPClient {
+	timeout := llmhttp.ParseTimeout(providerCfg.Timeout, httpCfg.Timeout, defaultTimeout)
+	retryConf := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
+
 	return &HTTPClient{
-		baseURL: baseURL,
-		model:   model,
-		timeout: defaultTimeout,
-		client:  &http.Client{Timeout: defaultTimeout},
+		baseURL:   baseURL,
+		model:     model,
+		timeout:   timeout,
+		retryConf: retryConf,
+		client:    &http.Client{Timeout: timeout},
 	}
 }
 
@@ -132,14 +138,8 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Execute request with retry logic
+	// Execute request with retry logic (using configured retry settings)
 	var resp *http.Response
-	retryConfig := llmhttp.RetryConfig{
-		MaxRetries:     3,
-		InitialBackoff: 1 * time.Second,
-		MaxBackoff:     8 * time.Second,
-		Multiplier:     2.0,
-	}
 
 	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
 		// Recreate request for each retry
@@ -183,7 +183,7 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		}
 
 		return nil
-	}, retryConfig)
+	}, c.retryConf)
 
 	duration := time.Since(startTime)
 

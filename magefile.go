@@ -44,7 +44,7 @@ func Build() error {
 	}
 
 	version := resolveVersion()
-	ldflags := fmt.Sprintf("-X github.com/brandon/code-reviewer/internal/version.version=%s", version)
+	ldflags := fmt.Sprintf("-X github.com/bkyoung/code-reviewer/internal/version.version=%s", version)
 	return run("go", "build", "-ldflags", ldflags, "-o", "cr", "./cmd/cr")
 }
 

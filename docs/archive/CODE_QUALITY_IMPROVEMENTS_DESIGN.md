@@ -90,7 +90,7 @@ import (
     "strings"
     "sync"
 
-    "github.com/brandon/code-reviewer/internal/domain"
+    "github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 var (

@@ -1,7 +1,7 @@
 package merge
 
 import (
-	"github.com/brandon/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
 // Service defines the merging logic.
