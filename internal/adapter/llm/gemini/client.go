@@ -284,11 +284,12 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 	// Log if we got an empty response for debugging
 	if c.logger != nil && responseText == "" {
 		c.logger.LogWarning(ctx, "Gemini returned empty response", map[string]interface{}{
-			"finishReason":    candidate.FinishReason,
-			"numParts":        len(candidate.Content.Parts),
-			"numCandidates":   len(genResp.Candidates),
-			"tokensOut":       genResp.UsageMetadata.CandidatesTokenCount,
-			"rawResponseBody": string(bodyBytes),
+			"finishReason":      candidate.FinishReason,
+			"numParts":          len(candidate.Content.Parts),
+			"numCandidates":     len(genResp.Candidates),
+			"tokensOut":         genResp.UsageMetadata.CandidatesTokenCount,
+			"responsePreview":   llmhttp.SafeLogResponse(string(bodyBytes)),
+			"responseLengthBytes": len(bodyBytes),
 		})
 	}
 
@@ -402,9 +403,9 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 		// Log the parsing failure to help with debugging
 		if c.logger != nil {
 			c.logger.LogWarning(ctx, "Gemini JSON parsing failed, returning raw text as summary", map[string]interface{}{
-				"error":          err.Error(),
-				"responseLength": len(apiResp.Text),
-				"fullResponse":   apiResp.Text, // Log the FULL response for debugging
+				"error":           err.Error(),
+				"responseLength":  len(apiResp.Text),
+				"responsePreview": llmhttp.SafeLogResponse(apiResp.Text),
 			})
 		}
 		// If JSON parsing fails, return text as summary

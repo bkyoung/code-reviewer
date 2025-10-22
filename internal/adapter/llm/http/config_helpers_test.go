@@ -89,15 +89,37 @@ func TestParseTimeout_ZeroValue(t *testing.T) {
 	assert.Equal(t, 0*time.Second, result, "Zero duration should be valid and returned")
 }
 
-func TestParseTimeout_NegativeValue(t *testing.T) {
-	// Note: time.ParseDuration actually accepts negative values
+func TestParseTimeout_NegativeValueRejected(t *testing.T) {
+	// Negative values should be rejected and fall back to global
 	override := stringPtr("-10s")
 	global := "20s"
 	defaultVal := 30 * time.Second
 
 	result := http.ParseTimeout(override, global, defaultVal)
 
-	assert.Equal(t, -10*time.Second, result, "Negative duration is technically valid")
+	assert.Equal(t, 20*time.Second, result, "Negative provider override should fall back to global")
+}
+
+func TestParseTimeout_NegativeGlobalFallsBackToDefault(t *testing.T) {
+	// Negative global should fall back to default
+	var override *string = nil
+	global := "-20s"
+	defaultVal := 30 * time.Second
+
+	result := http.ParseTimeout(override, global, defaultVal)
+
+	assert.Equal(t, 30*time.Second, result, "Negative global should fall back to default")
+}
+
+func TestParseTimeout_NegativeDefaultUsesSafeFallback(t *testing.T) {
+	// If somehow defaultVal is negative, use safe fallback
+	var override *string = nil
+	global := ""
+	defaultVal := -10 * time.Second
+
+	result := http.ParseTimeout(override, global, defaultVal)
+
+	assert.Equal(t, 60*time.Second, result, "Negative default should use 60s safe fallback")
 }
 
 func TestBuildRetryConfig_AllProviderOverrides(t *testing.T) {

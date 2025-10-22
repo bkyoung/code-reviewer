@@ -8,11 +8,22 @@ import (
 )
 
 // defaultMaxTokens sets the maximum output tokens for LLM responses.
-// This needs to be high enough to accommodate:
-// 1. Extended thinking models (Gemini 2.5 Pro, OpenAI o1/o4) which use tokens for internal reasoning
-// 2. The actual JSON response with findings
-// Gemini 2.5 Pro supports up to 32k output tokens, Claude Sonnet up to 8k.
-const defaultMaxTokens = 16384
+//
+// This is set to 8192 as a safe default that works across all providers:
+// - Claude Sonnet: max 8k output tokens
+// - GPT-4-turbo: max 4k-16k depending on variant
+// - Gemini: supports up to 32k
+//
+// Note for extended thinking models (Gemini 2.5 Pro, OpenAI o1/o3/o4):
+// These models use tokens for internal reasoning before generating output.
+// If you encounter MAX_TOKENS errors with these models, you may need to:
+//   1. Use a provider that supports higher limits (Gemini supports 32k)
+//   2. Configure a custom max tokens value per provider in your config
+//   3. Reduce the size of diffs being reviewed
+//
+// The 8k limit provides a good balance: enough for substantial code reviews
+// while preventing HTTP 400 errors from providers with lower limits.
+const defaultMaxTokens = 8192
 
 // DefaultPromptBuilder renders a structured prompt for the provider.
 func DefaultPromptBuilder(diff domain.Diff, req BranchRequest) (ProviderRequest, error) {
