@@ -17,6 +17,7 @@ import (
 	"github.com/brandon/code-reviewer/internal/adapter/llm/ollama"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/openai"
 	"github.com/brandon/code-reviewer/internal/adapter/llm/static"
+	"github.com/brandon/code-reviewer/internal/adapter/observability"
 	"github.com/brandon/code-reviewer/internal/adapter/output/json"
 	"github.com/brandon/code-reviewer/internal/adapter/output/markdown"
 	"github.com/brandon/code-reviewer/internal/adapter/output/sarif"
@@ -67,9 +68,15 @@ func run() error {
 	sarifWriter := sarif.NewWriter(nowFunc)
 
 	// Build observability components
-	observability := buildObservability(cfg.Observability)
+	obs := buildObservability(cfg.Observability)
 
-	providers := buildProviders(cfg.Providers, observability)
+	// Create review logger adapter if logging is enabled
+	var reviewLogger review.Logger
+	if obs.logger != nil {
+		reviewLogger = observability.NewReviewLogger(obs.logger)
+	}
+
+	providers := buildProviders(cfg.Providers, obs)
 
 	merger := merge.NewService()
 
@@ -111,6 +118,7 @@ func run() error {
 		SeedGenerator: determinism.GenerateSeed,
 		PromptBuilder: review.DefaultPromptBuilder,
 		Store:         reviewStore,
+		Logger:        reviewLogger,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{

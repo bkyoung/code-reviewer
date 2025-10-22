@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -120,7 +121,8 @@ type OrchestratorDeps struct {
 	Redactor      Redactor
 	SeedGenerator SeedFunc
 	PromptBuilder PromptBuilder
-	Store         Store // Optional: persistence layer for review history
+	Store         Store  // Optional: persistence layer for review history
+	Logger        Logger // Optional: structured logging for warnings and info
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -243,7 +245,14 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 
 		if err := o.deps.Store.CreateRun(ctx, run); err != nil {
 			// Log warning but continue - store failures shouldn't break reviews
-			fmt.Printf("warning: failed to create run record: %v\n", err)
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to create run record", map[string]interface{}{
+					"runID": runID,
+					"error": err.Error(),
+				})
+			} else {
+				log.Printf("warning: failed to create run record: %v\n", err)
+			}
 		}
 	}
 
@@ -346,7 +355,15 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			if runID != "" {
 				if err := o.SaveReviewToStore(ctx, runID, review); err != nil {
 					// Log warning but continue
-					fmt.Printf("warning: failed to save review to store: %v\n", err)
+					if o.deps.Logger != nil {
+						o.deps.Logger.LogWarning(ctx, "failed to save review to store", map[string]interface{}{
+							"runID":    runID,
+							"provider": name,
+							"error":    err.Error(),
+						})
+					} else {
+						log.Printf("warning: failed to save review to store: %v\n", err)
+					}
 				}
 			}
 
@@ -395,7 +412,15 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	if o.deps.Store != nil && runID != "" {
 		if err := o.deps.Store.UpdateRunCost(ctx, runID, totalCost); err != nil {
 			// Log warning but continue - store failures shouldn't break reviews
-			fmt.Printf("warning: failed to update run cost: %v\n", err)
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to update run cost", map[string]interface{}{
+					"runID":     runID,
+					"totalCost": totalCost,
+					"error":     err.Error(),
+				})
+			} else {
+				log.Printf("warning: failed to update run cost: %v\n", err)
+			}
 		}
 	}
 
@@ -443,7 +468,15 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	if runID != "" {
 		if err := o.SaveReviewToStore(ctx, runID, mergedReview); err != nil {
 			// Log warning but continue
-			fmt.Printf("warning: failed to save merged review to store: %v\n", err)
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to save merged review to store", map[string]interface{}{
+					"runID":    runID,
+					"provider": "merged",
+					"error":    err.Error(),
+				})
+			} else {
+				log.Printf("warning: failed to save merged review to store: %v\n", err)
+			}
 		}
 	}
 
