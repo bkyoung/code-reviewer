@@ -29,27 +29,27 @@ func TestDefaultLogger_RedactAPIKey(t *testing.T) {
 		{
 			name:     "full key",
 			key:      "sk-1234567890abcdef",
-			expected: "****cdef",
+			expected: "[REDACTED-cdef]",
 		},
 		{
 			name:     "anthropic key",
 			key:      "sk-ant-1234567890abcdef",
-			expected: "****cdef",
+			expected: "[REDACTED-cdef]",
 		},
 		{
 			name:     "short key",
 			key:      "abc",
-			expected: "****",
+			expected: "[REDACTED]",
 		},
 		{
 			name:     "empty key",
 			key:      "",
-			expected: "****",
+			expected: "[REDACTED]",
 		},
 		{
 			name:     "4 char key",
 			key:      "abcd",
-			expected: "****",
+			expected: "[REDACTED]",
 		},
 	}
 
@@ -81,7 +81,7 @@ func TestDefaultLogger_LogRequest_DebugLevel(t *testing.T) {
 	assert.Contains(t, output, "openai")
 	assert.Contains(t, output, "gpt-4o-mini")
 	assert.Contains(t, output, "1000")
-	assert.Contains(t, output, "****cdef")
+	assert.Contains(t, output, "[REDACTED-cdef]")
 	assert.NotContains(t, output, "sk-1234567890abcdef")
 }
 
@@ -133,7 +133,7 @@ func TestDefaultLogger_LogRequest_JSONFormat(t *testing.T) {
 	assert.Equal(t, "openai", logData["provider"])
 	assert.Equal(t, "gpt-4o-mini", logData["model"])
 	assert.Equal(t, float64(1000), logData["prompt_chars"])
-	assert.Equal(t, "****cdef", logData["api_key"])
+	assert.Equal(t, "[REDACTED-cdef]", logData["api_key"])
 }
 
 func TestDefaultLogger_LogResponse(t *testing.T) {

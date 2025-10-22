@@ -156,13 +156,13 @@ func (l *DefaultLogger) LogError(ctx context.Context, err ErrorLog) {
 	}
 }
 
-// RedactAPIKey shows only the last 4 characters of an API key.
+// RedactAPIKey shows only the last 4 characters of an API key with explicit redaction markers.
 func (l *DefaultLogger) RedactAPIKey(key string) string {
 	if !l.redactKeys {
 		return key
 	}
 	if len(key) <= 4 {
-		return "****"
+		return "[REDACTED]"
 	}
-	return fmt.Sprintf("****%s", key[len(key)-4:])
+	return fmt.Sprintf("[REDACTED-%s]", key[len(key)-4:])
 }
