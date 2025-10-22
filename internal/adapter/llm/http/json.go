@@ -23,7 +23,8 @@ var (
 //
 // This greedy approach is necessary to handle nested code blocks within JSON
 // content. For example, when LLM suggestions contain example code like:
-//   "suggestion": "Use this code:\n\n```go\nfunc main() {}\n```"
+//
+//	"suggestion": "Use this code:\n\n```go\nfunc main() {}\n```"
 //
 // The greedy regex correctly extracts the entire JSON block by matching to the
 // outermost closing backticks, not the inner ones from the code example.

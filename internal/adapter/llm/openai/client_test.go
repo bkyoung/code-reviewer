@@ -444,7 +444,7 @@ func TestHTTPClient_Call_O3Model(t *testing.T) {
 
 	seed := uint64(54321)
 	resp, err := client.Call(context.Background(), "test prompt", openai.CallOptions{
-		Temperature: 0.8, // Should be ignored for o3
+		Temperature: 0.8,   // Should be ignored for o3
 		Seed:        &seed, // Should be ignored for o3
 		MaxTokens:   3000,
 	})

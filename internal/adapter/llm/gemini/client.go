@@ -284,11 +284,11 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 	// Log if we got an empty response for debugging
 	if c.logger != nil && responseText == "" {
 		c.logger.LogWarning(ctx, "Gemini returned empty response", map[string]interface{}{
-			"finishReason":      candidate.FinishReason,
-			"numParts":          len(candidate.Content.Parts),
-			"numCandidates":     len(genResp.Candidates),
-			"tokensOut":         genResp.UsageMetadata.CandidatesTokenCount,
-			"responsePreview":   llmhttp.SafeLogResponse(string(bodyBytes)),
+			"finishReason":        candidate.FinishReason,
+			"numParts":            len(candidate.Content.Parts),
+			"numCandidates":       len(genResp.Candidates),
+			"tokensOut":           genResp.UsageMetadata.CandidatesTokenCount,
+			"responsePreview":     llmhttp.SafeLogResponse(string(bodyBytes)),
 			"responseLengthBytes": len(bodyBytes),
 		})
 	}

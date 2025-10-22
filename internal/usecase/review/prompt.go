@@ -17,9 +17,9 @@ import (
 // Note for extended thinking models (Gemini 2.5 Pro, OpenAI o1/o3/o4):
 // These models use tokens for internal reasoning before generating output.
 // If you encounter MAX_TOKENS errors with these models, you may need to:
-//   1. Use a provider that supports higher limits (Gemini supports 32k)
-//   2. Configure a custom max tokens value per provider in your config
-//   3. Reduce the size of diffs being reviewed
+//  1. Use a provider that supports higher limits (Gemini supports 32k)
+//  2. Configure a custom max tokens value per provider in your config
+//  3. Reduce the size of diffs being reviewed
 //
 // The 8k limit provides a good balance: enough for substantial code reviews
 // while preventing HTTP 400 errors from providers with lower limits.
