@@ -7,7 +7,12 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
-const defaultMaxTokens = 4096
+// defaultMaxTokens sets the maximum output tokens for LLM responses.
+// This needs to be high enough to accommodate:
+// 1. Extended thinking models (Gemini 2.5 Pro, OpenAI o1/o4) which use tokens for internal reasoning
+// 2. The actual JSON response with findings
+// Gemini 2.5 Pro supports up to 32k output tokens, Claude Sonnet up to 8k.
+const defaultMaxTokens = 16384
 
 // DefaultPromptBuilder renders a structured prompt for the provider.
 func DefaultPromptBuilder(diff domain.Diff, req BranchRequest) (ProviderRequest, error) {

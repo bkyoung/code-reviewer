@@ -19,6 +19,26 @@ import (
 const (
 	defaultBaseURL = "https://generativelanguage.googleapis.com"
 	defaultTimeout = 60 * time.Second
+
+	// systemInstruction is the system instruction for Gemini to return structured JSON.
+	// Gemini requires explicit formatting instructions unlike OpenAI/Anthropic.
+	systemInstruction = `You are a code review assistant. Analyze the code and provide feedback in JSON format.
+
+Return your response as JSON wrapped in a markdown code block like this:
+` + "```json\n" + `{
+  "summary": "Brief overview of the code changes",
+  "findings": [
+    {
+      "severity": "error|warning|info",
+      "category": "bug|style|performance|security|maintainability",
+      "message": "Description of the issue",
+      "file": "path/to/file.ext",
+      "line": 42,
+      "suggestion": "How to fix it (optional)"
+    }
+  ]
+}
+` + "```"
 )
 
 // HTTPClient is an HTTP client for the Google Gemini API.
@@ -116,23 +136,7 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 	reqBody := GenerateContentRequest{
 		SystemInstruction: &Content{
 			Parts: []Part{
-				{Text: `You are a code review assistant. Analyze the code and provide feedback in JSON format.
-
-Return your response as JSON wrapped in a markdown code block like this:
-` + "```json\n" + `{
-  "summary": "Brief overview of the code changes",
-  "findings": [
-    {
-      "severity": "error|warning|info",
-      "category": "bug|style|performance|security|maintainability",
-      "message": "Description of the issue",
-      "file": "path/to/file.ext",
-      "line": 42,
-      "suggestion": "How to fix it (optional)"
-    }
-  ]
-}
-` + "```"},
+				{Text: systemInstruction},
 			},
 		},
 		Contents: []Content{
@@ -275,8 +279,21 @@ Return your response as JSON wrapped in a markdown code block like this:
 		textParts = append(textParts, part.Text)
 	}
 
+	responseText := strings.Join(textParts, "")
+
+	// Log if we got an empty response for debugging
+	if c.logger != nil && responseText == "" {
+		c.logger.LogWarning(ctx, "Gemini returned empty response", map[string]interface{}{
+			"finishReason":    candidate.FinishReason,
+			"numParts":        len(candidate.Content.Parts),
+			"numCandidates":   len(genResp.Candidates),
+			"tokensOut":       genResp.UsageMetadata.CandidatesTokenCount,
+			"rawResponseBody": string(bodyBytes),
+		})
+	}
+
 	response := &APIResponse{
-		Text:         strings.Join(textParts, ""),
+		Text:         responseText,
 		TokensIn:     genResp.UsageMetadata.PromptTokenCount,
 		TokensOut:    genResp.UsageMetadata.CandidatesTokenCount,
 		FinishReason: candidate.FinishReason,
