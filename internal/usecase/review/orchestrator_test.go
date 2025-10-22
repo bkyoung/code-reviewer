@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
@@ -708,5 +709,96 @@ func TestReviewBranch_CostTracking(t *testing.T) {
 	expectedTotalCost := 0.08
 	if run.TotalCost != expectedTotalCost {
 		t.Errorf("expected total cost $%.4f, got $%.4f", expectedTotalCost, run.TotalCost)
+	}
+}
+
+// blockingProvider simulates a slow HTTP request that blocks until context is cancelled
+type blockingProvider struct {
+	mu               sync.Mutex
+	contextCancelled bool
+}
+
+func (b *blockingProvider) Review(ctx context.Context, req review.ProviderRequest) (domain.Review, error) {
+	// Wait for context cancellation
+	<-ctx.Done()
+
+	b.mu.Lock()
+	b.contextCancelled = true
+	b.mu.Unlock()
+
+	return domain.Review{}, ctx.Err()
+}
+
+func TestOrchestrator_ContextCancellation(t *testing.T) {
+	// Test that when context is cancelled (e.g., CTRL+C), all in-flight operations abort promptly
+	ctx, cancel := context.WithCancel(context.Background())
+
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "test.go", Status: "modified", Patch: "diff content"},
+		},
+	}
+
+	blockingProv := &blockingProvider{}
+	gitMock := &mockGitEngine{diff: diff}
+	writerMock := &mockMarkdownWriter{}
+	jsonWriterMock := &mockJSONWriter{}
+	sarifWriterMock := &mockSARIFWriter{}
+	mergerMock := &mockMerger{}
+
+	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
+		Git: gitMock,
+		Providers: map[string]review.Provider{
+			"slow-provider": blockingProv,
+		},
+		Merger:        mergerMock,
+		Markdown:      writerMock,
+		JSON:          jsonWriterMock,
+		SARIF:         sarifWriterMock,
+		SeedGenerator: func(_, _ string) uint64 { return 42 },
+		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+			return review.ProviderRequest{Prompt: "prompt", Seed: 42, MaxSize: 8192}, nil
+		},
+	})
+
+	// Run ReviewBranch in a goroutine
+	done := make(chan struct{})
+	var reviewErr error
+	go func() {
+		_, reviewErr = orchestrator.ReviewBranch(ctx, review.BranchRequest{
+			BaseRef:    "main",
+			TargetRef:  "feature",
+			OutputDir:  t.TempDir(),
+			Repository: "test-repo",
+		})
+		close(done)
+	}()
+
+	// Give the goroutine a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the context (simulating CTRL+C)
+	cancel()
+
+	// Wait for ReviewBranch to complete (should be prompt)
+	select {
+	case <-done:
+		// Good! The operation completed promptly
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReviewBranch did not abort within 2 seconds of context cancellation")
+	}
+
+	// Verify the provider detected the cancellation
+	blockingProv.mu.Lock()
+	cancelled := blockingProv.contextCancelled
+	blockingProv.mu.Unlock()
+
+	if !cancelled {
+		t.Error("expected provider to detect context cancellation")
+	}
+
+	// Verify the error is context-related
+	if reviewErr == nil {
+		t.Error("expected an error after context cancellation")
 	}
 }
