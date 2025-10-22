@@ -37,10 +37,11 @@ func TestReviewLogger_LogWarning(t *testing.T) {
 	})
 
 	output := buf.String()
-	assert.Contains(t, output, "warning:")
+	assert.Contains(t, output, "[WARN]")
 	assert.Contains(t, output, "failed to save review")
-	assert.Contains(t, output, "run-123")
-	assert.Contains(t, output, "openai")
+	assert.Contains(t, output, "runID=run-123")
+	assert.Contains(t, output, "provider=openai")
+	assert.Contains(t, output, "error=database connection failed")
 }
 
 func TestReviewLogger_LogInfo(t *testing.T) {
@@ -60,8 +61,9 @@ func TestReviewLogger_LogInfo(t *testing.T) {
 	})
 
 	output := buf.String()
-	assert.Contains(t, output, "info:")
+	assert.Contains(t, output, "[INFO]")
 	assert.Contains(t, output, "review completed successfully")
-	assert.Contains(t, output, "run-456")
-	assert.Contains(t, output, "anthropic")
+	assert.Contains(t, output, "runID=run-456")
+	assert.Contains(t, output, "provider=anthropic")
+	assert.Contains(t, output, "totalCost=0.05")
 }

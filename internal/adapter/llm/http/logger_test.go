@@ -339,9 +339,9 @@ func TestDefaultLogger_LogInfo_JSON(t *testing.T) {
 
 func TestDefaultLogger_LogWarning_RespectLogLevel(t *testing.T) {
 	tests := []struct {
-		name           string
-		logLevel       http.LogLevel
-		shouldLog      bool
+		name      string
+		logLevel  http.LogLevel
+		shouldLog bool
 	}{
 		{"Debug level logs warnings", http.LogLevelDebug, true},
 		{"Info level logs warnings", http.LogLevelInfo, true},
@@ -369,9 +369,9 @@ func TestDefaultLogger_LogWarning_RespectLogLevel(t *testing.T) {
 
 func TestDefaultLogger_LogInfo_RespectLogLevel(t *testing.T) {
 	tests := []struct {
-		name           string
-		logLevel       http.LogLevel
-		shouldLog      bool
+		name      string
+		logLevel  http.LogLevel
+		shouldLog bool
 	}{
 		{"Debug level logs info", http.LogLevelDebug, true},
 		{"Info level logs info", http.LogLevelInfo, true},
