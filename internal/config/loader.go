@@ -67,8 +67,28 @@ func expandEnvVars(cfg Config) Config {
 	for name, provider := range cfg.Providers {
 		provider.APIKey = expandEnvString(provider.APIKey)
 		provider.Model = expandEnvString(provider.Model)
+
+		// Expand provider-specific HTTP overrides
+		if provider.Timeout != nil {
+			timeout := expandEnvString(*provider.Timeout)
+			provider.Timeout = &timeout
+		}
+		if provider.InitialBackoff != nil {
+			backoff := expandEnvString(*provider.InitialBackoff)
+			provider.InitialBackoff = &backoff
+		}
+		if provider.MaxBackoff != nil {
+			backoff := expandEnvString(*provider.MaxBackoff)
+			provider.MaxBackoff = &backoff
+		}
+
 		cfg.Providers[name] = provider
 	}
+
+	// Expand HTTP config
+	cfg.HTTP.Timeout = expandEnvString(cfg.HTTP.Timeout)
+	cfg.HTTP.InitialBackoff = expandEnvString(cfg.HTTP.InitialBackoff)
+	cfg.HTTP.MaxBackoff = expandEnvString(cfg.HTTP.MaxBackoff)
 
 	// Expand merge config
 	cfg.Merge.Provider = expandEnvString(cfg.Merge.Provider)
@@ -157,6 +177,13 @@ func locateConfigFile(name string, paths []string) string {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("output.directory", "out")
+
+	// HTTP defaults
+	v.SetDefault("http.timeout", "60s")
+	v.SetDefault("http.maxRetries", 5)
+	v.SetDefault("http.initialBackoff", "2s")
+	v.SetDefault("http.maxBackoff", "32s")
+	v.SetDefault("http.backoffMultiplier", 2.0)
 
 	// Determinism defaults (Phase 2)
 	v.SetDefault("determinism.enabled", true)

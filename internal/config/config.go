@@ -3,6 +3,7 @@ package config
 // Config represents the full application configuration.
 type Config struct {
 	Providers     map[string]ProviderConfig `yaml:"providers"`
+	HTTP          HTTPConfig                `yaml:"http"`
 	Merge         MergeConfig               `yaml:"merge"`
 	Git           GitConfig                 `yaml:"git"`
 	Output        OutputConfig              `yaml:"output"`
@@ -18,6 +19,21 @@ type ProviderConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"apiKey"`
+
+	// HTTP overrides (optional, use global HTTP config if not set)
+	Timeout        *string `yaml:"timeout,omitempty"`
+	MaxRetries     *int    `yaml:"maxRetries,omitempty"`
+	InitialBackoff *string `yaml:"initialBackoff,omitempty"`
+	MaxBackoff     *string `yaml:"maxBackoff,omitempty"`
+}
+
+// HTTPConfig holds global HTTP client settings.
+type HTTPConfig struct {
+	Timeout           string  `yaml:"timeout"`
+	MaxRetries        int     `yaml:"maxRetries"`
+	InitialBackoff    string  `yaml:"initialBackoff"`
+	MaxBackoff        string  `yaml:"maxBackoff"`
+	BackoffMultiplier float64 `yaml:"backoffMultiplier"`
 }
 
 type MergeConfig struct {
@@ -90,6 +106,7 @@ func Merge(configs ...Config) Config {
 func merge(base, overlay Config) Config {
 	result := base
 
+	result.HTTP = chooseHTTP(base.HTTP, overlay.HTTP)
 	result.Output = chooseOutput(base.Output, overlay.Output)
 	result.Git = chooseGit(base.Git, overlay.Git)
 	result.Budget = chooseBudget(base.Budget, overlay.Budget)
@@ -126,6 +143,13 @@ func chooseOutput(base, overlay OutputConfig) OutputConfig {
 
 func chooseGit(base, overlay GitConfig) GitConfig {
 	if overlay.RepositoryDir != "" {
+		return overlay
+	}
+	return base
+}
+
+func chooseHTTP(base, overlay HTTPConfig) HTTPConfig {
+	if overlay.Timeout != "" || overlay.MaxRetries != 0 || overlay.InitialBackoff != "" || overlay.MaxBackoff != "" || overlay.BackoffMultiplier != 0 {
 		return overlay
 	}
 	return base

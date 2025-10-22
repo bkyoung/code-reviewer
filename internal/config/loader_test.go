@@ -267,3 +267,65 @@ func TestExpandEnvVars_Comprehensive(t *testing.T) {
 	assert.Equal(t, "error", expanded.Observability.Logging.Level)
 	assert.Equal(t, "/data/reviews.db", expanded.Store.Path)
 }
+
+func TestHTTPConfigDefaults(t *testing.T) {
+	cfg, err := Load(LoaderOptions{
+		ConfigPaths: []string{"testdata"},
+		FileName:    "nonexistent", // Should use defaults
+	})
+	assert.NoError(t, err)
+
+	// Verify HTTP defaults
+	assert.Equal(t, "60s", cfg.HTTP.Timeout)
+	assert.Equal(t, 5, cfg.HTTP.MaxRetries)
+	assert.Equal(t, "2s", cfg.HTTP.InitialBackoff)
+	assert.Equal(t, "32s", cfg.HTTP.MaxBackoff)
+	assert.Equal(t, 2.0, cfg.HTTP.BackoffMultiplier)
+}
+
+func TestExpandEnvVars_HTTPConfig(t *testing.T) {
+	os.Setenv("HTTP_TIMEOUT", "120s")
+	os.Setenv("HTTP_BACKOFF", "5s")
+	defer os.Unsetenv("HTTP_TIMEOUT")
+	defer os.Unsetenv("HTTP_BACKOFF")
+
+	cfg := Config{
+		HTTP: HTTPConfig{
+			Timeout:        "${HTTP_TIMEOUT}",
+			InitialBackoff: "${HTTP_BACKOFF}",
+			MaxBackoff:     "30s", // Plain string
+		},
+	}
+
+	expanded := expandEnvVars(cfg)
+
+	assert.Equal(t, "120s", expanded.HTTP.Timeout)
+	assert.Equal(t, "5s", expanded.HTTP.InitialBackoff)
+	assert.Equal(t, "30s", expanded.HTTP.MaxBackoff)
+}
+
+func TestExpandEnvVars_ProviderHTTPOverrides(t *testing.T) {
+	os.Setenv("OLLAMA_TIMEOUT", "180s")
+	defer os.Unsetenv("OLLAMA_TIMEOUT")
+
+	timeout := "${OLLAMA_TIMEOUT}"
+	maxRetries := 3
+
+	cfg := Config{
+		Providers: map[string]ProviderConfig{
+			"ollama": {
+				Enabled:    true,
+				Model:      "llama2",
+				Timeout:    &timeout,
+				MaxRetries: &maxRetries,
+			},
+		},
+	}
+
+	expanded := expandEnvVars(cfg)
+
+	assert.NotNil(t, expanded.Providers["ollama"].Timeout)
+	assert.Equal(t, "180s", *expanded.Providers["ollama"].Timeout)
+	assert.NotNil(t, expanded.Providers["ollama"].MaxRetries)
+	assert.Equal(t, 3, *expanded.Providers["ollama"].MaxRetries)
+}
