@@ -410,6 +410,48 @@ func TestHTTPClient_Call_O4Model(t *testing.T) {
 	assert.NotEmpty(t, resp.Text)
 }
 
+func TestHTTPClient_Call_O3Model(t *testing.T) {
+	// Test that o3 models use max_completion_tokens (like o1/o4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify o3 model uses max_completion_tokens
+		assert.Equal(t, 3000, req.MaxCompletionTokens, "o3 models should use max_completion_tokens")
+		assert.Equal(t, 0, req.MaxTokens, "o3 models should not set max_tokens")
+
+		// Verify o3 models don't send temperature or seed
+		assert.Equal(t, 0.0, req.Temperature, "o3 models should not set temperature")
+		assert.Nil(t, req.Seed, "o3 models should not set seed")
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "o3-mini",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "o3 response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 8, CompletionTokens: 12, TotalTokens: 20},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("test-key", "o3-mini", testProviderConfig(), testHTTPConfig())
+	client.SetBaseURL(server.URL)
+
+	seed := uint64(54321)
+	resp, err := client.Call(context.Background(), "test prompt", openai.CallOptions{
+		Temperature: 0.8, // Should be ignored for o3
+		Seed:        &seed, // Should be ignored for o3
+		MaxTokens:   3000,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "o3 response", resp.Text)
+}
+
 func TestHTTPClient_Call_RegularModel_UsesTemperatureAndSeed(t *testing.T) {
 	// Verify regular models (non-o1) still use temperature, seed, and max_tokens
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

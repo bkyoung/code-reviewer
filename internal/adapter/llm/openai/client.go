@@ -21,13 +21,14 @@ const (
 	defaultTimeout = 60 * time.Second
 )
 
-// isO1Model returns true if the model is an o1-series reasoning model.
-// These models have different API requirements:
-// - Use max_completion_tokens instead of max_tokens
-// - Don't support temperature, seed, or response_format
+// isO1Model checks if the model is an OpenAI reasoning model (o1, o3, o4 series).
+// These models use max_completion_tokens instead of max_tokens and don't support
+// temperature, seed, or response_format parameters.
 func isO1Model(model string) bool {
 	modelLower := strings.ToLower(model)
-	return strings.HasPrefix(modelLower, "o1-") || strings.HasPrefix(modelLower, "o4-")
+	return strings.HasPrefix(modelLower, "o1-") ||
+	       strings.HasPrefix(modelLower, "o3-") ||
+	       strings.HasPrefix(modelLower, "o4-")
 }
 
 // HTTPClient is an HTTP client for the OpenAI API.
