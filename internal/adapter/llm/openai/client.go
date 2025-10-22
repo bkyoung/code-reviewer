@@ -26,10 +26,13 @@ const (
 // temperature, seed, or response_format parameters.
 func isO1Model(model string) bool {
 	modelLower := strings.ToLower(model)
-	// Check for exact matches (e.g., "o1", "o3", "o4") or prefixes (e.g., "o1-mini", "o3-mini")
-	return modelLower == "o1" || strings.HasPrefix(modelLower, "o1-") ||
-	       modelLower == "o3" || strings.HasPrefix(modelLower, "o3-") ||
-	       modelLower == "o4" || strings.HasPrefix(modelLower, "o4-")
+	reasoningModelFamilies := []string{"o1", "o3", "o4"}
+	for _, family := range reasoningModelFamilies {
+		if modelLower == family || strings.HasPrefix(modelLower, family+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // HTTPClient is an HTTP client for the OpenAI API.

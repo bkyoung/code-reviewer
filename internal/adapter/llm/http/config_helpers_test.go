@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
+	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/stretchr/testify/assert"
 )
@@ -24,7 +24,7 @@ func TestParseTimeout_ProviderOverrideTakesPrecedence(t *testing.T) {
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 10*time.Second, result, "Provider override should take precedence")
 }
@@ -34,7 +34,7 @@ func TestParseTimeout_GlobalFallback(t *testing.T) {
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 20*time.Second, result, "Should use global config when no provider override")
 }
@@ -44,7 +44,7 @@ func TestParseTimeout_DefaultFallback(t *testing.T) {
 	global := ""
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 30*time.Second, result, "Should use default when no override or global")
 }
@@ -54,7 +54,7 @@ func TestParseTimeout_InvalidProviderOverrideFallsBackToGlobal(t *testing.T) {
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 20*time.Second, result, "Invalid provider override should fall back to global")
 }
@@ -64,7 +64,7 @@ func TestParseTimeout_InvalidGlobalFallsBackToDefault(t *testing.T) {
 	global := "not-a-duration"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 30*time.Second, result, "Invalid global should fall back to default")
 }
@@ -74,7 +74,7 @@ func TestParseTimeout_EmptyStringProviderOverrideFallsBackToGlobal(t *testing.T)
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 20*time.Second, result, "Empty string override should fall back to global")
 }
@@ -84,7 +84,7 @@ func TestParseTimeout_ZeroValue(t *testing.T) {
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 0*time.Second, result, "Zero duration should be valid and returned")
 }
@@ -95,7 +95,7 @@ func TestParseTimeout_NegativeValueRejected(t *testing.T) {
 	global := "20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 20*time.Second, result, "Negative provider override should fall back to global")
 }
@@ -106,7 +106,7 @@ func TestParseTimeout_NegativeGlobalFallsBackToDefault(t *testing.T) {
 	global := "-20s"
 	defaultVal := 30 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 30*time.Second, result, "Negative global should fall back to default")
 }
@@ -117,7 +117,7 @@ func TestParseTimeout_NegativeDefaultUsesSafeFallback(t *testing.T) {
 	global := ""
 	defaultVal := -10 * time.Second
 
-	result := http.ParseTimeout(override, global, defaultVal)
+	result := llmhttp.ParseTimeout(override, global, defaultVal)
 
 	assert.Equal(t, 60*time.Second, result, "Negative default should use 60s safe fallback")
 }
@@ -136,7 +136,7 @@ func TestBuildRetryConfig_AllProviderOverrides(t *testing.T) {
 		BackoffMultiplier: 2.5,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 3, result.MaxRetries, "Should use provider max retries")
 	assert.Equal(t, 1*time.Second, result.InitialBackoff, "Should use provider initial backoff")
@@ -156,7 +156,7 @@ func TestBuildRetryConfig_GlobalFallbacks(t *testing.T) {
 		BackoffMultiplier: 3.0,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 5, result.MaxRetries, "Should use global max retries")
 	assert.Equal(t, 3*time.Second, result.InitialBackoff, "Should use global initial backoff")
@@ -176,7 +176,7 @@ func TestBuildRetryConfig_DefaultFallbacks(t *testing.T) {
 		BackoffMultiplier: 2.0,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 5, result.MaxRetries, "Should use global max retries")
 	assert.Equal(t, 2*time.Second, result.InitialBackoff, "Should use default initial backoff (2s)")
@@ -197,7 +197,7 @@ func TestBuildRetryConfig_InvalidProviderValuesFallBackToGlobal(t *testing.T) {
 		BackoffMultiplier: 2.0,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 3*time.Second, result.InitialBackoff, "Invalid provider should fall back to global")
 	assert.Equal(t, 40*time.Second, result.MaxBackoff, "Invalid provider should fall back to global")
@@ -215,7 +215,7 @@ func TestBuildRetryConfig_ZeroMaxRetries(t *testing.T) {
 		BackoffMultiplier: 2.0,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 0, result.MaxRetries, "Zero max retries should be valid (disables retries)")
 }
@@ -234,7 +234,7 @@ func TestBuildRetryConfig_MixedOverridesAndFallbacks(t *testing.T) {
 		BackoffMultiplier: 2.5,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 10, result.MaxRetries, "Should use provider max retries")
 	assert.Equal(t, 5*time.Second, result.InitialBackoff, "Should use provider initial backoff")
@@ -255,7 +255,7 @@ func TestBuildRetryConfig_EmptyStringProviderOverrides(t *testing.T) {
 		BackoffMultiplier: 2.0,
 	}
 
-	result := http.BuildRetryConfig(providerCfg, httpCfg)
+	result := llmhttp.BuildRetryConfig(providerCfg, httpCfg)
 
 	assert.Equal(t, 3*time.Second, result.InitialBackoff, "Empty string override should fall back to global")
 	assert.Equal(t, 40*time.Second, result.MaxBackoff, "Empty string override should fall back to global")
