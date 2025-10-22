@@ -3,6 +3,7 @@ package sarif_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -189,4 +190,91 @@ func TestWriter_Write_IncludesCostInProperties(t *testing.T) {
 	properties := run["properties"].(map[string]interface{})
 	assert.Equal(t, 0.0523, properties["cost"])
 	assert.Equal(t, "Test review", properties["summary"])
+}
+
+func TestWriter_Write_HandlesInvalidCost(t *testing.T) {
+	now := func() string { return "2025-10-20T12-00-00" }
+
+	tests := []struct {
+		name          string
+		cost          float64
+		shouldInclude bool
+	}{
+		{
+			name:          "valid cost",
+			cost:          1.23,
+			shouldInclude: true,
+		},
+		{
+			name:          "zero cost",
+			cost:          0.0,
+			shouldInclude: true,
+		},
+		{
+			name:          "NaN cost",
+			cost:          math.NaN(),
+			shouldInclude: false,
+		},
+		{
+			name:          "positive infinity",
+			cost:          math.Inf(1),
+			shouldInclude: false,
+		},
+		{
+			name:          "negative infinity",
+			cost:          math.Inf(-1),
+			shouldInclude: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			testReview := domain.Review{
+				ProviderName: "openai",
+				ModelName:    "gpt-4o",
+				Summary:      "Test review",
+				Cost:         tt.cost,
+				Findings:     []domain.Finding{},
+			}
+
+			writer := sarif.NewWriter(now)
+			artifact := review.SARIFArtifact{
+				OutputDir:    tmpDir,
+				Repository:   "test-repo",
+				BaseRef:      "main",
+				TargetRef:    "feature",
+				Review:       testReview,
+				ProviderName: "openai",
+			}
+
+			path, err := writer.Write(context.Background(), artifact)
+			require.NoError(t, err)
+
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			var sarifDoc map[string]interface{}
+			err = json.Unmarshal(content, &sarifDoc)
+			require.NoError(t, err)
+
+			// Verify cost handling in properties
+			runs := sarifDoc["runs"].([]interface{})
+			require.Len(t, runs, 1)
+
+			run := runs[0].(map[string]interface{})
+			properties := run["properties"].(map[string]interface{})
+
+			if tt.shouldInclude {
+				assert.Contains(t, properties, "cost", "valid cost should be included")
+				assert.Equal(t, tt.cost, properties["cost"])
+			} else {
+				assert.NotContains(t, properties, "cost", "invalid cost should be excluded")
+			}
+
+			// Summary should always be included
+			assert.Equal(t, "Test review", properties["summary"])
+		})
+	}
 }

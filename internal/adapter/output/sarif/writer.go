@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
+	"github.com/brandon/code-reviewer/internal/domain"
 	"github.com/brandon/code-reviewer/internal/usecase/review"
 )
 
@@ -107,15 +109,27 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 						},
 					},
 				},
-				"results": results,
-				"properties": map[string]interface{}{
-					"cost":    artifact.Review.Cost,
-					"summary": artifact.Review.Summary,
-					"model":   artifact.Review.ModelName,
-				},
+				"results":    results,
+				"properties": buildProperties(artifact.Review),
 			},
 		},
 	}
+}
+
+// buildProperties creates the properties map for SARIF run, validating cost.
+func buildProperties(review domain.Review) map[string]interface{} {
+	properties := map[string]interface{}{
+		"summary": review.Summary,
+		"model":   review.ModelName,
+	}
+
+	// Only include cost if it's a valid number (not NaN or Inf)
+	// JSON encoding will fail on NaN and Inf values
+	if !math.IsNaN(review.Cost) && !math.IsInf(review.Cost, 0) {
+		properties["cost"] = review.Cost
+	}
+
+	return properties
 }
 
 // convertSeverity maps our severity levels to SARIF levels.
