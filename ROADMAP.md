@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**v0.1.5 - Configurable HTTP Settings** ✅
+**v0.1.6 - Security & Reliability Improvements** ✅
 
 The code reviewer now has:
 - ✅ Multi-provider LLM support (OpenAI, Anthropic, Gemini, Ollama)
@@ -12,6 +12,9 @@ The code reviewer now has:
 - ✅ Shared JSON parsing utilities - Zero duplication across LLM clients
 - ✅ **Complete environment variable expansion** - All config sections supported
 - ✅ **Configurable HTTP settings** - Global and per-provider timeout, retry, backoff config
+- ✅ **Graceful shutdown** - SIGINT/SIGTERM cancels in-flight requests promptly
+- ✅ **API key protection** - URL secrets redacted from all error outputs
+- ✅ **Shell path expansion** - Tilde (~) expansion for home directory paths
 - ✅ SQLite-based review persistence
 - ✅ Multiple output formats (Markdown, JSON, SARIF)
 - ✅ Configuration system with full env var support (${VAR} and $VAR syntax)
@@ -19,7 +22,7 @@ The code reviewer now has:
 - ✅ Deterministic reviews for CI/CD
 - ✅ Production-ready retry logic with edge case handling
 - ✅ Clean architecture integrity - Intentional duplication documented
-- ✅ All unit and integration tests passing (180+ tests)
+- ✅ All unit and integration tests passing (187+ tests)
 - ✅ Zero data races (verified with race detector)
 
 ## Near-Term Enhancements
@@ -415,6 +418,94 @@ This work included three phases of fixes based on comprehensive code review feed
 
 **Feedback sources**: Comprehensive code reviews from OpenAI o3, Anthropic Claude, and Gemini 2.5 Pro identified these issues and recommendations (Oct 22, 2025).
 
+### ✅ Security & Reliability Improvements (v0.1.6)
+**Fixed**: 2025-10-22
+**Locations**: `cmd/cr/main.go`, `internal/config/loader.go`, `internal/adapter/llm/http/logging.go`, `internal/adapter/llm/http/logger.go`
+**Severity**: HIGH (security + reliability)
+
+This release addresses three critical bugs discovered during manual testing:
+
+#### 1. Graceful Shutdown on SIGINT/SIGTERM
+**Location**: `cmd/cr/main.go:45-47`
+**Severity**: HIGH (resource leaks, orphaned goroutines)
+
+**Problem**: When users pressed CTRL+C during long-running reviews, the main process exited but goroutines making HTTP requests to LLM providers continued running in the background. This caused:
+- Resource leaks (open connections, goroutines)
+- Wasted API costs (requests completing after user cancellation)
+- Inability to interrupt slow/stuck operations
+
+**Root Cause**: Application used `context.Background()` which never gets cancelled, so goroutines had no signal to abort when the process received SIGINT.
+
+**Solution**:
+- Replaced `context.Background()` with `signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)`
+- Context now automatically cancels when SIGINT or SIGTERM received
+- All goroutines detect cancellation via `ctx.Done()` and abort promptly
+- HTTP clients respect context cancellation and stop in-flight requests
+- Comprehensive test coverage (`TestOrchestrator_ContextCancellation`)
+
+**Impact**: Reviews can now be safely interrupted with CTRL+C. All goroutines and HTTP requests abort within 2 seconds of cancellation signal. No more orphaned processes or wasted API calls.
+
+#### 2. Tilde Expansion for Database Paths
+**Location**: `internal/config/loader.go:123-141`
+**Severity**: MEDIUM (incorrect file locations)
+
+**Problem**: Configuration paths like `~/.config/cr/reviews.db` were interpreted literally as `$REPO_ROOT/~/.config/cr/reviews.db`, creating a directory named `~` in the repository root instead of expanding to the user's home directory.
+
+**Root Cause**: The `expandEnvString()` function only handled `${VAR}` and `$VAR` syntax but didn't implement shell-style tilde expansion.
+
+**Solution**:
+- Added tilde expansion to `expandEnvString()` following shell conventions
+- Only expands `~` when it appears at the start of the path
+- Handles `~` (home dir), `~/` (home dir with slash), and `~/path` (home dir + path)
+- Uses `os.UserHomeDir()` for cross-platform compatibility
+- Special handling for `~/` to preserve trailing slash
+- Comprehensive test coverage (7 new tests for tilde expansion)
+
+**Impact**: Database files and other configured paths now correctly resolve to user's home directory. No more accidental creation of `~` directories in repository roots.
+
+#### 3. API Key Redaction in Error Messages
+**Location**: `internal/adapter/llm/http/logging.go:52-92`, `internal/adapter/llm/http/logger.go:149-150`, `cmd/cr/main.go:39`
+**Severity**: HIGH (security - API key exposure)
+
+**Problem**: When Gemini API requests failed (e.g., timeout, cancellation), error messages contained full URLs with API keys visible in query parameters like `?key=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`. API keys appeared in TWO locations:
+1. Structured logger output (DefaultLogger.LogError)
+2. Main error output (main function's log.Println)
+
+**Root Cause**: Go's HTTP client includes full request URLs in error messages. Gemini uses API keys as query parameters instead of headers, causing keys to appear in error text. No sanitization was applied before logging.
+
+**Solution**:
+- Created `RedactURLSecrets()` function in `logging.go` with regex-based redaction
+- Redacts common secret patterns: `key=`, `apiKey=`, `api_key=`, `token=`, `access_token=`
+- Applied redaction in TWO locations to prevent dual exposure:
+  - DefaultLogger.LogError: Redacts before structured logging
+  - main.go error output: Redacts before terminal output
+- Preserves error context (domain, endpoint, error type) while hiding secrets
+- Comprehensive test coverage (6 new tests for URL redaction)
+
+**Impact**: API keys can no longer leak through error messages or logs. Both terminal output and structured logs show `key=[REDACTED]` instead of actual keys. Users can still debug errors (domain, endpoint visible) without exposing credentials.
+
+#### Summary
+
+**Changes**:
+- Added signal handling for graceful shutdown (1 test)
+- Implemented tilde expansion for shell-style paths (7 tests)
+- Created URL secret redaction utilities (6 tests)
+- Applied redaction at both logger and main error output levels
+- All 187+ tests passing with zero data races
+
+**Commits**:
+- 4c7dfb5: "Add graceful shutdown on SIGINT/SIGTERM"
+- 6551a81: "Fix tilde expansion and add API key redaction to logger"
+- 0fd8ca8: "Fix API key exposure in main error output"
+
+**Impact**:
+- **Security**: API keys can no longer leak through error messages
+- **Reliability**: CTRL+C properly cancels all in-flight operations
+- **Correctness**: Configuration paths expand correctly using shell conventions
+- **User Experience**: Graceful interruption, no orphaned processes, proper file locations
+
+**Discovery**: All three bugs found during manual testing after v0.1.5 release. User reported CTRL+C not working, database created in wrong location, and API keys visible in Gemini error messages.
+
 ## Future Features (Deferred)
 
 ### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
@@ -550,7 +641,7 @@ When adding new features:
 - Comprehensive test coverage (6 new tests, 20+ assertions)
 - 140+ tests passing with zero data races
 
-### v0.1.5 (Current)
+### v0.1.5 (Released)
 - Configurable HTTP settings (timeout, retries, backoff)
 - Global HTTP config with per-provider overrides
 - Environment variable expansion for HTTP config
@@ -561,6 +652,13 @@ When adding new features:
 - Token limit adjustments (8k default for cross-provider compatibility)
 - Code quality improvements (import alias fix, isO1Model refactor)
 - 180+ tests passing with zero data races
+
+### v0.1.6 (Current)
+- Graceful shutdown on SIGINT/SIGTERM
+- Tilde expansion for configuration paths
+- API key redaction in error messages and logs
+- Context cancellation for in-flight HTTP requests
+- 187+ tests passing with zero data races
 
 ### v0.2.0 (Future)
 - TUI for review history
