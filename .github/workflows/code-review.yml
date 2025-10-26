@@ -37,9 +37,24 @@ jobs:
       - name: Find review files
         id: find-files
         run: |
+          # Debug: show what files were created
+          echo "Contents of review-output directory:"
+          ls -la review-output/ || echo "review-output directory does not exist"
+
           # Find the markdown and SARIF files (pattern: review-{provider}.md)
-          MARKDOWN_FILE=$(ls review-output/review-*.md | head -1)
-          SARIF_FILE=$(ls review-output/review-*.sarif | head -1)
+          if [ ! -d "review-output" ]; then
+            echo "Error: review-output directory was not created"
+            exit 1
+          fi
+
+          MARKDOWN_FILE=$(ls review-output/review-*.md 2>/dev/null | head -1 || echo "")
+          SARIF_FILE=$(ls review-output/review-*.sarif 2>/dev/null | head -1 || echo "")
+
+          if [ -z "$MARKDOWN_FILE" ] || [ -z "$SARIF_FILE" ]; then
+            echo "Error: Could not find review output files"
+            echo "Expected: review-output/review-*.md and review-output/review-*.sarif"
+            exit 1
+          fi
 
           echo "markdown_file=$MARKDOWN_FILE" >> $GITHUB_OUTPUT
           echo "sarif_file=$SARIF_FILE" >> $GITHUB_OUTPUT
