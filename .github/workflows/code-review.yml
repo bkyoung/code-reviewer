@@ -27,21 +27,25 @@ jobs:
       - name: Build code-reviewer
         run: go build -o cr ./cmd/cr
 
-      - name: Run AI code review (SARIF)
+      - name: Run AI code review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           ./cr review branch ${{ github.event.pull_request.base.ref }} \
-            --format sarif \
-            --output review.sarif
+            --output ./review-output
 
-      - name: Run AI code review (Markdown)
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Find review files
+        id: find-files
         run: |
-          ./cr review branch ${{ github.event.pull_request.base.ref }} \
-            --format markdown \
-            --output review.md
+          # Find the markdown and SARIF files (pattern: review-{provider}.md)
+          MARKDOWN_FILE=$(ls review-output/review-*.md | head -1)
+          SARIF_FILE=$(ls review-output/review-*.sarif | head -1)
+
+          echo "markdown_file=$MARKDOWN_FILE" >> $GITHUB_OUTPUT
+          echo "sarif_file=$SARIF_FILE" >> $GITHUB_OUTPUT
+
+          echo "Found markdown: $MARKDOWN_FILE"
+          echo "Found SARIF: $SARIF_FILE"
 
       - name: Post review summary as PR comment
         if: always()  # Post even if review found issues
@@ -53,7 +57,7 @@ jobs:
           echo "" >> comment.md
           echo "_Automated review by code-reviewer. [View inline annotations in Files Changed tab](${{ github.event.pull_request.html_url }}/files)_" >> comment.md
           echo "" >> comment.md
-          cat review.md >> comment.md
+          cat ${{ steps.find-files.outputs.markdown_file }} >> comment.md
 
           # Post as PR comment
           gh pr comment ${{ github.event.pull_request.number }} \
@@ -63,7 +67,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         if: always()  # Upload even if review found issues
         with:
-          sarif_file: review.sarif
+          sarif_file: ${{ steps.find-files.outputs.sarif_file }}
           category: ai-code-review
 
       - name: Upload review artifacts
@@ -72,7 +76,6 @@ jobs:
         with:
           name: code-review-results
           path: |
-            review.sarif
-            review.md
+            review-output/
             comment.md
           retention-days: 30
