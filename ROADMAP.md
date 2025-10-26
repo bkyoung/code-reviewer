@@ -135,9 +135,23 @@ See [ENHANCED_PROMPTING_DESIGN.md](docs/ENHANCED_PROMPTING_DESIGN.md) and [ENHAN
 
 This section tracks issues identified through code reviews and technical debt items to be addressed in future releases.
 
-**No medium or high priority technical debt items remaining.** 🎉
+### Optional Code Quality Improvements (Low Priority)
 
-All known code quality issues and configuration inconsistencies have been addressed through v0.1.1-v0.1.4.
+Deferred from v0.2.0 code review feedback - these are nice-to-haves that can be addressed if they become problematic:
+
+**1. Observability Setup Duplication**
+- **Location**: `cmd/cr/main.go` - Multiple `SetLogger/SetMetrics/SetPricing` calls
+- **Severity**: Low (minor code duplication)
+- **Defer Reason**: Only 2-3 instances, extraction would add complexity without significant benefit
+- **When to Address**: If observability setup appears in 5+ locations
+
+**2. Template-Based Prompt Construction**
+- **Location**: `internal/usecase/review/planner.go:234-276`
+- **Severity**: Low (maintainability concern)
+- **Defer Reason**: Current string concatenation is clear and working well
+- **When to Address**: If prompts become significantly more complex or need versioning
+
+All medium and high priority technical debt has been addressed.
 
 ## Recently Fixed Issues
 
@@ -759,10 +773,10 @@ When adding new features:
   - Graceful fallback on LLM failure
   - Cost: ~$0.0003 per review
 
-### v0.2.0 (Current - Ready for Release)
+### v0.2.0 (Released)
 **Focus: Interactive Mode & Planning Agent**
 
-- ✅ Phase 4: Planning Agent
+- ✅ Phase 4: Planning Agent (commit: b8c60e8)
   - Interactive CLI with LLM-powered planning
   - Context analysis and clarifying questions
   - TTY detection (disabled in CI/CD)
@@ -773,13 +787,31 @@ When adding new features:
   - All CLI flags implemented and working
   - Planning agent fully integrated
   - User documentation updated
+- ✅ Bug Fixes (commits: 08f1105)
+  - Fixed planning provider not respecting model configuration
+  - Fixed JSON format incompatibility with provider expectations
+  - Planning now works correctly with all providers
+- ✅ Code Review Feedback Implementation (commits: a51ab90, 30a1ec2)
+  - **Phase 1: Refactoring & Tests**
+    - Extracted `createPlanningProvider()` function for maintainability
+    - Extended multi-provider support (OpenAI, Anthropic, Gemini, Ollama)
+    - Added 6 comprehensive unit tests with table-driven approach
+    - Reduced code complexity and improved testability
+  - **Phase 2: Documentation & Polish**
+    - Added detailed workflow comments for planning provider paths
+    - Improved error messages with actionable guidance
+    - Provider-specific hints (environment variables, configuration)
+    - Clarified JSON embedding documentation in planner.go
+    - Streamlined prompt documentation to reduce redundancy
 
 **Release Notes**:
 - New `--interactive` flag enables LLM-powered clarifying questions
 - Planning agent asks 1-5 targeted questions before review
 - TTY detection ensures planning only runs in interactive environments
-- Comprehensive test coverage (228+ total tests, all passing)
+- Multi-provider support for planning (OpenAI, Anthropic, Gemini, Ollama)
+- Comprehensive test coverage (234+ total tests, all passing)
 - Zero data races verified
+- Improved code quality and documentation based on multi-provider code reviews
 
 ### v0.3.0 (Future)
 **Focus: Cost Control & Advanced Features**

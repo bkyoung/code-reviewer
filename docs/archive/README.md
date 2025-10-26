@@ -110,6 +110,25 @@ This directory contains completed implementation checklists and historical plann
   - Comprehensive test strategy for all config sections
   - TDD approach with Red-Green-Refactor cycle
 
+### Enhanced Prompting System (v0.1.7)
+- **ENHANCED_PROMPTING_CHECKLIST.md** - Implementation checklist for enhanced prompting (✅ Complete)
+  - Phase 1: Context Gathering (context.go, 13 tests)
+  - Phase 2: Enhanced Prompt Building (prompt_builder.go, 15 tests)
+  - Phase 3: Intelligent Merge - Rule-Based (intelligent_merger.go, 8 tests)
+  - Phase 3.5: LLM-Based Summary Synthesis (completed in v0.1.7)
+  - Phase 4: Planning Agent (completed in v0.2.0)
+  - Phase 5: Full CLI Integration (completed in v0.2.0)
+
+### Planning Agent (v0.2.0)
+- **PLANNING_AGENT_CHECKLIST.md** - Implementation checklist for planning agent (✅ Complete)
+  - Interactive CLI with LLM-powered clarifying questions
+  - TTY detection (disabled in CI/CD environments)
+  - Three question types: yes_no, multiple_choice, text
+  - Graceful degradation on failures
+  - Configuration support (provider, model, maxQuestions, timeout)
+  - 41 comprehensive planning tests
+  - Multi-provider support refactoring and documentation improvements
+
 ## Historical Planning Documents
 
 - **IMPEMENTATION_PLAN.md** - Original multi-phase implementation plan
@@ -146,3 +165,5 @@ The following design documents remain in the main docs directory as they documen
 - **2025-10-22**: Added structured logging fix design and checklist (v0.1.2 release)
 - **2025-10-22**: Added code quality improvements design and checklist (v0.1.3 release)
 - **2025-10-22**: Added environment variable expansion design (v0.1.4 release)
+- **2025-10-26**: Archived enhanced prompting checklist (v0.1.7 complete, phases 1-5)
+- **2025-10-26**: Archived planning agent checklist (v0.2.0 complete, including refactoring)

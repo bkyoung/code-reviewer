@@ -1,7 +1,7 @@
 # Enhanced Prompting System - Implementation Checklist
 
-**Status**: v0.1.7 In Progress
-**Last Updated**: 2025-10-26
+**Status**: ✅ COMPLETE (v0.1.7 released, v0.2.0 finalized)
+**Last Updated**: 2025-10-26 (archived)
 **Design Document**: [ENHANCED_PROMPTING_DESIGN.md](ENHANCED_PROMPTING_DESIGN.md)
 
 This checklist tracks the implementation of the Enhanced Prompting System across 5 phases.
@@ -128,9 +128,9 @@ This checklist tracks the implementation of the Enhanced Prompting System across
 
 ---
 
-## Phase 3.5: LLM-Based Summary Synthesis 🔄 IN PROGRESS
+## Phase 3.5: LLM-Based Summary Synthesis ✅ COMPLETE
 
-**Status**: 🔄 In Progress (started 2025-10-26)
+**Status**: ✅ Complete (implemented 2025-10-26, v0.1.7)
 
 ### Configuration
 - [ ] Add `merge.useLLM` config field (bool, default: true)
@@ -181,9 +181,9 @@ This checklist tracks the implementation of the Enhanced Prompting System across
 
 ---
 
-## Phase 4: Planning Agent ❌ NOT STARTED
+## Phase 4: Planning Agent ✅ COMPLETE
 
-**Status**: ❌ Not Started
+**Status**: ✅ Complete (implemented 2025-10-26, v0.2.0)
 **Priority**: Medium (interactive mode only)
 
 ### Implementation
@@ -231,9 +231,9 @@ This checklist tracks the implementation of the Enhanced Prompting System across
 
 ---
 
-## Phase 5: Full CLI Integration 🟡 PARTIALLY COMPLETE
+## Phase 5: Full CLI Integration ✅ COMPLETE
 
-**Status**: 🟡 Partially Complete (7/7 flags added, 5/7 fully wired)
+**Status**: ✅ Complete (implemented 2025-10-26, v0.2.0)
 
 ### CLI Flags
 - [x] `--instructions` - Custom review instructions (fully wired)
