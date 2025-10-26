@@ -1,0 +1,78 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload
+      pull-requests: write    # Required to post PR comments
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git diff
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build code-reviewer
+        run: go build -o cr ./cmd/cr
+
+      - name: Run AI code review (SARIF)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          ./cr branch ${{ github.event.pull_request.base.ref }} \
+            --format sarif \
+            --output review.sarif
+
+      - name: Run AI code review (Markdown)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          ./cr branch ${{ github.event.pull_request.base.ref }} \
+            --format markdown \
+            --output review.md
+
+      - name: Post review summary as PR comment
+        if: always()  # Post even if review found issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Add header to distinguish this from human reviews
+          echo "## 🤖 AI Code Review" > comment.md
+          echo "" >> comment.md
+          echo "_Automated review by code-reviewer. [View inline annotations in Files Changed tab](${{ github.event.pull_request.html_url }}/files)_" >> comment.md
+          echo "" >> comment.md
+          cat review.md >> comment.md
+
+          # Post as PR comment
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body-file comment.md
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Upload even if review found issues
+        with:
+          sarif_file: review.sarif
+          category: ai-code-review
+
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@v4
+        if: always()  # Always upload for debugging
+        with:
+          name: code-review-results
+          path: |
+            review.sarif
+            review.md
+            comment.md
+          retention-days: 30

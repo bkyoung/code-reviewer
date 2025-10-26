@@ -598,57 +598,42 @@ This release addresses three critical bugs discovered during manual testing:
 
 **Discovery**: All three bugs found during manual testing after v0.1.5 release. User reported CTRL+C not working, database created in wrong location, and API keys visible in Gemini error messages.
 
+## Dropped Features
+
+### TUI (Terminal User Interface)
+**Status: DROPPED - Pivoted to GitHub-native PR integration**
+
+Originally planned as Phase 3, the TUI feature has been dropped in favor of GitHub PR integration. The decision was made after recognizing that:
+- Most code review happens in GitHub/GitLab UI, not the terminal
+- SARIF + Code Scanning provides native GitHub UI integration
+- GitHub PR comments are more natural for review workflows
+- TUI would have limited adoption compared to GitHub integration
+
+**What was planned**:
+- Bubble Tea-based interactive review browser
+- Finding list/detail views with severity filtering
+- Feedback capture ('a' accept, 'r' reject)
+- Statistics and precision tracking views
+
+**What we're doing instead**:
+- GitHub PR inline comments (v0.3.0)
+- Native GitHub Code Scanning integration (Phase 0)
+- Feedback via GitHub PR comment reactions
+- Statistics via database queries and reports
+
 ## Future Features (Deferred)
 
-### Phase 3 Continuation: TUI & Intelligence (Weeks 2-4)
+### Enhanced Redaction
 
-**Status: Deferred - Store infrastructure complete, TUI not yet implemented**
+**Status: Deferred - Current regex-based approach working well**
 
-#### TUI Implementation (Week 2)
-- [ ] Add Bubble Tea, Bubbles, and Lipgloss dependencies
-- [ ] Create `internal/adapter/tui/` package
-- [ ] Implement review list view (load runs from store)
-- [ ] Implement finding list view (show findings by severity)
-- [ ] Implement finding detail view (scrollable viewport)
-- [ ] Add navigation and key bindings
-- [ ] Add `tui` command to CLI
-
-#### Feedback & Intelligence (Week 3)
-- [ ] Add feedback capture in TUI ('a' accept, 'r' reject)
-- [ ] Implement feedback processor use case
-- [ ] Create statistics view showing precision by provider
-- [ ] Implement intelligent merger v2 (uses precision priors)
-- [ ] Update merger configuration (`strategy: "intelligent"`)
-- [ ] Wire precision priors into scoring algorithm
-
-#### Enhanced Redaction (Week 4)
 - [ ] Implement entropy-based secret detection
 - [ ] Add Shannon entropy calculation
 - [ ] Integrate entropy detector into redaction engine
 - [ ] Add config options for entropy threshold
 - [ ] Combine regex + entropy detection for better coverage
 
-### Phase 4: Budget Enforcement & Cost Control
-
-**Status: Not Started - Cost tracking infrastructure complete**
-
-- [ ] Add budget.hardCapUSD config option
-- [ ] Implement pre-flight cost estimation
-- [ ] Add degradation policies (reduce providers, reduce context)
-- [ ] Create budget tracking middleware
-- [ ] Add warnings when approaching budget limits
-- [ ] Reject reviews that would exceed hard cap
-
-### Phase 5: Multi-Repository & CI/CD
-
-**Status: Not Started**
-
-- [ ] Support reviewing multiple repositories
-- [ ] Add PR/MR integration (GitHub, GitLab)
-- [ ] Implement GitHub Actions workflow
-- [ ] Add GitLab CI template
-- [ ] Create Docker image for containerized reviews
-- [ ] Add webhook support for automatic reviews
+**When to revisit**: If users report secrets leaking through reviews
 
 ### Advanced Features (Backlog)
 
@@ -813,17 +798,104 @@ When adding new features:
 - Zero data races verified
 - Improved code quality and documentation based on multi-provider code reviews
 
-### v0.3.0 (Future)
-**Focus: Cost Control & Advanced Features**
+### Phase 0: Self-Dogfooding via GitHub Actions (In Progress)
+**Status: In Progress**
+**Priority: Critical - Real-world usage drives v0.3.0 development**
 
-- Budget enforcement and cost controls
-- Advanced merge strategies
-- Enhanced secret detection (entropy-based)
-- Performance optimizations
+This phase enables immediate self-dogfooding by integrating the code reviewer into this repository's CI/CD:
+
+- ✅ Create `.github/workflows/code-review.yml` workflow
+- ✅ Configure workflow to run on every PR to main
+- ✅ Generate SARIF output and upload to GitHub Code Scanning
+- ✅ Post review summaries as PR comments for Claude Code integration
+- ✅ Setup documentation (GITHUB_ACTION_SETUP.md)
+- [ ] Test workflow on a practice PR
+- [ ] Iterate based on real-world feedback
+- [ ] Document learnings and pain points
+- [ ] **Optimize**: Generate both formats (SARIF + Markdown) from single review run (50% cost reduction)
+
+**Benefits**:
+- Immediate real-world testing of SARIF output quality
+- Validates inline annotations work correctly in GitHub UI
+- Identifies missing features and UX issues
+- Provides cost data for budget planning
+- Informs v0.3.0 development priorities
+
+**Setup Requirements**:
+- Add `OPENAI_API_KEY` to GitHub repository secrets
+- Enable GitHub Code Scanning (free for public repos)
+- See [GITHUB_ACTION_SETUP.md](docs/GITHUB_ACTION_SETUP.md) for full instructions
+
+### v0.3.0 (Future - Weeks 2-4)
+**Focus: GitHub PR Integration with Inline Comments**
+
+This release transforms the tool from a CLI-first code reviewer into a GitHub-native PR review assistant:
+
+**Core GitHub Integration**:
+- [ ] Research GitHub review comments API (create, update, delete)
+- [ ] Design findings-to-diff-position mapper algorithm
+- [ ] Implement GitHub adapter for inline PR comments
+- [ ] Add diff position calculation for multi-line findings
+- [ ] Handle edge cases (file renames, binary files, large diffs)
+
+**Deduplication & Persistence**:
+- [ ] Implement SQLite + GitHub Actions Cache strategy
+- [ ] Design cache key structure (branch, commit, config hash)
+- [ ] Add finding deduplication across PR updates
+- [ ] Track finding lifecycle (new, updated, resolved, dismissed)
+- [ ] Prevent duplicate comments on unchanged code
+
+**Cost Reporting**:
+- [ ] Add per-PR cost summary in review comment
+- [ ] Track cumulative costs across PR lifecycle
+- [ ] Show cost breakdown by provider and operation
+- [ ] Add cost estimation before running review
+
+**Documentation & Polish**:
+- [ ] Create comprehensive GitHub integration docs
+- [ ] Update workflow templates with cache configuration
+- [ ] Add troubleshooting guide for common issues
+- [ ] Document cost optimization strategies
+
+**Success Criteria**:
+- Reviews appear as inline PR comments on specific lines
+- Findings deduplicate correctly across PR updates
+- Cache persists between PR synchronize events
+- Total cost per PR is reasonable ($0.05-$0.50)
+- No rate limiting issues with GitHub API
+
+### v0.4.0+ (Long-Term Vision)
+**Focus: Org-Wide Learning & Multi-Platform Support**
+
+**Database Evolution**:
+- [ ] Add optional Postgres sync for org-wide learning
+- [ ] Design hybrid architecture (SQLite + Postgres sync)
+- [ ] Implement precision prior aggregation across repos
+- [ ] Add org-wide statistics and trending
+
+**Advanced GitHub Features**:
+- [ ] Suggested fixes (GitHub's suggestion format)
+- [ ] Review thread management (resolve, dismiss, acknowledge)
+- [ ] Multi-commit reviews (compare PR branch to base)
+- [ ] Differential reviews (only review new changes since last push)
+
+**Multi-Platform Support**:
+- [ ] GitLab integration (merge request comments)
+- [ ] Bitbucket support (PR comments)
+- [ ] Azure DevOps integration
+- [ ] Self-hosted Git platforms
+
+**Budget & Cost Control** (from original v0.3.0 plan):
+- [ ] Budget enforcement and cost controls
+- [ ] Pre-flight cost estimation
+- [ ] Degradation policies (reduce providers, reduce context)
+- [ ] Hard cap support with graceful rejection
 
 ### v1.0.0 (Future)
-- Production-ready
-- CI/CD integrations (GitHub Actions, GitLab CI)
-- Comprehensive documentation
-- Performance optimized
-- Multi-repository support
+- Production-ready with battle-tested GitHub integration
+- Comprehensive CI/CD integrations (GitHub, GitLab, Bitbucket)
+- Org-wide learning with Postgres backend
+- Advanced comment management and suggested fixes
+- Multi-repository support with shared learning
+- Performance optimized for large diffs and monorepos
+- Complete documentation and best practices
