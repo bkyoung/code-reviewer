@@ -273,6 +273,84 @@ budget:
     - "reduce-context"    # Then reduce context size
 ```
 
+### Planning (Interactive Mode)
+
+Enable LLM-powered clarifying questions before review:
+
+```yaml
+planning:
+  enabled: true              # Enable interactive planning
+  provider: "openai"         # LLM provider for planning (e.g., "openai", "anthropic")
+  model: "gpt-4o-mini"       # Model for planning (optional, uses provider default)
+  maxQuestions: 5            # Maximum questions to ask (default: 5)
+  timeout: "30s"             # Timeout for planning phase (default: "30s")
+```
+
+**How it works:**
+
+1. User runs review with `--interactive` flag
+2. Planning agent analyzes changes and generates 1-5 clarifying questions
+3. User answers questions interactively in the terminal
+4. Answers are incorporated into review prompts for better context
+
+**Question types:**
+- **Yes/No**: Binary questions with [y/n] prompts
+- **Multiple Choice**: Numbered options to select from
+- **Text**: Free-form text input
+
+**Benefits:**
+- More targeted reviews focused on your concerns
+- Better context understanding from user input
+- Reduced false positives through clarification
+- Improved review quality with minimal overhead
+
+**Cost:** ~$0.001 per review (using gpt-4o-mini for planning)
+
+**TTY Detection:**
+Planning only runs in TTY environments (real terminals). Automatically disabled in CI/CD pipelines to prevent blocking.
+
+**Graceful Degradation:**
+If planning fails (LLM error, timeout, etc.), review continues without planning context. Planning failures never block the review.
+
+**Example:**
+
+```bash
+# Enable interactive planning
+./cr review branch main --interactive
+
+# With custom config
+./cr review branch main --interactive
+```
+
+Sample interaction:
+```
+Planning Phase: Analyzing your changes...
+
+Q: What is the primary purpose of these changes? [text]
+A: Adding OAuth2 authentication to the API
+
+Q: Should the review focus on security vulnerabilities? [y/n]
+A: y
+
+Q: What is your main concern? [multiple choice]
+1. Performance
+2. Security
+3. Maintainability
+4. Correctness
+A: 2
+
+Proceeding with review...
+```
+
+**Configuration via environment variables:**
+```bash
+export CR_PLANNING_ENABLED=true
+export CR_PLANNING_PROVIDER=openai
+export CR_PLANNING_MODEL=gpt-4o-mini
+export CR_PLANNING_MAXQUESTIONS=3
+export CR_PLANNING_TIMEOUT=60s
+```
+
 ### Context Gathering (Enhanced Prompting)
 
 Control what context is gathered and included in review prompts:
@@ -459,7 +537,7 @@ output:
   directory: "./reviews"
 ```
 
-### Production (Multi-provider with persistence)
+### Production (Multi-provider with persistence and planning)
 
 ```yaml
 providers:
@@ -472,6 +550,13 @@ providers:
     enabled: true
     model: "claude-3-5-sonnet-20241022"
     apiKey: "${ANTHROPIC_API_KEY}"
+
+planning:
+  enabled: true
+  provider: "openai"
+  model: "gpt-4o-mini"
+  maxQuestions: 5
+  timeout: "30s"
 
 store:
   enabled: true

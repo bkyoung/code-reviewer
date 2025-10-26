@@ -5,6 +5,7 @@ type Config struct {
 	Providers     map[string]ProviderConfig `yaml:"providers"`
 	HTTP          HTTPConfig                `yaml:"http"`
 	Merge         MergeConfig               `yaml:"merge"`
+	Planning      PlanningConfig            `yaml:"planning"`
 	Git           GitConfig                 `yaml:"git"`
 	Output        OutputConfig              `yaml:"output"`
 	Budget        BudgetConfig              `yaml:"budget"`
@@ -42,6 +43,17 @@ type MergeConfig struct {
 	Model    string             `yaml:"model"`
 	Strategy string             `yaml:"strategy"`
 	Weights  map[string]float64 `yaml:"weights"`
+}
+
+// PlanningConfig configures the interactive planning agent.
+// The planning agent asks clarifying questions before starting the review
+// to improve context and focus. Only runs in interactive (TTY) mode.
+type PlanningConfig struct {
+	Enabled      bool   `yaml:"enabled"`      // Enable interactive planning
+	Provider     string `yaml:"provider"`     // LLM provider for planning (e.g., "openai", "anthropic")
+	Model        string `yaml:"model"`        // Model for planning (e.g., "gpt-4o-mini", "claude-3-5-haiku")
+	MaxQuestions int    `yaml:"maxQuestions"` // Maximum questions to ask (default: 5)
+	Timeout      string `yaml:"timeout"`      // Timeout for planning phase (default: "30s")
 }
 
 type GitConfig struct {
@@ -113,6 +125,7 @@ func merge(base, overlay Config) Config {
 	result.Redaction = chooseRedaction(base.Redaction, overlay.Redaction)
 	result.Determinism = chooseDeterminism(base.Determinism, overlay.Determinism)
 	result.Merge = chooseMerge(base.Merge, overlay.Merge)
+	result.Planning = choosePlanning(base.Planning, overlay.Planning)
 	result.Store = chooseStore(base.Store, overlay.Store)
 	result.Observability = chooseObservability(base.Observability, overlay.Observability)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
@@ -178,6 +191,13 @@ func chooseDeterminism(base, overlay DeterminismConfig) DeterminismConfig {
 
 func chooseMerge(base, overlay MergeConfig) MergeConfig {
 	if overlay.Enabled || overlay.Provider != "" || overlay.Model != "" || overlay.Strategy != "" || len(overlay.Weights) > 0 {
+		return overlay
+	}
+	return base
+}
+
+func choosePlanning(base, overlay PlanningConfig) PlanningConfig {
+	if overlay.Enabled || overlay.Provider != "" || overlay.Model != "" || overlay.MaxQuestions != 0 || overlay.Timeout != "" {
 		return overlay
 	}
 	return base

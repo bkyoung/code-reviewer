@@ -130,9 +130,10 @@ type OrchestratorDeps struct {
 	Redactor      Redactor
 	SeedGenerator SeedFunc
 	PromptBuilder PromptBuilder
-	Store         Store  // Optional: persistence layer for review history
-	Logger        Logger // Optional: structured logging for warnings and info
-	RepoDir       string // Repository directory for context gathering (optional)
+	Store         Store          // Optional: persistence layer for review history
+	Logger        Logger         // Optional: structured logging for warnings and info
+	PlanningAgent *PlanningAgent // Optional: interactive planning agent (only works in TTY mode)
+	RepoDir       string         // Repository directory for context gathering (optional)
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -153,6 +154,7 @@ type BranchRequest struct {
 	ContextFiles       []string // Optional: additional context files to include
 	NoArchitecture     bool     // Skip loading ARCHITECTURE.md
 	NoAutoContext      bool     // Disable automatic context gathering (design docs, relevant docs)
+	Interactive        bool     // Enable interactive planning mode (requires TTY)
 }
 
 // Result captures the orchestrator outcome.
@@ -271,6 +273,24 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 
 	// Always set custom instructions from request (even if RepoDir is not configured)
 	projectContext.CustomInstructions = req.CustomInstructions
+
+	// Planning Phase: Interactive clarifying questions (optional, only in TTY mode)
+	if req.Interactive && IsInteractive() && o.deps.PlanningAgent != nil {
+		planningResult, err := o.deps.PlanningAgent.Plan(ctx, projectContext, diff)
+		if err != nil {
+			// Planning failure shouldn't block the review - log warning and continue
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "planning phase failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else {
+				log.Printf("warning: planning phase failed: %v\n", err)
+			}
+		} else {
+			// Use enhanced context from planning
+			projectContext = planningResult.EnhancedContext
+		}
+	}
 
 	// Generate run ID for potential store usage
 	now := time.Now()

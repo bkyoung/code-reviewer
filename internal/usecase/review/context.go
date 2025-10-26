@@ -19,6 +19,7 @@ type ProjectContext struct {
 	// User-provided context
 	CustomInstructions string   // Instructions from --instructions flag
 	CustomContextFiles []string // Contents of files from --context flag
+	PlanningAnswers    string   // Answers from interactive planning phase
 
 	// Automatically gathered context
 	RelevantDocs []string // Docs related to changed files

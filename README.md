@@ -6,6 +6,7 @@ AI-powered code review tool that uses multiple LLM providers to analyze Git bran
 
 - **Multi-Provider Support**: OpenAI, Anthropic Claude, Google Gemini, and local Ollama models
 - **Git Integration**: Review branches, commits, and diffs directly from your repository
+- **Interactive Planning**: LLM-powered clarifying questions before review for better context
 - **Multiple Output Formats**: Markdown, JSON, and SARIF for CI/CD integration
 - **Cost Tracking**: Automatic token counting and cost calculation per provider
 - **Observability**: Comprehensive logging and metrics for monitoring API usage
@@ -74,7 +75,34 @@ export OPENAI_API_KEY="sk-your-api-key-here"
 
 # Review with multiple providers
 ./cr review branch main --target HEAD
+
+# Interactive mode with planning questions
+./cr review branch main --interactive
 ```
+
+## Interactive Planning Mode
+
+The tool can ask clarifying questions before reviewing to improve context and focus:
+
+```bash
+# Enable interactive planning
+./cr review branch main --interactive
+```
+
+When enabled, the tool will:
+1. Analyze your changes
+2. Ask 1-5 clarifying questions about:
+   - Purpose of changes
+   - Specific concerns
+   - Focus areas
+3. Incorporate your answers into review prompts
+
+**Benefits**:
+- More targeted reviews focused on your concerns
+- Better context understanding
+- Reduced false positives
+
+**Note**: Interactive mode only runs in TTY environments (real terminals), not in CI/CD pipelines.
 
 ## Observability and Cost Tracking
 

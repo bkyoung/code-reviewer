@@ -134,6 +134,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 				ContextFiles:       contextFiles,
 				NoArchitecture:     noArchitecture,
 				NoAutoContext:      noAutoContext,
+				Interactive:        interactive,
 			})
 			return err
 		},
@@ -150,8 +151,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 	cmd.Flags().BoolVar(&detectTarget, "detect-target", true, "Automatically detect the checked out branch when no target is provided")
 	cmd.Flags().StringVar(&customInstructions, "instructions", "", "Custom instructions to include in review prompts")
 	cmd.Flags().StringSliceVar(&contextFiles, "context", []string{}, "Additional context files to include in prompts")
-	cmd.Flags().BoolVar(&interactive, "interactive", false, "Interactive mode with planning")
-	_ = cmd.Flags().MarkHidden("interactive") // Not yet implemented
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "Enable interactive planning mode (asks clarifying questions before review)")
 	cmd.Flags().BoolVar(&noPlanning, "no-planning", false, "Skip planning in interactive mode")
 	_ = cmd.Flags().MarkHidden("no-planning") // Not yet implemented
 	cmd.Flags().BoolVar(&planOnly, "plan-only", false, "Dry-run showing what context would be gathered")

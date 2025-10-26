@@ -129,6 +129,42 @@ func run() error {
 		redactor = redaction.NewEngine()
 	}
 
+	// Create planning agent if configured and enabled
+	var planningAgent *review.PlanningAgent
+	if cfg.Planning.Enabled && cfg.Planning.Provider != "" {
+		// Get the planning provider
+		planningProvider, ok := providers[cfg.Planning.Provider]
+		if !ok {
+			log.Printf("warning: planning provider %q not found, planning disabled", cfg.Planning.Provider)
+		} else {
+			// Parse timeout (default to 30s)
+			timeout := 30 * time.Second
+			if cfg.Planning.Timeout != "" {
+				if parsed, err := time.ParseDuration(cfg.Planning.Timeout); err == nil {
+					timeout = parsed
+				} else {
+					log.Printf("warning: invalid planning timeout %q, using default 30s", cfg.Planning.Timeout)
+				}
+			}
+
+			// Max questions (default to 5)
+			maxQuestions := cfg.Planning.MaxQuestions
+			if maxQuestions == 0 {
+				maxQuestions = 5
+			}
+
+			planningAgent = review.NewPlanningAgent(
+				planningProvider,
+				review.PlanningConfig{
+					MaxQuestions: maxQuestions,
+					Timeout:      timeout,
+				},
+				os.Stdin,
+				os.Stdout,
+			)
+		}
+	}
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
 		Git:           gitEngine,
 		Providers:     providers,
@@ -141,6 +177,7 @@ func run() error {
 		PromptBuilder: promptBuilder.Build,
 		Store:         reviewStore,
 		Logger:        reviewLogger,
+		PlanningAgent: planningAgent,
 		RepoDir:       repoDir,
 	})
 
