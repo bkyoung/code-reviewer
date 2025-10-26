@@ -132,37 +132,7 @@ func run() error {
 	// Create planning agent if configured and enabled
 	var planningAgent *review.PlanningAgent
 	if cfg.Planning.Enabled && cfg.Planning.Provider != "" {
-		// Get or create the planning provider
-		var planningProvider review.Provider
-
-		// If a specific planning model is configured, create a dedicated provider
-		if cfg.Planning.Model != "" && cfg.Planning.Provider == "openai" {
-			// Get the provider config for API key
-			providerCfg, ok := cfg.Providers["openai"]
-			if !ok || providerCfg.APIKey == "" {
-				log.Printf("warning: planning provider %q not configured, planning disabled", cfg.Planning.Provider)
-			} else {
-				// Create a dedicated HTTP client for planning with the specified model
-				client := openai.NewHTTPClient(providerCfg.APIKey, cfg.Planning.Model, providerCfg, cfg.HTTP)
-				if obs.logger != nil {
-					client.SetLogger(obs.logger)
-				}
-				if obs.metrics != nil {
-					client.SetMetrics(obs.metrics)
-				}
-				if obs.pricing != nil {
-					client.SetPricing(obs.pricing)
-				}
-				planningProvider = openai.NewProvider(cfg.Planning.Model, client)
-			}
-		} else {
-			// Reuse existing provider if no specific model configured
-			var ok bool
-			planningProvider, ok = providers[cfg.Planning.Provider]
-			if !ok {
-				log.Printf("warning: planning provider %q not found, planning disabled", cfg.Planning.Provider)
-			}
-		}
+		planningProvider := createPlanningProvider(&cfg, providers, obs)
 
 		if planningProvider != nil {
 			// Parse timeout (default to 30s)
@@ -285,6 +255,113 @@ func buildObservability(cfg config.ObservabilityConfig) observabilityComponents 
 		metrics: metrics,
 		pricing: pricing,
 	}
+}
+
+// createPlanningProvider creates a dedicated provider instance for the planning agent.
+// If a specific planning model is configured, it creates a new provider instance for that model.
+// Otherwise, it reuses the existing provider from the providers map.
+//
+// This allows using a cheaper/faster model for planning (e.g., gpt-4o-mini) while using
+// more powerful models for the actual code review.
+//
+// Returns nil if the provider cannot be created (missing config, API key, etc.).
+func createPlanningProvider(cfg *config.Config, providers map[string]review.Provider, obs observabilityComponents) review.Provider {
+	providerName := cfg.Planning.Provider
+	model := cfg.Planning.Model
+
+	// If a specific planning model is configured, create a dedicated provider instance
+	if model != "" {
+		// Get the provider config for API key and other settings
+		providerCfg, ok := cfg.Providers[providerName]
+		if !ok {
+			log.Printf("warning: planning provider %q not configured, planning disabled", providerName)
+			return nil
+		}
+
+		// Create provider based on type
+		switch providerName {
+		case "openai":
+			if providerCfg.APIKey == "" {
+				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				return nil
+			}
+			client := openai.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			return openai.NewProvider(model, client)
+
+		case "anthropic":
+			if providerCfg.APIKey == "" {
+				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				return nil
+			}
+			client := anthropic.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			return anthropic.NewProvider(model, client)
+
+		case "gemini":
+			if providerCfg.APIKey == "" {
+				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				return nil
+			}
+			client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			return gemini.NewProvider(model, client)
+
+		case "ollama":
+			// Ollama doesn't require API key, uses host instead
+			host := os.Getenv("OLLAMA_HOST")
+			if host == "" {
+				host = "http://localhost:11434"
+			}
+			client := ollama.NewHTTPClient(host, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			if obs.metrics != nil {
+				client.SetMetrics(obs.metrics)
+			}
+			if obs.pricing != nil {
+				client.SetPricing(obs.pricing)
+			}
+			return ollama.NewProvider(model, client)
+
+		default:
+			log.Printf("warning: unsupported planning provider %q, planning disabled", providerName)
+			return nil
+		}
+	}
+
+	// Reuse existing provider if no specific model configured
+	planningProvider, ok := providers[providerName]
+	if !ok {
+		log.Printf("warning: planning provider %q not found, planning disabled", providerName)
+		return nil
+	}
+	return planningProvider
 }
 
 func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig config.HTTPConfig, obs observabilityComponents) map[string]review.Provider {
