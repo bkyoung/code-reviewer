@@ -80,6 +80,11 @@ func (m *mockStore) SaveFindings(ctx context.Context, findings []review.StoreFin
 	return nil
 }
 
+func (m *mockStore) GetPrecisionPriors(ctx context.Context) (map[string]map[string]review.StorePrecisionPrior, error) {
+	// Return empty map for tests - precision priors not needed in most test scenarios
+	return make(map[string]map[string]review.StorePrecisionPrior), nil
+}
+
 func (m *mockStore) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -287,7 +292,7 @@ func createTestOrchestrator(store review.Store) *review.Orchestrator {
 		JSON:          &mockJSONWriter{},
 		SARIF:         &mockSARIFWriter{},
 		SeedGenerator: func(baseRef, targetRef string) uint64 { return 12345 },
-		PromptBuilder: func(diff domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, diff domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{}, nil
 		},
 		Store: store,

@@ -219,17 +219,47 @@ Combine multiple provider reviews into consensus:
 ```yaml
 merge:
   enabled: true
-  strategy: "weighted"  # Options: weighted, unanimous, majority
+  strategy: "intelligent"  # Options: intelligent, weighted, unanimous, majority
   weights:
     openai: 1.0
     anthropic: 1.5      # Give Anthropic higher weight
     gemini: 0.8
+  # LLM-based summary synthesis (optional, for high-quality merged summaries)
+  useLLM: true          # Enable LLM-based synthesis (default: true)
+  provider: "openai"    # Provider for synthesis (default: first enabled provider)
+  model: "gpt-4o-mini"  # Model for synthesis (default: provider's default model)
 ```
 
 **Strategies:**
+- `intelligent` - Use similarity detection and weighted scoring for finding aggregation
 - `weighted` - Combine findings with provider weights
 - `unanimous` - Only include findings all providers agree on
 - `majority` - Include findings most providers agree on
+
+**LLM-Based Summary Synthesis:**
+
+When multiple providers are used, their summaries can be synthesized into a cohesive narrative using an LLM:
+
+```yaml
+merge:
+  enabled: true
+  strategy: "intelligent"
+  useLLM: true              # Enable LLM synthesis (recommended)
+  provider: "openai"        # Which provider to use for synthesis
+  model: "gpt-4o-mini"      # Cost-effective model for summarization
+```
+
+**Benefits:**
+- Creates cohesive narratives instead of concatenated fragments
+- Identifies themes and patterns across provider reviews
+- Highlights agreements and disagreements between providers
+- Prioritizes critical issues in the summary
+
+**Cost considerations:**
+- Synthesis adds ~$0.0001-0.0005 per review (using gpt-4o-mini)
+- Uses a separate provider/model from main review providers
+- Falls back to concatenation if synthesis fails
+- Disable with `useLLM: false` for zero-cost merging
 
 ### Budget (Cost Control)
 
@@ -241,6 +271,110 @@ budget:
   degradationPolicy:
     - "reduce-providers"  # Drop lower-priority providers first
     - "reduce-context"    # Then reduce context size
+```
+
+### Context Gathering (Enhanced Prompting)
+
+Control what context is gathered and included in review prompts:
+
+**CLI Flags:**
+
+```bash
+# Add custom instructions to all review prompts
+cr review branch main --instructions "Focus on security and performance"
+
+# Include additional context files (required, max 1MB each)
+cr review branch main --context docs/ARCHITECTURE.md --context docs/SECURITY.md
+
+# Skip loading ARCHITECTURE.md
+cr review branch main --no-architecture
+
+# Disable automatic context gathering (design docs, relevant docs)
+cr review branch main --no-auto-context
+```
+
+**Automatic Context Gathering:**
+
+By default, the tool automatically gathers context to enhance review quality:
+
+1. **Architecture Documentation**: `ARCHITECTURE.md` (if present)
+2. **Project README**: `README.md` (if present)
+3. **Design Documents**: Files matching `docs/design/*.md`
+4. **Relevant Documentation**: Context-aware loading based on changed files
+   - Database changes → includes `docs/DATABASE_DESIGN.md`
+   - Auth changes → includes `docs/SECURITY.md`, `docs/AUTH_DESIGN.md`
+   - Security changes → includes `docs/SECURITY.md`
+
+**Context File Limits:**
+- Maximum file size: 1MB per file
+- Files exceeding this limit will cause the review to fail with a clear error
+- Use `--no-auto-context` to disable automatic gathering if files are too large
+
+**Use Cases:**
+
+- **Custom instructions**: Guide reviewers on specific concerns
+  ```bash
+  cr review branch main --instructions "This is a security-sensitive change to authentication"
+  ```
+
+- **Additional context**: Provide domain-specific documentation
+  ```bash
+  cr review branch main --context docs/API_SPEC.md --context docs/MIGRATIONS.md
+  ```
+
+- **Minimal context**: For fast reviews or when context isn't needed
+  ```bash
+  cr review branch main --no-architecture --no-auto-context
+  ```
+
+### HTTP and Performance Tuning
+
+Configure HTTP client behavior and timeouts:
+
+```yaml
+http:
+  timeout: "120s"      # Global timeout for all providers (default: 60s)
+  retries: 3           # Number of retry attempts (default: 3)
+  retryDelay: "2s"     # Initial retry delay (default: 1s)
+
+# Provider-specific HTTP overrides
+providers:
+  anthropic:
+    timeout: "180s"    # Override global timeout for this provider
+    retries: 5         # More retries for this provider
+```
+
+**Why adjust timeouts:**
+
+Enhanced prompting sends much larger context (ARCHITECTURE.md, design docs, etc.) which takes longer to process:
+
+- **Standard reviews**: 60s timeout is usually sufficient
+- **Enhanced prompting**: 120-180s recommended (especially for Claude models)
+- **Large repositories**: May need 300s+ for very large context
+
+**Timeout recommendations by provider:**
+- OpenAI (gpt-4o, gpt-4o-mini): 60-120s
+- OpenAI (o1-preview, o3, o4): 120-300s (reasoning models are slower)
+- Anthropic (Claude): 120-180s (processes large context more thoroughly)
+- Gemini: 60-120s
+- Ollama (local): 30-60s (depends on local hardware)
+
+**Symptoms of insufficient timeouts:**
+```
+Error: anthropic/claude-sonnet: timeout: context deadline exceeded
+```
+
+**Solution:** Increase timeout for that provider:
+```yaml
+providers:
+  anthropic:
+    timeout: "180s"  # Increase from default 60s
+```
+
+**Environment variable overrides:**
+```bash
+export CR_HTTP_TIMEOUT="180s"
+export CR_PROVIDERS_ANTHROPIC_TIMEOUT="240s"
 ```
 
 ## Environment Variables

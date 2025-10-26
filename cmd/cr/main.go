@@ -27,6 +27,7 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/adapter/store/sqlite"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/determinism"
+	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/redaction"
 	"github.com/bkyoung/code-reviewer/internal/usecase/merge"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
@@ -83,14 +84,6 @@ func run() error {
 
 	providers := buildProviders(cfg.Providers, cfg.HTTP, obs)
 
-	merger := merge.NewService()
-
-	// Instantiate redaction engine if enabled
-	var redactor review.Redactor
-	if cfg.Redaction.Enabled {
-		redactor = redaction.NewEngine()
-	}
-
 	// Initialize store if enabled
 	var reviewStore review.Store
 	if cfg.Store.Enabled {
@@ -112,6 +105,30 @@ func run() error {
 		}
 	}
 
+	// Use intelligent merger for better finding aggregation
+	// Note: Pass nil for store for now - precision priors will use defaults
+	// TODO: Wire up store adapter when precision prior tracking is needed
+	merger := merge.NewIntelligentMerger(nil)
+
+	// Wire up LLM-based summary synthesis (Phase 3.5)
+	// Use OpenAI gpt-4o-mini for synthesis (cheap, fast, good at summarization)
+	// TODO: Make this configurable via merge.useLLM, merge.provider, merge.model config fields
+	if synthProvider, ok := providers["openai"]; ok {
+		// Wrap the provider to adapt review.Provider to merge.ReviewProvider
+		wrapped := &providerWrapper{provider: synthProvider}
+		synthAdapter := merge.NewSynthesisAdapter(wrapped)
+		merger.WithSynthesisProvider(synthAdapter)
+	}
+
+	// Use enhanced prompt builder for richer context
+	promptBuilder := review.NewEnhancedPromptBuilder()
+
+	// Instantiate redaction engine if enabled
+	var redactor review.Redactor
+	if cfg.Redaction.Enabled {
+		redactor = redaction.NewEngine()
+	}
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
 		Git:           gitEngine,
 		Providers:     providers,
@@ -121,9 +138,10 @@ func run() error {
 		SARIF:         sarifWriter,
 		Redactor:      redactor,
 		SeedGenerator: determinism.GenerateSeed,
-		PromptBuilder: review.DefaultPromptBuilder,
+		PromptBuilder: promptBuilder.Build,
 		Store:         reviewStore,
 		Logger:        reviewLogger,
+		RepoDir:       repoDir,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
@@ -322,6 +340,22 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	}
 
 	return providers
+}
+
+// providerWrapper adapts review.Provider to merge.ReviewProvider.
+// This is needed because the types are structurally identical but defined in different packages.
+type providerWrapper struct {
+	provider review.Provider
+}
+
+func (w *providerWrapper) Review(ctx context.Context, req merge.ProviderRequest) (domain.Review, error) {
+	// Convert merge.ProviderRequest to review.ProviderRequest
+	reviewReq := review.ProviderRequest{
+		Prompt:  req.Prompt,
+		Seed:    req.Seed,
+		MaxSize: req.MaxSize,
+	}
+	return w.provider.Review(ctx, reviewReq)
 }
 
 // Compile-time interface compliance checks

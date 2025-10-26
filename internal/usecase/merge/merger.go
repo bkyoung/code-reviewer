@@ -1,6 +1,8 @@
 package merge
 
 import (
+	"context"
+
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
@@ -13,7 +15,7 @@ func NewService() *Service {
 }
 
 // Merge combines multiple reviews into a single review, de-duplicating findings.
-func (s *Service) Merge(reviews []domain.Review) domain.Review {
+func (s *Service) Merge(ctx context.Context, reviews []domain.Review) domain.Review {
 	mergedReview := domain.Review{
 		ProviderName: "merged",
 		ModelName:    "consensus",

@@ -1,6 +1,7 @@
 package merge_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -10,6 +11,7 @@ import (
 
 func TestMerge_Merge(t *testing.T) {
 	// Given
+	ctx := context.Background()
 	finding1 := domain.NewFinding(domain.FindingInput{File: "file1.go", LineStart: 10, Description: "Bug A"})
 	finding2 := domain.NewFinding(domain.FindingInput{File: "file2.go", LineStart: 20, Description: "Bug B"})
 	finding3 := domain.NewFinding(domain.FindingInput{File: "file1.go", LineStart: 10, Description: "Bug A"}) // Duplicate of finding1
@@ -20,7 +22,7 @@ func TestMerge_Merge(t *testing.T) {
 	merger := merge.NewService()
 
 	// When
-	mergedReview := merger.Merge([]domain.Review{review1, review2})
+	mergedReview := merger.Merge(ctx, []domain.Review{review1, review2})
 
 	// Then
 	assert.Equal(t, "merged", mergedReview.ProviderName)

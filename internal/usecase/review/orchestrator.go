@@ -25,7 +25,7 @@ type Provider interface {
 
 // Merger defines the outbound port for merging reviews.
 type Merger interface {
-	Merge(reviews []domain.Review) domain.Review
+	Merge(ctx context.Context, reviews []domain.Review) domain.Review
 }
 
 // MarkdownWriter persists provider output to disk.
@@ -56,8 +56,8 @@ type SARIFArtifact struct {
 // SeedFunc generates deterministic seeds per review scope.
 type SeedFunc func(baseRef, targetRef string) uint64
 
-// PromptBuilder constructs the provider request payload.
-type PromptBuilder func(diff domain.Diff, req BranchRequest) (ProviderRequest, error)
+// PromptBuilder constructs the provider request payload with project context.
+type PromptBuilder func(ctx ProjectContext, diff domain.Diff, req BranchRequest, providerName string) (ProviderRequest, error)
 
 // Redactor defines the outbound port for secret redaction.
 type Redactor interface {
@@ -70,7 +70,16 @@ type Store interface {
 	UpdateRunCost(ctx context.Context, runID string, totalCost float64) error
 	SaveReview(ctx context.Context, review StoreReview) error
 	SaveFindings(ctx context.Context, findings []StoreFinding) error
+	GetPrecisionPriors(ctx context.Context) (map[string]map[string]StorePrecisionPrior, error)
 	Close() error
+}
+
+// StorePrecisionPrior represents precision tracking for a provider/category combination.
+type StorePrecisionPrior struct {
+	Provider string
+	Category string
+	Alpha    float64
+	Beta     float64
 }
 
 // StoreRun represents a review run for persistence.
@@ -123,6 +132,7 @@ type OrchestratorDeps struct {
 	PromptBuilder PromptBuilder
 	Store         Store  // Optional: persistence layer for review history
 	Logger        Logger // Optional: structured logging for warnings and info
+	RepoDir       string // Repository directory for context gathering (optional)
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -139,6 +149,10 @@ type BranchRequest struct {
 	OutputDir          string
 	Repository         string
 	IncludeUncommitted bool
+	CustomInstructions string   // Optional: custom review instructions
+	ContextFiles       []string // Optional: additional context files to include
+	NoArchitecture     bool     // Skip loading ARCHITECTURE.md
+	NoAutoContext      bool     // Disable automatic context gathering (design docs, relevant docs)
 }
 
 // Result captures the orchestrator outcome.
@@ -205,6 +219,59 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		return Result{}, err
 	}
 
+	// Gather project context if RepoDir is configured
+	projectContext := ProjectContext{}
+	if o.deps.RepoDir != "" {
+		gatherer := NewContextGatherer(o.deps.RepoDir)
+
+		// Load architecture documentation (unless disabled)
+		if !req.NoArchitecture {
+			if architecture, err := gatherer.loadFile("ARCHITECTURE.md"); err == nil {
+				projectContext.Architecture = architecture
+			}
+		}
+
+		// Load README and design docs (unless auto-context is disabled)
+		if !req.NoAutoContext {
+			// Load README
+			if readme, err := gatherer.loadFile("README.md"); err == nil {
+				projectContext.README = readme
+			}
+
+			// Load design documents
+			if designDocs, err := gatherer.loadDesignDocs(); err == nil {
+				projectContext.DesignDocs = designDocs
+			}
+
+			// Detect change types and find relevant docs
+			projectContext.ChangeTypes = gatherer.detectChangeTypes(diff)
+			projectContext.ChangedPaths = make([]string, 0, len(diff.Files))
+			for _, file := range diff.Files {
+				projectContext.ChangedPaths = append(projectContext.ChangedPaths, file.Path)
+			}
+
+			if relevantDocs, err := gatherer.findRelevantDocs(projectContext.ChangedPaths, projectContext.ChangeTypes); err == nil {
+				projectContext.RelevantDocs = relevantDocs
+			}
+		}
+
+		// Load custom context files from request (always, regardless of flags)
+		if len(req.ContextFiles) > 0 {
+			contextFiles := make([]string, 0, len(req.ContextFiles))
+			for _, file := range req.ContextFiles {
+				content, err := gatherer.loadFile(file)
+				if err != nil {
+					return Result{}, fmt.Errorf("failed to load context file %s: %w", file, err)
+				}
+				contextFiles = append(contextFiles, fmt.Sprintf("=== %s ===\n%s", file, content))
+			}
+			projectContext.CustomContextFiles = contextFiles
+		}
+	}
+
+	// Always set custom instructions from request (even if RepoDir is not configured)
+	projectContext.CustomInstructions = req.CustomInstructions
+
 	// Generate run ID for potential store usage
 	now := time.Now()
 	var runID string
@@ -213,22 +280,6 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	}
 
 	seed := o.deps.SeedGenerator(req.BaseRef, req.TargetRef)
-	providerReq, err := o.deps.PromptBuilder(diff, req)
-	if err != nil {
-		return Result{}, err
-	}
-	if providerReq.Seed == 0 {
-		providerReq.Seed = seed
-	}
-
-	// Apply redaction if redactor is available
-	if o.deps.Redactor != nil {
-		redactedPrompt, err := o.deps.Redactor.Redact(providerReq.Prompt)
-		if err != nil {
-			return Result{}, fmt.Errorf("redaction failed: %w", err)
-		}
-		providerReq.Prompt = redactedPrompt
-	}
 
 	// Create run record BEFORE launching provider goroutines so that reviews can reference it
 	if o.deps.Store != nil && runID != "" {
@@ -280,6 +331,38 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				}
 				wg.Done()
 			}()
+
+			// Build provider-specific prompt
+			providerReq, err := o.deps.PromptBuilder(projectContext, diff, req, name)
+			if err != nil {
+				resultsChan <- struct {
+					review    domain.Review
+					path      string
+					jsonPath  string
+					sarifPath string
+					err       error
+				}{err: fmt.Errorf("prompt building failed for %s: %w", name, err)}
+				return
+			}
+			if providerReq.Seed == 0 {
+				providerReq.Seed = seed
+			}
+
+			// Apply redaction if redactor is available
+			if o.deps.Redactor != nil {
+				redactedPrompt, err := o.deps.Redactor.Redact(providerReq.Prompt)
+				if err != nil {
+					resultsChan <- struct {
+						review    domain.Review
+						path      string
+						jsonPath  string
+						sarifPath string
+						err       error
+					}{err: fmt.Errorf("redaction failed for %s: %w", name, err)}
+					return
+				}
+				providerReq.Prompt = redactedPrompt
+			}
 
 			review, err := provider.Review(ctx, providerReq)
 			if err != nil {
@@ -424,7 +507,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		}
 	}
 
-	mergedReview := o.deps.Merger.Merge(reviews)
+	mergedReview := o.deps.Merger.Merge(ctx, reviews)
 	mergedReview.Cost = totalCost // Merged review gets total cost from all providers
 
 	mergedMarkdownPath, err := o.deps.Markdown.Write(ctx, domain.MarkdownArtifact{

@@ -72,6 +72,30 @@ func (b *Bridge) SaveFindings(ctx context.Context, findings []review.StoreFindin
 	return b.store.SaveFindings(ctx, storeFindings)
 }
 
+// GetPrecisionPriors retrieves precision priors for all provider/category combinations.
+func (b *Bridge) GetPrecisionPriors(ctx context.Context) (map[string]map[string]review.StorePrecisionPrior, error) {
+	priors, err := b.store.GetPrecisionPriors(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert store.PrecisionPrior to review.StorePrecisionPrior
+	result := make(map[string]map[string]review.StorePrecisionPrior)
+	for provider, categoryMap := range priors {
+		result[provider] = make(map[string]review.StorePrecisionPrior)
+		for category, prior := range categoryMap {
+			result[provider][category] = review.StorePrecisionPrior{
+				Provider: prior.Provider,
+				Category: prior.Category,
+				Alpha:    prior.Alpha,
+				Beta:     prior.Beta,
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // Close closes the underlying store.
 func (b *Bridge) Close() error {
 	return b.store.Close()

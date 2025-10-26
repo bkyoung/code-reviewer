@@ -96,6 +96,13 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 	var repository string
 	var includeUncommitted bool
 	var detectTarget bool
+	var customInstructions string
+	var contextFiles []string
+	var interactive bool
+	var noPlanning bool
+	var planOnly bool
+	var noArchitecture bool
+	var noAutoContext bool
 
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
@@ -116,12 +123,17 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 			if targetRef == "" {
 				return fmt.Errorf("target branch not specified; pass as an argument, use --target, or disable --detect-target")
 			}
+
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:            baseRef,
 				TargetRef:          targetRef,
 				OutputDir:          outputDir,
 				Repository:         repository,
 				IncludeUncommitted: includeUncommitted,
+				CustomInstructions: customInstructions,
+				ContextFiles:       contextFiles,
+				NoArchitecture:     noArchitecture,
+				NoAutoContext:      noAutoContext,
 			})
 			return err
 		},
@@ -136,6 +148,16 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 	cmd.Flags().StringVar(&repository, "repository", defaultRepo, "Optional repository name override")
 	cmd.Flags().BoolVar(&includeUncommitted, "include-uncommitted", false, "Include uncommitted changes on the target branch")
 	cmd.Flags().BoolVar(&detectTarget, "detect-target", true, "Automatically detect the checked out branch when no target is provided")
+	cmd.Flags().StringVar(&customInstructions, "instructions", "", "Custom instructions to include in review prompts")
+	cmd.Flags().StringSliceVar(&contextFiles, "context", []string{}, "Additional context files to include in prompts")
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "Interactive mode with planning")
+	_ = cmd.Flags().MarkHidden("interactive") // Not yet implemented
+	cmd.Flags().BoolVar(&noPlanning, "no-planning", false, "Skip planning in interactive mode")
+	_ = cmd.Flags().MarkHidden("no-planning") // Not yet implemented
+	cmd.Flags().BoolVar(&planOnly, "plan-only", false, "Dry-run showing what context would be gathered")
+	_ = cmd.Flags().MarkHidden("plan-only") // Not yet implemented
+	cmd.Flags().BoolVar(&noArchitecture, "no-architecture", false, "Skip loading ARCHITECTURE.md")
+	cmd.Flags().BoolVar(&noAutoContext, "no-auto-context", false, "Disable automatic context gathering (design docs, relevant docs)")
 
 	return cmd
 }

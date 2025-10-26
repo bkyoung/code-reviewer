@@ -44,7 +44,7 @@ type mockMerger struct {
 	calls [][]domain.Review
 }
 
-func (m *mockMerger) Merge(reviews []domain.Review) domain.Review {
+func (m *mockMerger) Merge(ctx context.Context, reviews []domain.Review) domain.Review {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, reviews)
@@ -151,7 +151,7 @@ func TestReviewBranchWithSingleProvider(t *testing.T) {
 		JSON:          jsonWriterMock,
 		SARIF:         sarifWriterMock,
 		SeedGenerator: func(baseRef, targetRef string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			if d.ToCommitHash != diff.ToCommitHash {
 				t.Fatalf("unexpected diff passed to prompt builder: %+v", d)
 			}
@@ -252,7 +252,7 @@ func TestReviewBranchWithMultipleProviders(t *testing.T) {
 		JSON:          jsonWriterMock,
 		SARIF:         sarifWriterMock,
 		SeedGenerator: func(_, _ string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{Prompt: "prompt", Seed: 42, MaxSize: 16384}, nil
 		},
 	})
@@ -319,8 +319,9 @@ func TestCurrentBranchDelegatesToGitEngine(t *testing.T) {
 		Merger:        &mockMerger{},
 		Markdown:      &mockMarkdownWriter{},
 		JSON:          &mockJSONWriter{},
+		SARIF:         &mockSARIFWriter{},
 		SeedGenerator: func(_, _ string) uint64 { return 0 },
-		PromptBuilder: func(domain.Diff, review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(review.ProjectContext, domain.Diff, review.BranchRequest, string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{}, nil
 		},
 	})
@@ -395,7 +396,7 @@ func TestReviewBranch_StoreIntegration_SavesRunAndReviews(t *testing.T) {
 		SARIF:         sarifWriterMock,
 		Store:         storeMock,
 		SeedGenerator: func(baseRef, targetRef string) uint64 { return 12345 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{
 				Prompt:  "test prompt",
 				Seed:    12345,
@@ -528,7 +529,7 @@ func TestReviewBranch_StoreDisabled_ContinuesWithoutStore(t *testing.T) {
 		SARIF:         sarifWriterMock,
 		Store:         nil, // Disabled
 		SeedGenerator: func(baseRef, targetRef string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{Prompt: "test", Seed: 42, MaxSize: 16384}, nil
 		},
 	})
@@ -602,7 +603,7 @@ func TestReviewBranch_StoreErrors_ContinueGracefully(t *testing.T) {
 		SARIF:         sarifWriterMock,
 		Store:         storeMock,
 		SeedGenerator: func(baseRef, targetRef string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{Prompt: "test", Seed: 42, MaxSize: 16384}, nil
 		},
 	})
@@ -686,7 +687,7 @@ func TestReviewBranch_CostTracking(t *testing.T) {
 		SARIF:         sarifWriterMock,
 		Store:         storeMock,
 		SeedGenerator: func(_, _ string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{Prompt: "prompt", Seed: 42, MaxSize: 16384}, nil
 		},
 	})
@@ -756,7 +757,7 @@ func TestOrchestrator_ContextCancellation(t *testing.T) {
 		JSON:          jsonWriterMock,
 		SARIF:         sarifWriterMock,
 		SeedGenerator: func(_, _ string) uint64 { return 42 },
-		PromptBuilder: func(d domain.Diff, req review.BranchRequest) (review.ProviderRequest, error) {
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
 			return review.ProviderRequest{Prompt: "prompt", Seed: 42, MaxSize: 8192}, nil
 		},
 	})

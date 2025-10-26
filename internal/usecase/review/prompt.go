@@ -26,10 +26,18 @@ import (
 const defaultMaxTokens = 8192
 
 // DefaultPromptBuilder renders a structured prompt for the provider.
-func DefaultPromptBuilder(diff domain.Diff, req BranchRequest) (ProviderRequest, error) {
+// This is a simple implementation that doesn't use project context.
+// For enhanced prompts with context, use EnhancedPromptBuilder.
+func DefaultPromptBuilder(ctx ProjectContext, diff domain.Diff, req BranchRequest, providerName string) (ProviderRequest, error) {
 	var builder strings.Builder
 	builder.WriteString("You are an expert software engineer performing a code review.\n")
 	builder.WriteString("Provide actionable findings in JSON matching the expected schema.\n\n")
+
+	// Include custom instructions if provided
+	if ctx.CustomInstructions != "" {
+		builder.WriteString(fmt.Sprintf("Instructions: %s\n\n", ctx.CustomInstructions))
+	}
+
 	builder.WriteString(fmt.Sprintf("Base Ref: %s\n", req.BaseRef))
 	builder.WriteString(fmt.Sprintf("Target Ref: %s\n\n", req.TargetRef))
 	builder.WriteString("Unified Diff:\n")

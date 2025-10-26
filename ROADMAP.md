@@ -47,11 +47,87 @@ The code reviewer now has:
 - ✅ Environment variable expansion for all HTTP config fields
 
 ### 3. Resilience Features
-**Priority: Low**
+**Status: Complete** ✅
 
-- [ ] Implement circuit breaker pattern for repeated failures
-- [ ] Add graceful shutdown handling for in-flight requests
-- [ ] Improve context propagation and cancellation support
+- [x] Implement circuit breaker pattern for repeated failures
+- [x] Add graceful shutdown handling for in-flight requests ✅ (v0.1.6)
+- [x] Improve context propagation and cancellation support ✅ (v0.1.6)
+
+## Enhanced Prompting System
+
+**Status**: In Progress (Phases 1-3 complete, Phase 3.5 in progress, Phases 4-5 pending)
+
+See [ENHANCED_PROMPTING_DESIGN.md](docs/ENHANCED_PROMPTING_DESIGN.md) and [ENHANCED_PROMPTING_CHECKLIST.md](docs/ENHANCED_PROMPTING_CHECKLIST.md) for detailed design and tracking.
+
+### Phase 1: Context Gathering ✅
+**Status**: Complete
+
+- ✅ `internal/usecase/review/context.go`: Smart context gathering
+- ✅ `internal/usecase/review/context_test.go`: Comprehensive tests (13 tests)
+- ✅ Change type detection (auth, database, api, security, etc.)
+- ✅ Automatic documentation loading (ARCHITECTURE.md, README.md, design docs)
+- ✅ Relevant doc discovery based on change types
+- ✅ Custom instructions and context files support
+
+### Phase 2: Enhanced Prompt Building ✅
+**Status**: Complete
+
+- ✅ `internal/usecase/review/prompt_builder.go`: Template-based system
+- ✅ `internal/usecase/review/prompt_builder_test.go`: Template tests (15 tests)
+- ✅ Provider-specific prompt templates
+- ✅ Context-rich prompts with architecture, docs, and custom instructions
+- ✅ Integration test verifying full workflow
+
+### Phase 3: Intelligent Merge (Rule-Based) ✅
+**Status**: Complete
+
+- ✅ `internal/usecase/merge/intelligent_merger.go`: Finding similarity and scoring
+- ✅ `internal/usecase/merge/intelligent_merger_test.go`: Merge logic tests (8 tests)
+- ✅ Finding grouping by similarity (Jaccard distance)
+- ✅ Weighted scoring (agreement 40%, severity 30%, precision 20%, evidence 10%)
+- ✅ Precision prior support (from database)
+- ⚠️  Summary synthesis uses concatenation (not LLM-based yet)
+
+### Phase 3.5: LLM-Based Summary Synthesis 🔄
+**Status**: In Progress
+**Priority**: High (quick win, dramatically improves merge quality)
+
+- [ ] Add configuration: `merge.useLLM`, `merge.provider`, `merge.model`
+- [ ] Update `IntelligentMerger` to support LLM-based synthesis
+- [ ] Synthesis prompt: combine all provider summaries into cohesive narrative
+- [ ] Graceful fallback to concatenation on LLM failure
+- [ ] Tests for LLM synthesis and fallback
+- [ ] Wire synthesis provider in main.go
+- [ ] Cost: ~$0.0003 per review (negligible)
+
+**Benefits**:
+- Cohesive merged summary instead of concatenated fragments
+- Identifies agreement and disagreements across providers
+- Highlights key themes and critical findings
+- Better user experience with merged reviews
+
+### Phase 4: Planning Agent ❌
+**Status**: Not Started
+**Priority**: Medium (interactive mode only)
+
+- [ ] `internal/usecase/review/planner.go`: Planning agent implementation
+- [ ] Interactive CLI with LLM-powered questions
+- [ ] TTY detection (disabled in CI/CD)
+- [ ] Wire `--interactive`, `--no-planning`, `--plan-only` flags
+- [ ] Configuration: `planning.provider`, `planning.model`
+- [ ] Cost: ~$0.001 per review
+
+### Phase 5: Full CLI Integration 🟡
+**Status**: Partially Complete
+
+- ✅ All 7 CLI flags added and working
+- ✅ Context flows through to prompts
+- ✅ `--instructions` and `--context` flags fully wired
+- ✅ `--no-architecture` and `--no-auto-context` flags fully wired
+- ⚠️  `--interactive`, `--no-planning`, `--plan-only` show warnings (Phase 4 pending)
+- [ ] Wire planning agent (blocked on Phase 4)
+- [ ] End-to-end testing with all providers
+- [ ] Update user documentation
 
 ## Known Issues & Technical Debt
 
@@ -653,24 +729,63 @@ When adding new features:
 - Code quality improvements (import alias fix, isO1Model refactor)
 - 180+ tests passing with zero data races
 
-### v0.1.6 (Current)
+### v0.1.6 (Released)
 - Graceful shutdown on SIGINT/SIGTERM
 - Tilde expansion for configuration paths
 - API key redaction in error messages and logs
 - Context cancellation for in-flight HTTP requests
 - 187+ tests passing with zero data races
 
+### v0.1.7 (Current - In Progress)
+**Focus: Enhanced Prompting System (Phases 1-3.5)**
+
+- ✅ Phase 1: Context Gathering (complete)
+  - Smart document loading (ARCHITECTURE, README, design docs)
+  - Change type detection and relevant doc discovery
+  - Custom instructions and context files support
+- ✅ Phase 2: Enhanced Prompt Building (complete)
+  - Template-based prompting system
+  - Provider-specific prompt templates
+  - Context-rich prompts with all gathered documentation
+- ✅ Phase 3: Intelligent Merge - Rule-Based (complete)
+  - Finding similarity detection and grouping
+  - Weighted scoring algorithm
+  - Precision prior support
+- 🔄 Phase 3.5: LLM-Based Summary Synthesis (in progress)
+  - Configurable synthesis provider/model
+  - Cohesive narrative instead of concatenation
+  - Graceful fallback on LLM failure
+  - Cost: ~$0.0003 per review
+- ✅ Phase 5: CLI Integration (partial)
+  - All 7 new CLI flags implemented
+  - Context gathering flags wired
+  - Interactive mode flags (stub for Phase 4)
+
 ### v0.2.0 (Future)
-- TUI for review history
-- Feedback and intelligent merging
-- Enhanced secret detection
+**Focus: Interactive Mode & Planning Agent**
+
+- Phase 4: Planning Agent
+  - Interactive CLI with LLM-powered planning
+  - Context analysis and clarifying questions
+  - TTY detection (disabled in CI/CD)
+  - Wire `--interactive`, `--no-planning`, `--plan-only` flags
+- Complete Phase 5: Full CLI Integration
+  - End-to-end testing with all providers
+  - User documentation updates
+- TUI for review history (deferred from original plan)
+- Feedback capture and precision prior updates
 
 ### v0.3.0 (Future)
-- Budget enforcement
-- Advanced cost controls
+**Focus: Cost Control & Advanced Features**
+
+- Budget enforcement and cost controls
+- Advanced merge strategies
+- Enhanced secret detection (entropy-based)
+- Performance optimizations
 
 ### v1.0.0 (Future)
 - Production-ready
-- CI/CD integrations
+- CI/CD integrations (GitHub Actions, GitLab CI)
 - Comprehensive documentation
 - Performance optimized
+- Multi-repository support
