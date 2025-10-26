@@ -31,7 +31,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          ./cr branch ${{ github.event.pull_request.base.ref }} \
+          ./cr review branch ${{ github.event.pull_request.base.ref }} \
             --format sarif \
             --output review.sarif
 
@@ -39,7 +39,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          ./cr branch ${{ github.event.pull_request.base.ref }} \
+          ./cr review branch ${{ github.event.pull_request.base.ref }} \
             --format markdown \
             --output review.md
 
