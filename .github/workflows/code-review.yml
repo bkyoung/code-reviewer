@@ -93,6 +93,7 @@ jobs:
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         if: always()  # Upload even if review found issues
+        continue-on-error: true  # Don't fail workflow if SARIF is invalid
         with:
           sarif_file: ${{ steps.find-files.outputs.sarif_file }}
           category: ai-code-review
