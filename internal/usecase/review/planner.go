@@ -234,10 +234,18 @@ func (p *PlanningAgent) buildPlanningPrompt(ctx ProjectContext, diff domain.Diff
 	b.WriteString("   - Additional files or context that should be loaded\n\n")
 	b.WriteString("If you have no questions and the available context is sufficient, return an empty questions array.\n\n")
 
-	// JSON Schema
+	// JSON Schema - Use code review format for provider compatibility
 	b.WriteString("## Output Format\n\n")
-	b.WriteString("Return your response in JSON format:\n\n")
+	b.WriteString("Return your response in this EXACT JSON format:\n\n")
 	b.WriteString("```json\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"summary\": \"{\\\"questions\\\": [...], \\\"reasoning\\\": \\\"...\\\"}\",\n")
+	b.WriteString("  \"findings\": []\n")
+	b.WriteString("}\n")
+	b.WriteString("```\n\n")
+	b.WriteString("The summary field must contain the JSON object as a plain text string (the JSON parser will handle it).\n\n")
+	b.WriteString("Structure for the questions object:\n\n")
+	b.WriteString("```\n")
 	b.WriteString("{\n")
 	b.WriteString("  \"questions\": [\n")
 	b.WriteString("    {\n")

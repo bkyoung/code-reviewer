@@ -132,11 +132,39 @@ func run() error {
 	// Create planning agent if configured and enabled
 	var planningAgent *review.PlanningAgent
 	if cfg.Planning.Enabled && cfg.Planning.Provider != "" {
-		// Get the planning provider
-		planningProvider, ok := providers[cfg.Planning.Provider]
-		if !ok {
-			log.Printf("warning: planning provider %q not found, planning disabled", cfg.Planning.Provider)
+		// Get or create the planning provider
+		var planningProvider review.Provider
+
+		// If a specific planning model is configured, create a dedicated provider
+		if cfg.Planning.Model != "" && cfg.Planning.Provider == "openai" {
+			// Get the provider config for API key
+			providerCfg, ok := cfg.Providers["openai"]
+			if !ok || providerCfg.APIKey == "" {
+				log.Printf("warning: planning provider %q not configured, planning disabled", cfg.Planning.Provider)
+			} else {
+				// Create a dedicated HTTP client for planning with the specified model
+				client := openai.NewHTTPClient(providerCfg.APIKey, cfg.Planning.Model, providerCfg, cfg.HTTP)
+				if obs.logger != nil {
+					client.SetLogger(obs.logger)
+				}
+				if obs.metrics != nil {
+					client.SetMetrics(obs.metrics)
+				}
+				if obs.pricing != nil {
+					client.SetPricing(obs.pricing)
+				}
+				planningProvider = openai.NewProvider(cfg.Planning.Model, client)
+			}
 		} else {
+			// Reuse existing provider if no specific model configured
+			var ok bool
+			planningProvider, ok = providers[cfg.Planning.Provider]
+			if !ok {
+				log.Printf("warning: planning provider %q not found, planning disabled", cfg.Planning.Provider)
+			}
+		}
+
+		if planningProvider != nil {
 			// Parse timeout (default to 30s)
 			timeout := 30 * time.Second
 			if cfg.Planning.Timeout != "" {
