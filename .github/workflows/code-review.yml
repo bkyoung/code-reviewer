@@ -41,18 +41,30 @@ jobs:
           echo "Contents of review-output directory:"
           ls -la review-output/ || echo "review-output directory does not exist"
 
-          # Find the markdown and SARIF files (pattern: review-{provider}.md)
+          echo ""
+          echo "Contents of subdirectories:"
+          find review-output -type f -name "*.md" -o -name "*.sarif"
+
           if [ ! -d "review-output" ]; then
             echo "Error: review-output directory was not created"
             exit 1
           fi
 
-          MARKDOWN_FILE=$(ls review-output/review-*.md 2>/dev/null | head -1 || echo "")
-          SARIF_FILE=$(ls review-output/review-*.sarif 2>/dev/null | head -1 || echo "")
+          # Find merged markdown file (pattern: {repo}_{branch}_merged_{timestamp}.md)
+          MARKDOWN_FILE=$(find review-output -maxdepth 1 -name "*_merged_*.md" | head -1)
 
-          if [ -z "$MARKDOWN_FILE" ] || [ -z "$SARIF_FILE" ]; then
-            echo "Error: Could not find review output files"
-            echo "Expected: review-output/review-*.md and review-output/review-*.sarif"
+          # Find SARIF files (could be in subdirectory or at root)
+          SARIF_FILE=$(find review-output -name "*.sarif" | head -1)
+
+          if [ -z "$MARKDOWN_FILE" ]; then
+            echo "Error: Could not find merged markdown file"
+            echo "Expected pattern: review-output/*_merged_*.md"
+            exit 1
+          fi
+
+          if [ -z "$SARIF_FILE" ]; then
+            echo "Error: Could not find SARIF file"
+            echo "Expected: *.sarif somewhere in review-output/"
             exit 1
           fi
 
