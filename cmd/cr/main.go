@@ -130,6 +130,14 @@ func run() error {
 	}
 
 	// Create planning agent if configured and enabled
+	//
+	// Planning agent workflow:
+	// 1. If planning.model is specified, create a dedicated provider instance for that model
+	//    (e.g., use gpt-4o-mini for planning while using o3 for reviews)
+	// 2. If no planning.model specified, reuse the existing provider from the providers map
+	//    (maintains backward compatibility with simpler configurations)
+	// 3. If provider creation fails (missing API key, etc.), planning is disabled with a warning
+	//    and code review continues without the planning phase
 	var planningAgent *review.PlanningAgent
 	if cfg.Planning.Enabled && cfg.Planning.Provider != "" {
 		planningProvider := createPlanningProvider(&cfg, providers, obs)
@@ -274,7 +282,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 		// Get the provider config for API key and other settings
 		providerCfg, ok := cfg.Providers[providerName]
 		if !ok {
-			log.Printf("warning: planning provider %q not configured, planning disabled", providerName)
+			log.Printf("warning: planning provider %q not configured in providers section, planning disabled. Add a '%s' provider configuration to enable planning.", providerName, providerName)
 			return nil
 		}
 
@@ -282,7 +290,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 		switch providerName {
 		case "openai":
 			if providerCfg.APIKey == "" {
-				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				log.Printf("warning: planning provider %q missing API key (set OPENAI_API_KEY or providers.openai.apiKey), planning disabled", providerName)
 				return nil
 			}
 			client := openai.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
@@ -299,7 +307,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 
 		case "anthropic":
 			if providerCfg.APIKey == "" {
-				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				log.Printf("warning: planning provider %q missing API key (set ANTHROPIC_API_KEY or providers.anthropic.apiKey), planning disabled", providerName)
 				return nil
 			}
 			client := anthropic.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
@@ -316,7 +324,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 
 		case "gemini":
 			if providerCfg.APIKey == "" {
-				log.Printf("warning: planning provider %q has no API key, planning disabled", providerName)
+				log.Printf("warning: planning provider %q missing API key (set GEMINI_API_KEY or providers.gemini.apiKey), planning disabled", providerName)
 				return nil
 			}
 			client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
@@ -350,7 +358,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 			return ollama.NewProvider(model, client)
 
 		default:
-			log.Printf("warning: unsupported planning provider %q, planning disabled", providerName)
+			log.Printf("warning: unsupported planning provider %q, planning disabled. Supported providers: openai, anthropic, gemini, ollama", providerName)
 			return nil
 		}
 	}
@@ -358,7 +366,7 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 	// Reuse existing provider if no specific model configured
 	planningProvider, ok := providers[providerName]
 	if !ok {
-		log.Printf("warning: planning provider %q not found, planning disabled", providerName)
+		log.Printf("warning: planning provider %q not found in enabled providers, planning disabled. Enable the provider in your configuration or set planning.model to use a dedicated model.", providerName)
 		return nil
 	}
 	return planningProvider
