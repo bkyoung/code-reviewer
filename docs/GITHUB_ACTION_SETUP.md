@@ -2,6 +2,54 @@
 
 This guide explains how to enable AI-powered code reviews in your GitHub repository using GitHub Actions and Code Scanning.
 
+## ⚠️ Security Warning - Read First
+
+**This workflow sends your code diffs to third-party LLM APIs.**
+
+Before enabling this workflow, please understand:
+
+### Critical Security Considerations
+
+1. **Code Transmission**: All code changes in PRs are sent to your configured LLM provider (OpenAI, Anthropic, Google, etc.)
+2. **Data Retention**: Providers may retain your code for 30 days or longer (varies by provider and tier)
+3. **Secret Exposure Risk**: While the tool has secret redaction, it cannot catch all secret formats
+4. **Proprietary Code**: Your algorithms and business logic become visible to the LLM provider
+
+### Required Actions Before Enabling
+
+- [ ] **Read [SECURITY.md](SECURITY.md)** - Complete security documentation
+- [ ] **Review provider policy** - Understand data retention for your chosen LLM provider
+- [ ] **Check compliance** - Verify tool usage complies with your org's policies (GDPR, HIPAA, etc.)
+- [ ] **Never commit secrets** - Ensure your team follows secret management best practices
+- [ ] **Consider Ollama** - For sensitive repos, use local Ollama models instead of cloud APIs
+
+### Recommendations by Repository Type
+
+**Public Open-Source Repositories:**
+- ✅ Generally safe to use
+- Use cheaper models (gpt-4o-mini, claude-3-5-haiku)
+
+**Private Repositories (Personal):**
+- ⚠️ Acceptable with standard API tiers
+- Review your provider's data retention policy
+- Avoid reviewing files with secrets or sensitive data
+
+**Private Repositories (Company/Enterprise):**
+- ⚠️ **Requires approval** from InfoSec/Legal
+- **Required**: Enterprise LLM tier with data protection guarantees
+- **Alternative**: Use local Ollama models (no data leaves your infrastructure)
+- Set up `redaction.denyGlobs` to exclude sensitive files
+
+**Do NOT use without approval on:**
+- Repositories with regulated data (HIPAA, PCI-DSS)
+- Repositories with customer PII
+- Repositories with security-critical code
+- Repositories subject to export controls
+
+See [SECURITY.md](SECURITY.md) for complete security considerations.
+
+---
+
 ## Overview
 
 The `.github/workflows/code-review.yml` workflow automatically runs the code reviewer on every pull request and posts the results in two ways:

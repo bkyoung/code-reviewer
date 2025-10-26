@@ -799,20 +799,57 @@ When adding new features:
 - Improved code quality and documentation based on multi-provider code reviews
 
 ### Phase 0: Self-Dogfooding via GitHub Actions (In Progress)
-**Status: In Progress**
+**Status: In Progress - Workflow live, security hardening needed**
 **Priority: Critical - Real-world usage drives v0.3.0 development**
 
 This phase enables immediate self-dogfooding by integrating the code reviewer into this repository's CI/CD:
 
+#### ✅ Completed
 - ✅ Create `.github/workflows/code-review.yml` workflow
 - ✅ Configure workflow to run on every PR to main
 - ✅ Generate SARIF output and upload to GitHub Code Scanning
 - ✅ Post review summaries as PR comments for Claude Code integration
 - ✅ Setup documentation (GITHUB_ACTION_SETUP.md)
 - ✅ **Optimized**: Tool generates all formats (SARIF + Markdown + JSON) from single review run (no extra cost)
-- [ ] Test workflow on a practice PR
-- [ ] Iterate based on real-world feedback
-- [ ] Document learnings and pain points
+- ✅ Workflow successfully runs and posts PR comments
+- ✅ Created comprehensive security documentation (SECURITY.md)
+- ✅ Added security warnings to README and GITHUB_ACTION_SETUP
+
+#### 🔒 Security Testing & Hardening (High Priority)
+- [ ] **Secret Redaction Testing**:
+  - [ ] Test with various API key formats (AWS, GCP, Azure, generic)
+  - [ ] Test with tokens and passwords in different contexts
+  - [ ] Test with Base64/hex encoded secrets
+  - [ ] Verify redaction in all output formats (Markdown, JSON, SARIF)
+  - [ ] Document redaction coverage and known limitations
+- [ ] **Data Transmission Audit**:
+  - [ ] Enable debug logging and review what's sent to LLM API
+  - [ ] Verify no secrets leak through in edge cases
+  - [ ] Test deny globs exclude sensitive files correctly
+  - [ ] Review SARIF output for sensitive path disclosure
+- [ ] **Workflow Security Audit**:
+  - [ ] Verify minimal permissions are sufficient
+  - [ ] Test that secrets don't leak in workflow logs
+  - [ ] Confirm workflow doesn't run on fork PRs
+  - [ ] Review artifact contents for unredacted data
+- [ ] **Provider Security Review**:
+  - [ ] Document OpenAI data retention policy and opt-out process
+  - [ ] Document Anthropic, Gemini data handling policies
+  - [ ] Test Ollama local model as secure alternative
+  - [ ] Create decision matrix for provider selection
+
+#### 📊 Real-World Testing
+- [ ] Run on 5-10 real PRs and collect feedback
+- [ ] Track which findings are useful vs. noise
+- [ ] Identify false positives and accuracy issues
+- [ ] Document edge cases and limitations
+- [ ] Measure actual cost per PR in production
+
+#### 📝 Documentation & Training
+- [ ] Create security quick-start checklist
+- [ ] Document incident response procedures
+- [ ] Add examples of secure vs. insecure configurations
+- [ ] Create video walkthrough of security setup
 
 **Benefits**:
 - Immediate real-world testing of SARIF output quality
@@ -829,7 +866,7 @@ This phase enables immediate self-dogfooding by integrating the code reviewer in
 ### v0.3.0 (Future - Weeks 2-4)
 **Focus: GitHub PR Integration with Inline Comments**
 
-This release transforms the tool from a CLI-first code reviewer into a GitHub-native PR review assistant:
+This release transforms the tool from a CLI-first code reviewer into a GitHub-native PR review assistant.
 
 **Core GitHub Integration**:
 - [ ] Research GitHub review comments API (create, update, delete)
@@ -837,6 +874,7 @@ This release transforms the tool from a CLI-first code reviewer into a GitHub-na
 - [ ] Implement GitHub adapter for inline PR comments
 - [ ] Add diff position calculation for multi-line findings
 - [ ] Handle edge cases (file renames, binary files, large diffs)
+- [ ] Fix SARIF writer validation issues (`artifactChanges` property)
 
 **Deduplication & Persistence**:
 - [ ] Implement SQLite + GitHub Actions Cache strategy
@@ -851,11 +889,34 @@ This release transforms the tool from a CLI-first code reviewer into a GitHub-na
 - [ ] Show cost breakdown by provider and operation
 - [ ] Add cost estimation before running review
 
+**🔒 Security Enhancements**:
+- [ ] **Enhanced Secret Detection**:
+  - [ ] Implement entropy-based secret detection (Shannon entropy)
+  - [ ] Add machine learning-based secret detection (optional)
+  - [ ] Support custom secret patterns via config
+  - [ ] Add dry-run mode to preview what will be sent to LLM
+- [ ] **Diff Preview Feature**:
+  - [ ] Add `--preview` flag to show exactly what will be sent to LLM
+  - [ ] Show redaction results before submission
+  - [ ] Require confirmation before sending (interactive mode)
+- [ ] **Audit Logging**:
+  - [ ] Log all LLM API calls with timestamps
+  - [ ] Track what data was sent to which provider
+  - [ ] Enable compliance reporting
+  - [ ] Add retention policies for audit logs
+- [ ] **PII Detection**:
+  - [ ] Detect and redact email addresses
+  - [ ] Detect and redact phone numbers
+  - [ ] Detect and redact SSNs/national IDs
+  - [ ] Configurable PII patterns
+
 **Documentation & Polish**:
 - [ ] Create comprehensive GitHub integration docs
 - [ ] Update workflow templates with cache configuration
 - [ ] Add troubleshooting guide for common issues
 - [ ] Document cost optimization strategies
+- [ ] Security testing guide and checklist
+- [ ] Compliance documentation (GDPR, HIPAA considerations)
 
 **Success Criteria**:
 - Reviews appear as inline PR comments on specific lines
@@ -863,6 +924,8 @@ This release transforms the tool from a CLI-first code reviewer into a GitHub-na
 - Cache persists between PR synchronize events
 - Total cost per PR is reasonable ($0.05-$0.50)
 - No rate limiting issues with GitHub API
+- **Security testing completed with no critical findings**
+- **Clear documentation of security limitations and mitigations**
 
 ### v0.4.0+ (Long-Term Vision)
 **Focus: Org-Wide Learning & Multi-Platform Support**

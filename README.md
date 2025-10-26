@@ -2,6 +2,25 @@
 
 AI-powered code review tool that uses multiple LLM providers to analyze Git branches and generate detailed review feedback.
 
+## ⚠️ Security Warning
+
+**This tool sends your code to third-party LLM APIs.**
+
+Before using this tool, especially in CI/CD or on private repositories, please read [docs/SECURITY.md](docs/SECURITY.md) for:
+- Data transmission and privacy implications
+- Secret redaction capabilities and limitations
+- LLM provider data retention policies
+- Security best practices and recommendations
+- Compliance considerations (GDPR, HIPAA, etc.)
+
+**TL;DR Security Recommendations:**
+- ✅ **Public repos**: Generally safe for open-source projects
+- ⚠️ **Private repos**: Use enterprise LLM tiers with data protection OR local Ollama models
+- ❌ **Never commit secrets**: Tool has regex-based redaction but cannot catch everything
+- 📋 **Review provider policies**: Understand how your code will be stored and used
+
+See [Security Considerations](docs/SECURITY.md) for complete details.
+
 ## Features
 
 - **Multi-Provider Support**: OpenAI, Anthropic Claude, Google Gemini, and local Ollama models
