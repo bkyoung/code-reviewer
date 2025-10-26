@@ -97,12 +97,11 @@ The workflow triggers on:
 
 1. **Checks out code** with full git history
 2. **Builds the tool** from source (ensures latest version)
-3. **Runs code review twice**:
-   - Once for SARIF (inline annotations)
-   - Once for Markdown (readable summary)
-4. **Posts review comment** to PR with full findings
-5. **Uploads to Code Scanning** for inline annotations
-6. **Archives both outputs** as artifacts for 30 days
+3. **Runs code review once**:
+   - Tool automatically generates Markdown, JSON, and SARIF outputs
+4. **Posts review comment** to PR with full findings (uses Markdown)
+5. **Uploads to Code Scanning** for inline annotations (uses SARIF)
+6. **Archives all outputs** as artifacts for 30 days
 
 ### Permissions Required
 
@@ -304,6 +303,8 @@ Each PR review incurs LLM API costs:
 - **gpt-4o**: ~$0.10-1.00 per review
 - **claude-3-5-haiku**: ~$0.01-0.05 per review
 - **claude-3-5-sonnet**: ~$0.05-0.50 per review
+
+**Note**: The tool generates all output formats (Markdown, JSON, SARIF) from a single review run, so you only pay for one API call per PR, not multiple.
 
 **Recommendations**:
 - Use cheaper models for routine PRs (`gpt-4o-mini`, `claude-3-5-haiku`)
