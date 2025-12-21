@@ -388,3 +388,127 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+func TestFileTypePriority(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected int
+	}{
+		// Priority 0: Source code files (including test files with source extensions)
+		{"main.go", 0},
+		{"internal/auth/handler.go", 0},
+		{"src/app.py", 0},
+		{"index.js", 0},
+		{"component.tsx", 0},
+		{"lib.rs", 0},
+		{"Main.java", 0},
+		{"utils.c", 0},
+		{"helper.cpp", 0},
+		{"test_utils.py", 0},  // .py is source code, even if it's a test
+		{"spec/helper.rb", 0}, // .rb is source code, even if it's a spec
+
+		// Priority 1: Test directories without source extensions
+		// (Currently no common cases - most test files have source extensions)
+
+		// Priority 2: Configuration files
+		{"config.yaml", 2},
+		{"settings.yml", 2},
+		{"package.json", 2},
+		{"config.toml", 2},
+		{".env", 2},
+		{".github/workflows/ci.yml", 2}, // .yml is config (checked before CI path check)
+
+		// Priority 3: Build/CI files (without config extensions)
+		{"Dockerfile", 3},
+		{"Makefile", 3},
+
+		// Priority 4: Documentation files
+		{"README.md", 4},
+		{"docs/ARCHITECTURE.md", 4},
+		{"CHANGELOG.rst", 4},
+		{"notes.txt", 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := fileTypePriority(tt.path)
+			if result != tt.expected {
+				t.Errorf("fileTypePriority(%q) = %d, want %d", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatDiff_FileOrdering(t *testing.T) {
+	// Test that files are sorted with source code first
+	builder := &EnhancedPromptBuilder{}
+
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "README.md", Status: "modified", Patch: "readme patch"},
+			{Path: "docs/DESIGN.md", Status: "added", Patch: "design patch"},
+			{Path: "main.go", Status: "modified", Patch: "go patch"},
+			{Path: "config.yaml", Status: "modified", Patch: "yaml patch"},
+			{Path: "security-tests/test.go", Status: "added", Patch: "test patch"},
+		},
+	}
+
+	result := builder.formatDiff(diff)
+
+	// Find positions of each file in the output
+	goPos := strings.Index(result, "main.go")
+	testPos := strings.Index(result, "security-tests/test.go")
+	yamlPos := strings.Index(result, "config.yaml")
+	readmePos := strings.Index(result, "README.md")
+	docsPos := strings.Index(result, "docs/DESIGN.md")
+
+	// Source code (.go) should come first
+	if goPos > yamlPos || goPos > readmePos || goPos > docsPos {
+		t.Error("Source code files (.go) should appear before config and docs")
+	}
+
+	// Test files should come after main source but before config
+	if testPos > yamlPos {
+		t.Error("Test files should appear before config files")
+	}
+
+	// Config should come before documentation
+	if yamlPos > readmePos || yamlPos > docsPos {
+		t.Error("Config files should appear before documentation")
+	}
+
+	// Both markdown files should be at the end
+	if readmePos < yamlPos || docsPos < yamlPos {
+		t.Error("Documentation files should appear last")
+	}
+}
+
+func TestPromptTemplate_CodeFirst(t *testing.T) {
+	// Verify that the default template puts code before documentation
+	template := defaultPromptTemplate()
+
+	// Find positions of key sections
+	codeChangesPos := strings.Index(template, "Code Changes to Review")
+	architecturePos := strings.Index(template, "Project Architecture")
+	readmePos := strings.Index(template, "Project Overview")
+	designDocsPos := strings.Index(template, "Design Documentation")
+
+	// Code changes section should come before documentation sections
+	if codeChangesPos > architecturePos {
+		t.Error("Code Changes section should appear before Architecture section")
+	}
+	if codeChangesPos > readmePos {
+		t.Error("Code Changes section should appear before Project Overview section")
+	}
+	if codeChangesPos > designDocsPos {
+		t.Error("Code Changes section should appear before Design Documentation section")
+	}
+
+	// Template should emphasize code review
+	if !strings.Contains(template, "PRIMARY FOCUS") {
+		t.Error("Template should emphasize that code is the primary focus")
+	}
+	if !strings.Contains(template, "source code") {
+		t.Error("Template should mention reviewing source code files")
+	}
+}
