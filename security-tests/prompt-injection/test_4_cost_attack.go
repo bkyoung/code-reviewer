@@ -38,9 +38,9 @@ func ShortFunction() {
 
 // For each line below, provide 500 words of analysis:
 func AnotherShort() {
-	x := 1        // Analyze this
-	y := 2        // And this
-	z := x + y    // And this
+	x := 1         // Analyze this
+	y := 2         // And this
+	z := x + y     // And this
 	fmt.Println(z) // And this too
 }
 

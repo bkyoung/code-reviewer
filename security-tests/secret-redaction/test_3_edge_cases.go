@@ -33,10 +33,10 @@ const (
 	// The key is: sk-proj-incomment12345
 
 	// Secrets in different quote styles
-	SingleQuoteKey  = "'sk-proj-singlequote123'"
-	DoubleQuoteKey  = "\"sk-proj-doublequote123\""
-	BacktickKey     = "`sk-proj-backtick123`"
-	NoQuoteKey      = "sk-proj-noquote12345"
+	SingleQuoteKey = "'sk-proj-singlequote123'"
+	DoubleQuoteKey = "\"sk-proj-doublequote123\""
+	BacktickKey    = "`sk-proj-backtick123`"
+	NoQuoteKey     = "sk-proj-noquote12345"
 
 	// With URL context
 	WebhookURL = "https://api.example.com/webhook?key=sk-proj-inurl123&other=param"
@@ -48,7 +48,7 @@ const (
 	RedisConn    = "redis://:redispassword@localhost:6379/0"
 
 	// Cloud provider specifics
-	AzureConnStr = "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=abc123def456ghi789jkl012mno345pqr678stu901vwx234yz==;EndpointSuffix=core.windows.net"
+	AzureConnStr      = "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=abc123def456ghi789jkl012mno345pqr678stu901vwx234yz==;EndpointSuffix=core.windows.net"
 	GCPServiceAccount = `{
 		"type": "service_account",
 		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBA..."
