@@ -1,0 +1,101 @@
+# Code Reviewer Configuration File
+# This file configures the code-reviewer application for CI/CD usage
+
+# LLM Provider Configuration
+providers:
+  # Static provider (for testing - returns canned responses)
+  static:
+    enabled: false
+    model: "static-model"
+
+  # OpenAI provider (GPT models)
+  openai:
+    enabled: true
+    model: "gpt-5.2-codex"
+    apiKey: "${OPENAI_API_KEY}"
+
+  # Anthropic provider (Claude models)
+  anthropic:
+    enabled: false
+    model: "claude-sonnet-4-5-20250929"
+    apiKey: "${ANTHROPIC_API_KEY}"
+
+  # Google Gemini provider
+  gemini:
+    enabled: false
+    model: "gemini-3-pro-preview"
+    apiKey: "${GEMINI_API_KEY}"
+
+  # Ollama provider (local LLM)
+  # ollama:
+  #   enabled: false
+  #   model: "qwen3:235b"
+
+# Store Configuration
+# Enables persistence of review history to SQLite database
+store:
+  enabled: true
+  path: "~/.config/cr/reviews.db"
+
+# Output Configuration
+output:
+  directory: "./review-output"
+
+# Git Configuration (optional)
+# git:
+#   repositoryDir: "."
+
+# Planning Configuration (disabled for CI/CD - not interactive)
+planning:
+  enabled: false
+  provider: "openai"
+  model: "gpt-4o-mini"
+  maxQuestions: 5
+  timeout: "30s"
+
+# Merge Configuration (for multi-provider consensus)
+# merge:
+#   enabled: true
+#   strategy: "weighted"
+
+# Budget Configuration (cost control)
+# budget:
+#   hardCapUSD: 10.0
+#   degradationPolicy:
+#     - "reduce-providers"
+#     - "reduce-context"
+
+# Redaction Configuration (secret protection)
+# IMPORTANT: Enable this for production use!
+redaction:
+  enabled: true
+  denyGlobs:
+    - "**/*.env"
+    - "**/*.pem"
+    - "**/*.key"
+    - "**/credentials.json"
+    - "**/secrets.*"
+
+# Determinism Configuration (reproducible reviews)
+determinism:
+  enabled: false
+  temperature: 0.0
+  useSeed: true
+
+# Observability Configuration
+observability:
+  logging:
+    enabled: true
+    level: "info"
+    format: "human"
+    redactAPIKeys: true
+  metrics:
+    enabled: true
+
+# HTTP Configuration
+http:
+  timeout: "120s"
+  maxRetries: 5
+  initialBackoff: "2s"
+  maxBackoff: "30s"
+  backoffMultiplier: 2.0
