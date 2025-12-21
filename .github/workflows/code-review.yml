@@ -33,7 +33,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          ./cr review branch ${{ github.event.pull_request.base.ref }} \
+          # Compare PR branch against base branch
+          # github.head_ref = source branch (e.g., feature/foo)
+          # github.event.pull_request.base.ref = target branch (e.g., main)
+          ./cr review branch ${{ github.head_ref }} \
+            --base ${{ github.event.pull_request.base.ref }} \
             --output ./review-output
 
       - name: Find review files
