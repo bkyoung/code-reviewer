@@ -9,14 +9,15 @@ providers:
     model: "static-model"
 
   # OpenAI provider (GPT models)
+  # Note: gpt-5.2-codex not yet available in API (Dec 2025)
   openai:
-    enabled: true
-    model: "gpt-5.2-codex"
+    enabled: false
+    model: "gpt-5.2"
     apiKey: "${OPENAI_API_KEY}"
 
   # Anthropic provider (Claude models)
   anthropic:
-    enabled: false
+    enabled: true
     model: "claude-sonnet-4-5-20250929"
     apiKey: "${ANTHROPIC_API_KEY}"
 
