@@ -10,7 +10,7 @@ providers:
 
   # OpenAI provider (GPT models)
   openai:
-    enabled: true
+    enabled: false  # Disabled: quota exceeded
     model: "gpt-5.2"
     apiKey: "${OPENAI_API_KEY}"
 
