@@ -21,7 +21,23 @@ const (
 	defaultTimeout        = 30 * time.Second
 	defaultMaxRetries     = 3
 	defaultInitialBackoff = 2 * time.Second
+	maxPaginationPages    = 100 // Prevent infinite pagination loops
 )
+
+// validatePathSegment validates that a path segment (owner, repo) doesn't contain
+// characters that could cause path injection attacks.
+func validatePathSegment(value, name string) error {
+	if strings.Contains(value, "..") {
+		return fmt.Errorf("invalid %s: must not contain '..'", name)
+	}
+	if strings.Contains(value, "/") {
+		return fmt.Errorf("invalid %s: must not contain '/'", name)
+	}
+	if value == "" {
+		return fmt.Errorf("invalid %s: must not be empty", name)
+	}
+	return nil
+}
 
 // Client is an HTTP client for the GitHub Pull Request Reviews API.
 type Client struct {
@@ -83,6 +99,14 @@ type CreateReviewInput struct {
 // Only findings with a valid DiffPosition (InDiff() == true) are posted as inline comments.
 // Returns an error if the request fails after all retries.
 func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*CreateReviewResponse, error) {
+	// Validate path segments to prevent injection attacks
+	if err := validatePathSegment(input.Owner, "owner"); err != nil {
+		return nil, err
+	}
+	if err := validatePathSegment(input.Repo, "repo"); err != nil {
+		return nil, err
+	}
+
 	// Build the API request
 	comments := BuildReviewComments(input.Findings)
 
@@ -172,7 +196,17 @@ func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*Cr
 // Returns reviews in chronological order (oldest first).
 // Handles GitHub API pagination to ensure all reviews are returned.
 func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber int) ([]ReviewSummary, error) {
+	// Validate path segments to prevent injection attacks
+	if err := validatePathSegment(owner, "owner"); err != nil {
+		return nil, err
+	}
+	if err := validatePathSegment(repo, "repo"); err != nil {
+		return nil, err
+	}
+
 	var allReviews []ReviewSummary
+	visitedURLs := make(map[string]bool) // Prevent infinite pagination loops
+	pageCount := 0
 
 	// Start with the first page, using max per_page to minimize API calls
 	// Path-escape owner/repo to prevent path injection attacks
@@ -180,6 +214,16 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 		c.baseURL, url.PathEscape(owner), url.PathEscape(repo), pullNumber)
 
 	for nextURL != "" {
+		// Pagination loop protection
+		if pageCount >= maxPaginationPages {
+			return nil, fmt.Errorf("pagination limit exceeded (%d pages)", maxPaginationPages)
+		}
+		if visitedURLs[nextURL] {
+			return nil, fmt.Errorf("pagination loop detected: URL already visited")
+		}
+		visitedURLs[nextURL] = true
+		pageCount++
+
 		pageReviews, next, err := c.fetchReviewsPage(ctx, nextURL)
 		if err != nil {
 			return nil, err
@@ -236,6 +280,16 @@ func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Reject URLs with userinfo (e.g., http://user@evil.com/...) - potential SSRF obfuscation
+	if parsed.User != nil {
+		return "", fmt.Errorf("URL must not contain userinfo")
+	}
+
+	// Reject URLs with fragments - not expected in pagination URLs
+	if parsed.Fragment != "" {
+		return "", fmt.Errorf("URL must not contain fragment")
 	}
 
 	// Resolve relative URLs against baseURL
@@ -361,6 +415,14 @@ func parseNextLink(linkHeader string) string {
 // DismissReview dismisses a pull request review with the given message.
 // Returns an error if the request fails after all retries.
 func (c *Client) DismissReview(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*DismissReviewResponse, error) {
+	// Validate path segments to prevent injection attacks
+	if err := validatePathSegment(owner, "owner"); err != nil {
+		return nil, err
+	}
+	if err := validatePathSegment(repo, "repo"); err != nil {
+		return nil, err
+	}
+
 	reqBody := DismissReviewRequest{Message: message}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {

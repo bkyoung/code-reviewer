@@ -741,30 +741,55 @@ func TestClient_ListReviews_RealisticPaginationURL(t *testing.T) {
 	assert.Equal(t, 2, pageCount)
 }
 
-func TestClient_ListReviews_PathEscaping(t *testing.T) {
-	// Test that owner/repo with special characters are properly escaped
-	// to prevent path injection attacks
-	var receivedRawPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Use RawPath to see the escaped version (before server decoding)
-		// If RawPath is empty, the path had no escaping needed
-		receivedRawPath = r.URL.RawPath
-		if receivedRawPath == "" {
-			receivedRawPath = r.URL.Path
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]github.ReviewSummary{})
-	}))
-	defer server.Close()
-
+func TestClient_ListReviews_PathInjectionRejected(t *testing.T) {
+	// Test that owner/repo with path injection attempts are rejected outright
 	client := github.NewClient("test-token")
-	client.SetBaseURL(server.URL)
 
-	// Owner with path traversal attempt - slashes should be escaped
-	_, err := client.ListReviews(context.Background(), "owner/../admin", "repo", 123)
-	require.NoError(t, err)
-	// The RawPath should contain %2F (escaped slash), preventing path traversal
-	assert.Contains(t, receivedRawPath, "%2F")
+	testCases := []struct {
+		name        string
+		owner       string
+		repo        string
+		expectedErr string
+	}{
+		{
+			name:        "owner with path traversal",
+			owner:       "owner/../admin",
+			repo:        "repo",
+			expectedErr: "invalid owner: must not contain '..'",
+		},
+		{
+			name:        "repo with path traversal",
+			owner:       "owner",
+			repo:        "repo/../secrets",
+			expectedErr: "invalid repo: must not contain '..'",
+		},
+		{
+			name:        "owner with slash",
+			owner:       "owner/other",
+			repo:        "repo",
+			expectedErr: "invalid owner: must not contain '/'",
+		},
+		{
+			name:        "empty owner",
+			owner:       "",
+			repo:        "repo",
+			expectedErr: "invalid owner: must not be empty",
+		},
+		{
+			name:        "empty repo",
+			owner:       "owner",
+			repo:        "",
+			expectedErr: "invalid repo: must not be empty",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.ListReviews(context.Background(), tc.owner, tc.repo, 123)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.expectedErr)
+		})
+	}
 }
 
 func TestClient_ListReviews_ChronologicalOrder(t *testing.T) {

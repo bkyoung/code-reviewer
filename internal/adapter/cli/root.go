@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -176,11 +177,11 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
 
 			// Resolve bot username for auto-dismiss feature
-			// "none" explicitly disables auto-dismiss; empty uses default
-			resolvedBotUsername := defaultBotUsername
+			// "none" (case-insensitive) explicitly disables auto-dismiss; empty uses default
+			resolvedBotUsername := strings.TrimSpace(defaultBotUsername)
 			if resolvedBotUsername == "" {
 				resolvedBotUsername = "github-actions[bot]"
-			} else if resolvedBotUsername == "none" {
+			} else if strings.EqualFold(resolvedBotUsername, "none") {
 				// Explicit opt-out: pass empty to poster (which skips dismissal)
 				resolvedBotUsername = ""
 			}
