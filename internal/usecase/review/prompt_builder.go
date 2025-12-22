@@ -189,7 +189,6 @@ func fileTypePriority(path string) int {
 func defaultPromptTemplate() string {
 	return `You are an expert software engineer performing a code review.
 Your PRIMARY task is to review the CODE CHANGES below for bugs, security issues, and improvements.
-Provide actionable findings in JSON format matching the expected schema.
 
 ## Code Changes to Review (PRIMARY FOCUS)
 
@@ -235,5 +234,33 @@ Look for: bugs, security vulnerabilities, logic errors, performance issues, and 
 {{.RelevantDocs}}
 {{end}}
 
-Analyze the CODE CHANGES above and provide structured feedback in JSON format with severity, category, file, line numbers, description, and actionable suggestions. Focus on the actual code, not on improving documentation.`
+## Required Output Format
+
+You MUST respond with a JSON object matching this EXACT schema (use camelCase for field names):
+
+` + "```" + `json
+{
+  "summary": "A brief text summary of the review (1-3 sentences)",
+  "findings": [
+    {
+      "file": "path/to/file.go",
+      "lineStart": 42,
+      "lineEnd": 42,
+      "severity": "high|medium|low",
+      "category": "security|bug|performance|maintainability|test_coverage|error_handling|architecture",
+      "description": "Clear description of the issue",
+      "suggestion": "Actionable fix or improvement",
+      "evidence": true
+    }
+  ]
+}
+` + "```" + `
+
+Rules:
+- "summary" MUST be a string, not an object
+- Use camelCase: "lineStart" and "lineEnd", NOT "line_start" or "line_end"
+- "severity" must be one of: "high", "medium", "low"
+- "evidence" should be true if you can point to specific code
+- If no issues found, return: {"summary": "No issues found.", "findings": []}
+- Focus on actual code issues, not documentation improvements`
 }

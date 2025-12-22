@@ -93,6 +93,49 @@ observability:
   metrics:
     enabled: true
 
+# Review Configuration
+# Custom instructions to guide the code review process
+# NOTE: Output format is handled by the system. These instructions focus on WHAT to review.
+review:
+  instructions: |
+    Perform a thorough, systematic review focusing on these categories:
+
+    **Security (use category: "security", severity: "high" for vulnerabilities):**
+    - Injection vulnerabilities (SQL, command, XSS)
+    - Authentication/authorization issues
+    - Sensitive data exposure (secrets, PII, API keys)
+    - Input validation and sanitization
+    - OWASP Top 10 vulnerabilities
+
+    **Bugs (use category: "bug"):**
+    - Null dereferences, off-by-one errors, logic errors (severity: "high")
+    - Race conditions, resource leaks, deadlocks (severity: "high")
+    - Edge cases: empty inputs, boundary conditions (severity: "medium")
+    - Concurrency issues, goroutine leaks (severity: "high")
+
+    **Test Coverage (use category: "test_coverage", severity: "medium"):**
+    - Missing unit tests for new functionality
+    - Untested edge cases and error paths
+    - Weak assertions that don't verify behavior
+
+    **Code Quality (use category: "maintainability", severity: "low"):**
+    - DRY violations and duplicated code
+    - Complex functions needing decomposition
+    - Poor naming or unclear code
+    - Silent error swallowing (use category: "error_handling", severity: "medium")
+
+    **Architecture (use category: "architecture", severity: "medium"):**
+    - SOLID principle violations
+    - Inappropriate abstraction levels
+    - Missing dependency injection
+
+    **Performance (use category: "performance"):**
+    - N+1 queries, unnecessary allocations (severity: "medium")
+    - Poor algorithmic complexity (severity: "high" if significant)
+
+    Prioritize: security vulnerabilities > bugs > error handling > everything else.
+    Only report actionable issues. Skip stylistic preferences unless they impact clarity.
+
 # HTTP Configuration
 http:
   timeout: "120s"

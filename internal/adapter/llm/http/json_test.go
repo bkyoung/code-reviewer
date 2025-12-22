@@ -123,13 +123,13 @@ func TestParseReviewResponse_InvalidJSON(t *testing.T) {
 }
 
 func TestParseReviewResponse_MissingSummary(t *testing.T) {
-	// JSON without summary field
+	// JSON without summary field - synthesizes summary from findings count
 	jsonWithoutSummary := `{"findings": []}`
 
 	summary, findings, err := http.ParseReviewResponse(jsonWithoutSummary)
 	require.NoError(t, err)
 
-	assert.Equal(t, "", summary) // Empty string for missing field
+	assert.Equal(t, "Code review completed with 0 finding(s).", summary)
 	assert.Empty(t, findings)
 }
 
@@ -141,7 +141,7 @@ func TestParseReviewResponse_MissingFindings(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Test", summary)
-	assert.Nil(t, findings) // nil for missing array
+	assert.Empty(t, findings) // empty slice (converted from nil)
 }
 
 func TestParseReviewResponse_EmptyFindings(t *testing.T) {
@@ -232,4 +232,100 @@ Let me know if you have questions!`
 	require.Len(t, findings, 1)
 	assert.Equal(t, "server.go", findings[0].File)
 	assert.Equal(t, "performance", findings[0].Category)
+}
+
+func TestParseReviewResponse_SnakeCaseFields(t *testing.T) {
+	// Some LLMs return snake_case instead of camelCase
+	jsonWithSnakeCase := `{
+		"summary": "Found issues",
+		"findings": [
+			{
+				"file": "main.go",
+				"line_start": 10,
+				"line_end": 15,
+				"category": "bug",
+				"severity": "high",
+				"description": "Null dereference",
+				"suggestion": "Add nil check",
+				"evidence": true
+			}
+		]
+	}`
+
+	summary, findings, err := http.ParseReviewResponse(jsonWithSnakeCase)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Found issues", summary)
+	require.Len(t, findings, 1)
+	assert.Equal(t, "main.go", findings[0].File)
+	assert.Equal(t, 10, findings[0].LineStart)
+	assert.Equal(t, 15, findings[0].LineEnd)
+}
+
+func TestParseReviewResponse_ObjectSummary(t *testing.T) {
+	// Some LLMs return summary as an object instead of string
+	jsonWithObjectSummary := `{
+		"summary": {
+			"total_findings": 2,
+			"by_severity": {"high": 1, "low": 1}
+		},
+		"findings": [
+			{
+				"file": "test.go",
+				"line_start": 5,
+				"line_end": 5,
+				"category": "bug",
+				"severity": "high",
+				"description": "Issue found",
+				"suggestion": "Fix it",
+				"evidence": true
+			},
+			{
+				"file": "util.go",
+				"line_start": 10,
+				"line_end": 10,
+				"category": "style",
+				"severity": "low",
+				"description": "Minor issue",
+				"suggestion": "Improve it",
+				"evidence": false
+			}
+		]
+	}`
+
+	summary, findings, err := http.ParseReviewResponse(jsonWithObjectSummary)
+	require.NoError(t, err)
+
+	// Should synthesize a summary from findings count
+	assert.Equal(t, "Code review completed with 2 finding(s).", summary)
+	require.Len(t, findings, 2)
+}
+
+func TestParseReviewResponse_MixedCaseFields(t *testing.T) {
+	// When both camelCase and snake_case are present, camelCase takes precedence
+	jsonWithMixedCase := `{
+		"summary": "Test",
+		"findings": [
+			{
+				"file": "main.go",
+				"lineStart": 100,
+				"lineEnd": 105,
+				"line_start": 10,
+				"line_end": 15,
+				"category": "bug",
+				"severity": "high",
+				"description": "Test",
+				"suggestion": "Test",
+				"evidence": true
+			}
+		]
+	}`
+
+	_, findings, err := http.ParseReviewResponse(jsonWithMixedCase)
+	require.NoError(t, err)
+
+	require.Len(t, findings, 1)
+	// camelCase should take precedence
+	assert.Equal(t, 100, findings[0].LineStart)
+	assert.Equal(t, 105, findings[0].LineEnd)
 }

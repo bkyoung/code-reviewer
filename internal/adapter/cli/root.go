@@ -29,11 +29,12 @@ type Arguments struct {
 
 // Dependencies captures the collaborators for the CLI.
 type Dependencies struct {
-	BranchReviewer BranchReviewer
-	Args           Arguments
-	DefaultOutput  string
-	DefaultRepo    string
-	Version        string
+	BranchReviewer      BranchReviewer
+	Args                Arguments
+	DefaultOutput       string
+	DefaultRepo         string
+	DefaultInstructions string // From config review.instructions
+	Version             string
 }
 
 // NewRootCommand constructs the root Cobra command.
@@ -65,7 +66,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Use:   "review",
 		Short: "Run a code review",
 	}
-	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo))
+	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions))
 	root.AddCommand(reviewCmd)
 
 	var showVersion bool
@@ -89,7 +90,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	return root
 }
 
-func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo string) *cobra.Command {
+func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string) *cobra.Command {
 	var baseRef string
 	var targetRef string
 	var outputDir string
@@ -122,6 +123,11 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo str
 			}
 			if targetRef == "" {
 				return fmt.Errorf("target branch not specified; pass as an argument, use --target, or disable --detect-target")
+			}
+
+			// Use config instructions as fallback if --instructions flag not provided
+			if customInstructions == "" {
+				customInstructions = defaultInstructions
 			}
 
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{

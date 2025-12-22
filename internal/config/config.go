@@ -13,6 +13,7 @@ type Config struct {
 	Determinism   DeterminismConfig         `yaml:"determinism"`
 	Store         StoreConfig               `yaml:"store"`
 	Observability ObservabilityConfig       `yaml:"observability"`
+	Review        ReviewConfig              `yaml:"review"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -106,6 +107,13 @@ type MetricsConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// ReviewConfig configures the code review behavior.
+type ReviewConfig struct {
+	// Instructions are custom instructions included in all review prompts.
+	// These guide the LLM on what to look for during code review.
+	Instructions string `yaml:"instructions"`
+}
+
 // Merge combines multiple configuration instances, prioritising the latter ones.
 func Merge(configs ...Config) Config {
 	result := Config{}
@@ -128,6 +136,7 @@ func merge(base, overlay Config) Config {
 	result.Planning = choosePlanning(base.Planning, overlay.Planning)
 	result.Store = chooseStore(base.Store, overlay.Store)
 	result.Observability = chooseObservability(base.Observability, overlay.Observability)
+	result.Review = chooseReview(base.Review, overlay.Review)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -224,4 +233,11 @@ func chooseObservability(base, overlay ObservabilityConfig) ObservabilityConfig 
 	}
 
 	return result
+}
+
+func chooseReview(base, overlay ReviewConfig) ReviewConfig {
+	if overlay.Instructions != "" {
+		return overlay
+	}
+	return base
 }
