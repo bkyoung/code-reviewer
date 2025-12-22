@@ -52,6 +52,11 @@ type PostReviewRequest struct {
 	// OverrideEvent optionally overrides the automatically determined event.
 	// If set, this event will be used instead of determining from severities.
 	OverrideEvent github.ReviewEvent
+
+	// ReviewActions configures the review action for each finding severity.
+	// If empty, sensible defaults are used (critical/high → request_changes,
+	// medium/low → comment, clean → approve).
+	ReviewActions github.ReviewActions
 }
 
 // PostReviewResult contains the result of posting a review.
@@ -88,7 +93,7 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	if req.OverrideEvent != "" {
 		event = req.OverrideEvent
 	} else {
-		event = github.DetermineReviewEvent(req.Findings)
+		event = github.DetermineReviewEventWithActions(req.Findings, req.ReviewActions)
 	}
 
 	// Call the client

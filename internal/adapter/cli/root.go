@@ -27,14 +27,24 @@ type Arguments struct {
 	ErrWriter io.Writer
 }
 
+// DefaultReviewActions holds default review action configuration from config.
+type DefaultReviewActions struct {
+	OnCritical string
+	OnHigh     string
+	OnMedium   string
+	OnLow      string
+	OnClean    string
+}
+
 // Dependencies captures the collaborators for the CLI.
 type Dependencies struct {
-	BranchReviewer      BranchReviewer
-	Args                Arguments
-	DefaultOutput       string
-	DefaultRepo         string
-	DefaultInstructions string // From config review.instructions
-	Version             string
+	BranchReviewer       BranchReviewer
+	Args                 Arguments
+	DefaultOutput        string
+	DefaultRepo          string
+	DefaultInstructions  string // From config review.instructions
+	DefaultReviewActions DefaultReviewActions
+	Version              string
 }
 
 // NewRootCommand constructs the root Cobra command.
@@ -66,7 +76,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Use:   "review",
 		Short: "Run a code review",
 	}
-	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions))
+	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions))
 	root.AddCommand(reviewCmd)
 
 	var showVersion bool
@@ -90,7 +100,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	return root
 }
 
-func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string) *cobra.Command {
+func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string, defaultActions DefaultReviewActions) *cobra.Command {
 	var baseRef string
 	var targetRef string
 	var outputDir string
@@ -111,6 +121,13 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var githubRepo string
 	var prNumber int
 	var commitSHA string
+
+	// Review action override flags
+	var actionCritical string
+	var actionHigh string
+	var actionMedium string
+	var actionLow string
+	var actionClean string
 
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
@@ -150,6 +167,13 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				}
 			}
 
+			// Resolve review actions: CLI flags override defaults from config
+			resolvedActionCritical := resolveAction(actionCritical, defaultActions.OnCritical)
+			resolvedActionHigh := resolveAction(actionHigh, defaultActions.OnHigh)
+			resolvedActionMedium := resolveAction(actionMedium, defaultActions.OnMedium)
+			resolvedActionLow := resolveAction(actionLow, defaultActions.OnLow)
+			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
+
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:            baseRef,
 				TargetRef:          targetRef,
@@ -166,6 +190,11 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				GitHubRepo:         githubRepo,
 				PRNumber:           prNumber,
 				CommitSHA:          commitSHA,
+				ActionOnCritical:   resolvedActionCritical,
+				ActionOnHigh:       resolvedActionHigh,
+				ActionOnMedium:     resolvedActionMedium,
+				ActionOnLow:        resolvedActionLow,
+				ActionOnClean:      resolvedActionClean,
 			})
 			return err
 		},
@@ -197,5 +226,20 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	cmd.Flags().IntVar(&prNumber, "pr-number", 0, "Pull request number (required with --post-github-review)")
 	cmd.Flags().StringVar(&commitSHA, "commit-sha", "", "Head commit SHA (required with --post-github-review)")
 
+	// Review action configuration flags (override config file values)
+	cmd.Flags().StringVar(&actionCritical, "action-critical", "", "Review action for critical severity (approve, comment, request_changes)")
+	cmd.Flags().StringVar(&actionHigh, "action-high", "", "Review action for high severity (approve, comment, request_changes)")
+	cmd.Flags().StringVar(&actionMedium, "action-medium", "", "Review action for medium severity (approve, comment, request_changes)")
+	cmd.Flags().StringVar(&actionLow, "action-low", "", "Review action for low severity (approve, comment, request_changes)")
+	cmd.Flags().StringVar(&actionClean, "action-clean", "", "Review action when no findings (approve, comment, request_changes)")
+
 	return cmd
+}
+
+// resolveAction returns the override value if non-empty, otherwise the default.
+func resolveAction(override, defaultValue string) string {
+	if override != "" {
+		return override
+	}
+	return defaultValue
 }

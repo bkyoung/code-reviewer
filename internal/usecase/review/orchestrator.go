@@ -87,6 +87,14 @@ type GitHubPostRequest struct {
 	CommitSHA string
 	Review    domain.Review
 	Diff      domain.Diff // For calculating diff positions
+
+	// ReviewActions configures the GitHub review action for each severity level.
+	// Empty values use sensible defaults.
+	ActionOnCritical string
+	ActionOnHigh     string
+	ActionOnMedium   string
+	ActionOnLow      string
+	ActionOnClean    string
 }
 
 // GitHubPostResult contains the result of posting a review.
@@ -186,6 +194,14 @@ type BranchRequest struct {
 	GitHubRepo   string // Repository name
 	PRNumber     int    // Pull request number
 	CommitSHA    string // Head commit SHA for the review
+
+	// Review action configuration (configures GitHub review action per severity)
+	// Values: "approve", "comment", "request_changes" (case-insensitive)
+	ActionOnCritical string // Action for critical severity findings
+	ActionOnHigh     string // Action for high severity findings
+	ActionOnMedium   string // Action for medium severity findings
+	ActionOnLow      string // Action for low severity findings
+	ActionOnClean    string // Action when no findings in diff
 }
 
 // Result captures the orchestrator outcome.
@@ -623,12 +639,17 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	var githubResult *GitHubPostResult
 	if req.PostToGitHub && o.deps.GitHubPoster != nil {
 		result, err := o.deps.GitHubPoster.PostReview(ctx, GitHubPostRequest{
-			Owner:     req.GitHubOwner,
-			Repo:      req.GitHubRepo,
-			PRNumber:  req.PRNumber,
-			CommitSHA: req.CommitSHA,
-			Review:    mergedReview,
-			Diff:      diff,
+			Owner:            req.GitHubOwner,
+			Repo:             req.GitHubRepo,
+			PRNumber:         req.PRNumber,
+			CommitSHA:        req.CommitSHA,
+			Review:           mergedReview,
+			Diff:             diff,
+			ActionOnCritical: req.ActionOnCritical,
+			ActionOnHigh:     req.ActionOnHigh,
+			ActionOnMedium:   req.ActionOnMedium,
+			ActionOnLow:      req.ActionOnLow,
+			ActionOnClean:    req.ActionOnClean,
 		})
 		if err != nil {
 			// Log warning but don't fail the review

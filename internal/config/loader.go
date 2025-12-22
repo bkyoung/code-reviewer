@@ -235,6 +235,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("providers.ollama.model", "llama2")
 	v.SetDefault("providers.static.enabled", true)
 	v.SetDefault("providers.static.model", "static-v1")
+
+	// Review action defaults (Phase 2) - configures GitHub review actions per severity
+	v.SetDefault("review.actions.onCritical", "request_changes")
+	v.SetDefault("review.actions.onHigh", "request_changes")
+	v.SetDefault("review.actions.onMedium", "comment")
+	v.SetDefault("review.actions.onLow", "comment")
+	v.SetDefault("review.actions.onClean", "approve")
 }
 
 func defaultStorePath() string {
