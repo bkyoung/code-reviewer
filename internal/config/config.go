@@ -119,6 +119,7 @@ type ReviewConfig struct {
 	// BotUsername is the GitHub username of the bot for auto-dismissing stale reviews.
 	// When set, previous reviews from this user are dismissed AFTER the new review
 	// posts successfully. This ensures the PR always maintains review signal.
+	// Set to "none" to explicitly disable auto-dismiss.
 	// Default: "github-actions[bot]"
 	BotUsername string `yaml:"botUsername"`
 }

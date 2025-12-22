@@ -175,10 +175,14 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedActionLow := resolveAction(actionLow, defaultActions.OnLow)
 			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
 
-			// Resolve bot username: use default if set, otherwise "github-actions[bot]"
+			// Resolve bot username for auto-dismiss feature
+			// "none" explicitly disables auto-dismiss; empty uses default
 			resolvedBotUsername := defaultBotUsername
 			if resolvedBotUsername == "" {
 				resolvedBotUsername = "github-actions[bot]"
+			} else if resolvedBotUsername == "none" {
+				// Explicit opt-out: pass empty to poster (which skips dismissal)
+				resolvedBotUsername = ""
 			}
 
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
