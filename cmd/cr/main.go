@@ -553,37 +553,43 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 	// Map findings to positioned findings with diff positions
 	positionedFindings := githubadapter.MapFindings(req.Review.Findings, req.Diff)
 
+	// Build review actions config for determining attention severities
+	reviewActions := githubadapter.ReviewActions{
+		OnCritical: req.ActionOnCritical,
+		OnHigh:     req.ActionOnHigh,
+		OnMedium:   req.ActionOnMedium,
+		OnLow:      req.ActionOnLow,
+		OnClean:    req.ActionOnClean,
+	}
+
+	// Build programmatic summary (replaces LLM-generated summary)
+	programmaticSummary := githubadapter.BuildProgrammaticSummary(positionedFindings, req.Diff, reviewActions)
+
 	// Build summary appendix for edge cases (out-of-diff findings, binary files, renames)
 	appendix := githubadapter.BuildSummaryAppendix(positionedFindings, req.Diff)
 
-	// Create review with enhanced summary if appendix exists
-	enhancedReview := req.Review
-	if appendix != "" {
-		enhancedReview = domain.Review{
-			ProviderName: req.Review.ProviderName,
-			ModelName:    req.Review.ModelName,
-			Summary:      githubadapter.AppendSections(req.Review.Summary, appendix),
-			Findings:     req.Review.Findings,
-			Cost:         req.Review.Cost,
-		}
+	// Combine programmatic summary with appendix
+	finalSummary := githubadapter.AppendSections(programmaticSummary, appendix)
+
+	// Create review with programmatic summary
+	enhancedReview := domain.Review{
+		ProviderName: req.Review.ProviderName,
+		ModelName:    req.Review.ModelName,
+		Summary:      finalSummary,
+		Findings:     req.Review.Findings,
+		Cost:         req.Review.Cost,
 	}
 
 	// Build the post request with review action configuration
 	postReq := usecasegithub.PostReviewRequest{
-		Owner:      req.Owner,
-		Repo:       req.Repo,
-		PullNumber: req.PRNumber,
-		CommitSHA:  req.CommitSHA,
-		Review:     enhancedReview,
-		Findings:   positionedFindings,
-		ReviewActions: githubadapter.ReviewActions{
-			OnCritical: req.ActionOnCritical,
-			OnHigh:     req.ActionOnHigh,
-			OnMedium:   req.ActionOnMedium,
-			OnLow:      req.ActionOnLow,
-			OnClean:    req.ActionOnClean,
-		},
-		BotUsername: req.BotUsername,
+		Owner:         req.Owner,
+		Repo:          req.Repo,
+		PullNumber:    req.PRNumber,
+		CommitSHA:     req.CommitSHA,
+		Review:        enhancedReview,
+		Findings:      positionedFindings,
+		ReviewActions: reviewActions,
+		BotUsername:   req.BotUsername,
 	}
 
 	// Post the review
