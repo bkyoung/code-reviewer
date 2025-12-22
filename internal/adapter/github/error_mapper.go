@@ -79,7 +79,15 @@ func MapHTTPError(statusCode int, body []byte) *llmhttp.Error {
 func parseErrorMessage(statusCode int, body []byte) string {
 	var errResp GitHubErrorResponse
 	if err := json.Unmarshal(body, &errResp); err != nil {
-		return fmt.Sprintf("HTTP %d", statusCode)
+		// Include body preview for debugging non-JSON responses
+		bodyPreview := string(body)
+		if len(bodyPreview) > 100 {
+			bodyPreview = bodyPreview[:100] + "..."
+		}
+		if bodyPreview == "" {
+			return fmt.Sprintf("HTTP %d", statusCode)
+		}
+		return fmt.Sprintf("HTTP %d: %s", statusCode, bodyPreview)
 	}
 
 	if errResp.Message == "" {

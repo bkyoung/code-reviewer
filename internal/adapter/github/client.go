@@ -131,8 +131,18 @@ func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*Cr
 
 		// Check for error status codes
 		if resp.StatusCode >= 400 {
-			bodyBytes, _ := io.ReadAll(resp.Body)
+			bodyBytes, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			if readErr != nil {
+				// If we can't read the error body, return a generic error with the status code
+				return &llmhttp.Error{
+					Type:       llmhttp.ErrTypeUnknown,
+					Message:    fmt.Sprintf("HTTP %d (failed to read response: %v)", resp.StatusCode, readErr),
+					StatusCode: resp.StatusCode,
+					Retryable:  resp.StatusCode >= 500,
+					Provider:   providerName,
+				}
+			}
 			return MapHTTPError(resp.StatusCode, bodyBytes)
 		}
 

@@ -95,68 +95,46 @@ observability:
 
 # Review Configuration
 # Custom instructions to guide the code review process
+# NOTE: Output format is handled by the system. These instructions focus on WHAT to review.
 review:
   instructions: |
-    You are an expert code reviewer. Perform a thorough, systematic review of the provided code changes.
+    Perform a thorough, systematic review focusing on these categories:
 
-    ## Review Categories
+    **Security (use category: "security", severity: "high" for vulnerabilities):**
+    - Injection vulnerabilities (SQL, command, XSS)
+    - Authentication/authorization issues
+    - Sensitive data exposure (secrets, PII, API keys)
+    - Input validation and sanitization
+    - OWASP Top 10 vulnerabilities
 
-    ### 1. Security Analysis (CRITICAL)
-    - Identify injection vulnerabilities (SQL, command, XSS, etc.)
-    - Check for authentication/authorization issues
-    - Look for sensitive data exposure (secrets, PII, API keys in code)
-    - Verify proper input validation and sanitization
-    - Check for insecure cryptographic practices
-    - Identify OWASP Top 10 vulnerabilities
+    **Bugs (use category: "bug"):**
+    - Null dereferences, off-by-one errors, logic errors (severity: "high")
+    - Race conditions, resource leaks, deadlocks (severity: "high")
+    - Edge cases: empty inputs, boundary conditions (severity: "medium")
+    - Concurrency issues, goroutine leaks (severity: "high")
 
-    ### 2. Bug Detection
-    - **Obvious bugs**: Null dereferences, off-by-one errors, logic errors
-    - **Non-obvious bugs**: Race conditions, resource leaks, deadlocks
-    - **Edge cases**: Empty inputs, boundary conditions, error paths
-    - **Concurrency issues**: Data races, improper synchronization, goroutine leaks
-    - **Resource management**: Unclosed resources, memory leaks, connection pooling issues
+    **Test Coverage (use category: "test_coverage", severity: "medium"):**
+    - Missing unit tests for new functionality
+    - Untested edge cases and error paths
+    - Weak assertions that don't verify behavior
 
-    ### 3. Test Coverage Assessment
-    - Are there sufficient unit tests for new functionality?
-    - Do tests cover edge cases and error paths?
-    - Is there integration test coverage where appropriate?
-    - Are test assertions meaningful (not just checking for nil)?
-    - Would additional test cases improve confidence in the code?
+    **Code Quality (use category: "maintainability", severity: "low"):**
+    - DRY violations and duplicated code
+    - Complex functions needing decomposition
+    - Poor naming or unclear code
+    - Silent error swallowing (use category: "error_handling", severity: "medium")
 
-    ### 4. Code Quality & Maintainability
-    - **DRY violations**: Duplicated code that should be extracted
-    - **Code reuse**: Opportunities to leverage existing utilities or abstractions
-    - **Refactoring opportunities**: Complex functions that should be decomposed
-    - **Naming**: Are variables, functions, and types clearly named?
-    - **Documentation**: Are complex algorithms or non-obvious decisions documented?
-    - **Error handling**: Are errors handled appropriately and not silently swallowed?
+    **Architecture (use category: "architecture", severity: "medium"):**
+    - SOLID principle violations
+    - Inappropriate abstraction levels
+    - Missing dependency injection
 
-    ### 5. Design & Architecture
-    - Does the code follow SOLID principles?
-    - Is the abstraction level appropriate?
-    - Are dependencies properly managed and injected?
-    - Does the change fit the existing architecture patterns?
-    - Could the design be simplified without losing functionality?
+    **Performance (use category: "performance"):**
+    - N+1 queries, unnecessary allocations (severity: "medium")
+    - Poor algorithmic complexity (severity: "high" if significant)
 
-    ### 6. Fitness for Purpose
-    - Does this code solve the problem it's meant to solve?
-    - Are there gaps between the implementation and stated requirements?
-    - Are there unhandled scenarios or use cases?
-    - Is the solution complete or does it leave technical debt?
-
-    ### 7. Performance Considerations
-    - Are there obvious performance issues (N+1 queries, unnecessary allocations)?
-    - Is the algorithmic complexity appropriate?
-    - Are there opportunities for caching or memoization?
-
-    ## Reporting Guidelines
-
-    - Prioritize findings by severity: CRITICAL > HIGH > MEDIUM > LOW
-    - For each finding, explain WHY it's a problem and HOW to fix it
-    - Be specific with file paths and line numbers
-    - Distinguish between blocking issues and suggestions
-    - If code is well-written, acknowledge what's done well
-    - Focus on actionable feedback, not stylistic preferences unless they impact clarity
+    Prioritize: security vulnerabilities > bugs > error handling > everything else.
+    Only report actionable issues. Skip stylistic preferences unless they impact clarity.
 
 # HTTP Configuration
 http:
