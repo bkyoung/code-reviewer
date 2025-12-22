@@ -170,7 +170,7 @@ func TestIsBinaryPatch(t *testing.T) {
 		{
 			name:     "patch mentioning binary in content",
 			patch:    "@@ -1,1 +1,1 @@\n-// Binary files are not supported\n+// Binary files are now supported\n",
-			expected: true, // This is a false positive, but acceptable edge case
+			expected: false, // Fixed: only matches when "Binary files " starts a line
 		},
 	}
 

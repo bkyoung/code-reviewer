@@ -145,10 +145,19 @@ func diffPathAndStatus(fp formatdiff.FilePatch) (path, oldPath, status string) {
 }
 
 // IsBinaryPatch checks if a patch represents a binary file.
-// Git uses "Binary files ... differ" or "GIT binary patch" in the patch for binary files.
+// Git outputs binary markers at the start of a line:
+//   - "Binary files a/... and b/... differ"
+//   - "GIT binary patch"
+//
+// We check line-by-line to avoid false positives from code containing these strings.
 func IsBinaryPatch(patchText string) bool {
-	return strings.Contains(patchText, "Binary files") ||
-		strings.Contains(patchText, "GIT binary patch")
+	for _, line := range strings.Split(patchText, "\n") {
+		if strings.HasPrefix(line, "Binary files ") ||
+			strings.HasPrefix(line, "GIT binary patch") {
+			return true
+		}
+	}
+	return false
 }
 
 func diffWithWorkingTree(ctx context.Context, repoDir, baseRef string) ([]domain.FileDiff, error) {
