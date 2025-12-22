@@ -95,7 +95,7 @@ func formatOutOfDiffSection(findings []PositionedFinding) string {
 	for _, pf := range findings {
 		f := pf.Finding
 		sb.WriteString(fmt.Sprintf("- **%s** in `%s` (line %d): %s\n",
-			f.Severity, f.File, f.LineStart, f.Description))
+			f.Severity, escapeMarkdownInlineCode(f.File), f.LineStart, f.Description))
 	}
 
 	return sb.String()
@@ -109,7 +109,7 @@ func formatBinaryFilesSection(files []domain.FileDiff) string {
 	sb.WriteString("The following binary files were changed and excluded from review:\n\n")
 
 	for _, f := range files {
-		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", f.Path, f.Status))
+		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", escapeMarkdownInlineCode(f.Path), f.Status))
 	}
 
 	return sb.String()
@@ -122,10 +122,36 @@ func formatRenamedFilesSection(files []domain.FileDiff) string {
 	sb.WriteString("## Files Renamed\n\n")
 
 	for _, f := range files {
-		sb.WriteString(fmt.Sprintf("- `%s` → `%s`\n", f.OldPath, f.Path))
+		sb.WriteString(fmt.Sprintf("- `%s` → `%s`\n", escapeMarkdownInlineCode(f.OldPath), escapeMarkdownInlineCode(f.Path)))
 	}
 
 	return sb.String()
+}
+
+// =============================================================================
+// Markdown Escaping Helpers
+// =============================================================================
+
+// escapeMarkdownInlineCode escapes characters that could break inline code formatting.
+// Specifically handles backticks and newlines which would break `code` spans.
+func escapeMarkdownInlineCode(s string) string {
+	// Replace backticks with escaped version
+	s = strings.ReplaceAll(s, "`", "\\`")
+	// Replace newlines with space (newlines break inline code)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// escapeMarkdownTableCell escapes characters that could break table cell formatting.
+// Specifically handles pipes and newlines which would break | cell | structure.
+func escapeMarkdownTableCell(s string) string {
+	// Replace pipes with escaped version
+	s = strings.ReplaceAll(s, "|", "\\|")
+	// Replace newlines with space (newlines break table rows)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
 }
 
 // =============================================================================
@@ -285,7 +311,7 @@ func formatFilesRequiringAttention(findings []PositionedFinding, attentionSeveri
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", file, strings.Join(badges, ", ")))
+		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", escapeMarkdownInlineCode(file), strings.Join(badges, ", ")))
 	}
 
 	return sb.String()
@@ -323,7 +349,7 @@ func formatCategoryTable(categoryCounts map[string]int) string {
 	sort.Strings(categories)
 
 	for _, cat := range categories {
-		sb.WriteString(fmt.Sprintf("| %s | %d |\n", cat, categoryCounts[cat]))
+		sb.WriteString(fmt.Sprintf("| %s | %d |\n", escapeMarkdownTableCell(cat), categoryCounts[cat]))
 	}
 
 	return sb.String()

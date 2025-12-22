@@ -298,9 +298,16 @@ func TestBuildProgrammaticSummary_FilesRequiringAttention_DefaultActions(t *test
 	if !strings.Contains(result, "db/query.go") {
 		t.Errorf("expected 'db/query.go' in attention section, got %q", result)
 	}
-	// Should NOT include util/helper.go (only medium/low)
-	if strings.Contains(result, "util/helper.go") {
-		t.Errorf("expected 'util/helper.go' to NOT be in attention section (only medium/low), got %q", result)
+	// Should NOT include util/helper.go in attention section (only medium/low)
+	// Extract attention section specifically to avoid false positives from category table
+	attentionSection := extractSection(result, "Files Requiring Attention")
+	if strings.Contains(attentionSection, "util/helper.go") {
+		t.Errorf("expected 'util/helper.go' to NOT be in attention section (only medium/low), got %q", attentionSection)
+	}
+
+	// Verify exact badge format for auth/handler.go
+	if !strings.Contains(attentionSection, "1 critical, 1 high") {
+		t.Errorf("expected auth/handler.go to show '1 critical, 1 high', got %q", attentionSection)
 	}
 }
 
@@ -399,17 +406,21 @@ func TestBuildProgrammaticSummary_EmptyCategory(t *testing.T) {
 
 	result := github.BuildProgrammaticSummary(findings, d, actions)
 
-	// Empty categories should be grouped as "general" or similar
+	// Empty categories should be grouped as "general"
 	if !strings.Contains(result, "Findings by Category") {
 		t.Errorf("expected 'Findings by Category' section even with empty categories, got %q", result)
+	}
+	// Verify empty categories are labeled as "general" with correct count
+	if !strings.Contains(result, "| general | 2 |") {
+		t.Errorf("expected empty categories to be grouped as 'general' with count 2, got %q", result)
 	}
 }
 
 func TestBuildProgrammaticSummary_OutOfDiffFindingsNotCounted(t *testing.T) {
 	findings := []github.PositionedFinding{
-		{Finding: domain.Finding{ID: "f1", File: "a.go", Severity: "critical"}, DiffPosition: diff.IntPtr(1)}, // In diff
-		{Finding: domain.Finding{ID: "f2", File: "b.go", Severity: "critical"}, DiffPosition: nil},            // Out of diff
-		{Finding: domain.Finding{ID: "f3", File: "c.go", Severity: "high"}, DiffPosition: nil},                // Out of diff
+		{Finding: domain.Finding{ID: "f1", File: "a.go", Severity: "critical", Category: "security"}, DiffPosition: diff.IntPtr(1)}, // In diff
+		{Finding: domain.Finding{ID: "f2", File: "b.go", Severity: "critical", Category: "security"}, DiffPosition: nil},            // Out of diff
+		{Finding: domain.Finding{ID: "f3", File: "c.go", Severity: "high", Category: "bug"}, DiffPosition: nil},                     // Out of diff
 	}
 	d := domain.Diff{Files: []domain.FileDiff{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}}
 	actions := github.ReviewActions{}
@@ -424,6 +435,65 @@ func TestBuildProgrammaticSummary_OutOfDiffFindingsNotCounted(t *testing.T) {
 	attentionSection := extractSection(result, "Files Requiring Attention")
 	if strings.Contains(attentionSection, "b.go") {
 		t.Errorf("expected 'b.go' (out of diff) to NOT be in attention section, got %q", attentionSection)
+	}
+
+	// Category table should only count in-diff findings
+	// security: 1 (only f1), bug: 0 (f3 is out of diff)
+	categorySection := extractSection(result, "Findings by Category")
+	if !strings.Contains(categorySection, "| security | 1 |") {
+		t.Errorf("expected category table to show 'security | 1' (only in-diff), got %q", categorySection)
+	}
+	// bug category should not appear since f3 is out of diff
+	if strings.Contains(categorySection, "bug") {
+		t.Errorf("expected 'bug' category to NOT appear (out-of-diff finding), got %q", categorySection)
+	}
+}
+
+func TestBuildProgrammaticSummary_MarkdownEscaping(t *testing.T) {
+	// Test that special characters in file paths and categories are escaped
+	findings := []github.PositionedFinding{
+		{
+			Finding: domain.Finding{
+				ID:       "f1",
+				File:     "path/with`backtick.go",
+				Severity: "high",
+				Category: "category|with|pipes",
+			},
+			DiffPosition: diff.IntPtr(1),
+		},
+		{
+			Finding: domain.Finding{
+				ID:       "f2",
+				File:     "path/with\nnewline.go",
+				Severity: "critical",
+				Category: "normal",
+			},
+			DiffPosition: diff.IntPtr(2),
+		},
+	}
+	d := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "path/with`backtick.go"},
+			{Path: "path/with\nnewline.go"},
+		},
+	}
+	actions := github.ReviewActions{}
+
+	result := github.BuildProgrammaticSummary(findings, d, actions)
+
+	// Backticks in file paths should be escaped
+	if strings.Contains(result, "with`backtick") && !strings.Contains(result, "with\\`backtick") {
+		t.Errorf("expected backtick in file path to be escaped, got %q", result)
+	}
+
+	// Newlines in file paths should be replaced with spaces
+	if strings.Contains(result, "with\nnewline") {
+		t.Errorf("expected newline in file path to be replaced, got %q", result)
+	}
+
+	// Pipes in category names should be escaped
+	if strings.Contains(result, "category|with|pipes") && !strings.Contains(result, "category\\|with\\|pipes") {
+		t.Errorf("expected pipes in category to be escaped, got %q", result)
 	}
 }
 
