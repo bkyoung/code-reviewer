@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"time"
 
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
@@ -193,7 +194,29 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 		nextURL = next
 	}
 
+	// Sort reviews chronologically (oldest first) to guarantee ordering
+	// Don't rely on GitHub API ordering which could change
+	sortReviewsChronologically(allReviews)
+
 	return allReviews, nil
+}
+
+// sortReviewsChronologically sorts reviews by SubmittedAt timestamp (oldest first).
+// Falls back to sorting by ID if timestamps cannot be parsed.
+func sortReviewsChronologically(reviews []ReviewSummary) {
+	sort.Slice(reviews, func(i, j int) bool {
+		// Parse timestamps - GitHub uses RFC3339 format
+		ti, errI := time.Parse(time.RFC3339, reviews[i].SubmittedAt)
+		tj, errJ := time.Parse(time.RFC3339, reviews[j].SubmittedAt)
+
+		// If both parse successfully, compare times
+		if errI == nil && errJ == nil {
+			return ti.Before(tj)
+		}
+
+		// Fall back to ID comparison if timestamps can't be parsed
+		return reviews[i].ID < reviews[j].ID
+	})
 }
 
 // validatePaginationURL validates that a pagination URL is safe to follow.

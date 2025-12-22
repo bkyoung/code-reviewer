@@ -543,6 +543,61 @@ func TestClient_ListReviews_PathEscaping(t *testing.T) {
 	assert.Contains(t, receivedRawPath, "%2F")
 }
 
+func TestClient_ListReviews_ChronologicalOrder(t *testing.T) {
+	// Test that reviews are sorted chronologically (oldest first)
+	// regardless of the order returned by the API
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Return reviews out of order - newest first
+		reviews := []github.ReviewSummary{
+			{ID: 3, SubmittedAt: "2024-01-03T12:00:00Z", State: "APPROVED"},
+			{ID: 1, SubmittedAt: "2024-01-01T12:00:00Z", State: "COMMENTED"},
+			{ID: 2, SubmittedAt: "2024-01-02T12:00:00Z", State: "CHANGES_REQUESTED"},
+		}
+		json.NewEncoder(w).Encode(reviews)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	require.Len(t, reviews, 3)
+	// Should be sorted oldest first
+	assert.Equal(t, int64(1), reviews[0].ID)
+	assert.Equal(t, int64(2), reviews[1].ID)
+	assert.Equal(t, int64(3), reviews[2].ID)
+}
+
+func TestClient_ListReviews_SortFallbackToID(t *testing.T) {
+	// Test that sorting falls back to ID when timestamps are missing
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Return reviews with missing/invalid timestamps
+		reviews := []github.ReviewSummary{
+			{ID: 3, SubmittedAt: "", State: "APPROVED"},
+			{ID: 1, SubmittedAt: "", State: "COMMENTED"},
+			{ID: 2, SubmittedAt: "", State: "CHANGES_REQUESTED"},
+		}
+		json.NewEncoder(w).Encode(reviews)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	require.Len(t, reviews, 3)
+	// Should be sorted by ID as fallback
+	assert.Equal(t, int64(1), reviews[0].ID)
+	assert.Equal(t, int64(2), reviews[1].ID)
+	assert.Equal(t, int64(3), reviews[2].ID)
+}
+
 func TestClient_ListReviews_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
