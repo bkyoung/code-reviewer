@@ -183,3 +183,149 @@ func makeFinding(file string, line int, severity, description string) domain.Fin
 		Description: description,
 	}
 }
+
+func TestNormalizeAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected github.ReviewEvent
+		valid    bool
+	}{
+		// Valid APPROVE variations
+		{"uppercase APPROVE", "APPROVE", github.EventApprove, true},
+		{"lowercase approve", "approve", github.EventApprove, true},
+		{"mixed case Approve", "Approve", github.EventApprove, true},
+		{"with whitespace", "  approve  ", github.EventApprove, true},
+
+		// Valid REQUEST_CHANGES variations
+		{"uppercase REQUEST_CHANGES", "REQUEST_CHANGES", github.EventRequestChanges, true},
+		{"lowercase request_changes", "request_changes", github.EventRequestChanges, true},
+		{"hyphenated request-changes", "request-changes", github.EventRequestChanges, true},
+		{"mixed case Request_Changes", "Request_Changes", github.EventRequestChanges, true},
+
+		// Valid COMMENT variations
+		{"uppercase COMMENT", "COMMENT", github.EventComment, true},
+		{"lowercase comment", "comment", github.EventComment, true},
+		{"mixed case Comment", "Comment", github.EventComment, true},
+
+		// Invalid values - should return EventComment and false
+		{"empty string", "", github.EventComment, false},
+		{"invalid value", "invalid", github.EventComment, false},
+		{"typo", "approv", github.EventComment, false},
+		{"only whitespace", "   ", github.EventComment, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, valid := github.NormalizeAction(tt.input)
+			assert.Equal(t, tt.expected, event, "event mismatch")
+			assert.Equal(t, tt.valid, valid, "valid mismatch")
+		})
+	}
+}
+
+func TestDetermineReviewEventWithActions(t *testing.T) {
+	// Custom actions for testing
+	customActions := github.ReviewActions{
+		OnCritical: "comment", // Instead of request_changes
+		OnHigh:     "approve", // Instead of request_changes
+		OnMedium:   "approve", // Instead of comment
+		OnLow:      "approve", // Instead of comment
+		OnClean:    "comment", // Instead of approve
+	}
+
+	tests := []struct {
+		name     string
+		findings []github.PositionedFinding
+		actions  github.ReviewActions
+		expected github.ReviewEvent
+	}{
+		{
+			name:     "clean code with custom action",
+			findings: []github.PositionedFinding{},
+			actions:  customActions,
+			expected: github.EventComment, // customActions.OnClean = comment
+		},
+		{
+			name: "critical finding with custom action",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "security issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  customActions,
+			expected: github.EventComment, // customActions.OnCritical = comment
+		},
+		{
+			name: "high finding with custom action",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  customActions,
+			expected: github.EventApprove, // customActions.OnHigh = approve
+		},
+		{
+			name: "medium finding with custom action",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "medium", "code smell"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  customActions,
+			expected: github.EventApprove, // customActions.OnMedium = approve
+		},
+		{
+			name: "low finding with custom action",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "minor issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  customActions,
+			expected: github.EventApprove, // customActions.OnLow = approve
+		},
+		{
+			name: "highest severity wins (critical over high)",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+				{Finding: makeFinding("b.go", 2, "critical", "security issue"), DiffPosition: diff.IntPtr(2)},
+			},
+			actions:  customActions,
+			expected: github.EventComment, // critical wins, customActions.OnCritical = comment
+		},
+		{
+			name: "case insensitive action values",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnCritical: "REQUEST_CHANGES", // uppercase
+			},
+			expected: github.EventRequestChanges,
+		},
+		{
+			name: "out of diff findings ignored",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "not in diff"), DiffPosition: nil},
+				{Finding: makeFinding("b.go", 2, "low", "in diff"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  customActions,
+			expected: github.EventApprove, // only low in diff, customActions.OnLow = approve
+		},
+		{
+			name: "default actions when config is empty",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},     // empty config
+			expected: github.EventRequestChanges, // fallback to default
+		},
+		{
+			name:     "clean code with empty config uses approve fallback",
+			findings: []github.PositionedFinding{},
+			actions:  github.ReviewActions{}, // empty config
+			expected: github.EventApprove,    // fallback to default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := github.DetermineReviewEventWithActions(tt.findings, tt.actions)
+			assert.Equal(t, tt.expected, event)
+		})
+	}
+}

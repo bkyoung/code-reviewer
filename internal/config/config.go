@@ -112,6 +112,28 @@ type ReviewConfig struct {
 	// Instructions are custom instructions included in all review prompts.
 	// These guide the LLM on what to look for during code review.
 	Instructions string `yaml:"instructions"`
+
+	// Actions configures the GitHub review action based on finding severity.
+	Actions ReviewActions `yaml:"actions"`
+}
+
+// ReviewActions maps finding severities to GitHub review actions.
+// Valid action values (case-insensitive): approve, comment, request_changes.
+type ReviewActions struct {
+	// OnCritical is the action when any critical severity finding is present.
+	OnCritical string `yaml:"onCritical"`
+
+	// OnHigh is the action when any high severity finding is present (and no critical).
+	OnHigh string `yaml:"onHigh"`
+
+	// OnMedium is the action when any medium severity finding is present (and no higher).
+	OnMedium string `yaml:"onMedium"`
+
+	// OnLow is the action when any low severity finding is present (and no higher).
+	OnLow string `yaml:"onLow"`
+
+	// OnClean is the action when no findings are present in the diff.
+	OnClean string `yaml:"onClean"`
 }
 
 // Merge combines multiple configuration instances, prioritising the latter ones.
@@ -236,8 +258,43 @@ func chooseObservability(base, overlay ObservabilityConfig) ObservabilityConfig 
 }
 
 func chooseReview(base, overlay ReviewConfig) ReviewConfig {
+	result := base
+
+	// Instructions: overlay wins if non-empty
 	if overlay.Instructions != "" {
-		return overlay
+		result.Instructions = overlay.Instructions
 	}
-	return base
+
+	// Actions: overlay wins if any field is non-empty
+	if overlay.Actions.hasAny() {
+		result.Actions = mergeReviewActions(base.Actions, overlay.Actions)
+	}
+
+	return result
+}
+
+// hasAny returns true if any action field is non-empty.
+func (a ReviewActions) hasAny() bool {
+	return a.OnCritical != "" || a.OnHigh != "" || a.OnMedium != "" || a.OnLow != "" || a.OnClean != ""
+}
+
+// mergeReviewActions merges two ReviewActions, with overlay taking precedence for non-empty fields.
+func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
+	result := base
+	if overlay.OnCritical != "" {
+		result.OnCritical = overlay.OnCritical
+	}
+	if overlay.OnHigh != "" {
+		result.OnHigh = overlay.OnHigh
+	}
+	if overlay.OnMedium != "" {
+		result.OnMedium = overlay.OnMedium
+	}
+	if overlay.OnLow != "" {
+		result.OnLow = overlay.OnLow
+	}
+	if overlay.OnClean != "" {
+		result.OnClean = overlay.OnClean
+	}
+	return result
 }

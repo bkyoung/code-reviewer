@@ -234,6 +234,90 @@ func TestReviewPoster_PostReview_OverrideEvent(t *testing.T) {
 	assert.Equal(t, github.EventComment, result.Event)
 }
 
+func TestReviewPoster_PostReview_WithCustomReviewActions(t *testing.T) {
+	client := &MockReviewClient{}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	// With default actions, high severity would trigger REQUEST_CHANGES
+	// But with custom actions, we configure high to trigger COMMENT
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+	}
+
+	customActions := github.ReviewActions{
+		OnCritical: "request_changes",
+		OnHigh:     "comment", // Override high to just comment
+		OnMedium:   "approve", // Override medium to approve
+		OnLow:      "approve",
+		OnClean:    "approve",
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:         "owner",
+		Repo:          "repo",
+		PullNumber:    1,
+		CommitSHA:     "sha",
+		Findings:      findings,
+		ReviewActions: customActions,
+	})
+
+	require.NoError(t, err)
+	// Should use COMMENT because custom actions configure high to COMMENT
+	assert.Equal(t, github.EventComment, result.Event)
+}
+
+func TestReviewPoster_PostReview_OverrideEventTakesPrecedenceOverReviewActions(t *testing.T) {
+	client := &MockReviewClient{}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	// Both OverrideEvent and ReviewActions are set
+	// OverrideEvent should take precedence
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+	}
+
+	customActions := github.ReviewActions{
+		OnHigh: "comment", // Would return COMMENT
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:         "owner",
+		Repo:          "repo",
+		PullNumber:    1,
+		CommitSHA:     "sha",
+		Findings:      findings,
+		ReviewActions: customActions,
+		OverrideEvent: github.EventApprove, // This should win
+	})
+
+	require.NoError(t, err)
+	// OverrideEvent takes precedence
+	assert.Equal(t, github.EventApprove, result.Event)
+}
+
+func TestReviewPoster_PostReview_ReviewActionsOnClean(t *testing.T) {
+	client := &MockReviewClient{}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	// No findings = clean code
+	// With custom OnClean = "comment", should return COMMENT instead of APPROVE
+	customActions := github.ReviewActions{
+		OnClean: "comment", // Override clean to comment
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:         "owner",
+		Repo:          "repo",
+		PullNumber:    1,
+		CommitSHA:     "sha",
+		Findings:      []github.PositionedFinding{},
+		ReviewActions: customActions,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, github.EventComment, result.Event)
+}
+
 // Helper to create a finding for tests
 func makeFinding(file string, line int, severity, description string) domain.Finding {
 	return domain.Finding{

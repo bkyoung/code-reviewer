@@ -7,6 +7,36 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
+// ReviewActions configures the GitHub review action for each finding severity level.
+// This mirrors config.ReviewActions but lives in the adapter layer to avoid coupling.
+type ReviewActions struct {
+	OnCritical string // Action for critical severity findings
+	OnHigh     string // Action for high severity findings
+	OnMedium   string // Action for medium severity findings
+	OnLow      string // Action for low severity findings
+	OnClean    string // Action when no findings in diff
+}
+
+// NormalizeAction converts a string action to ReviewEvent.
+// It handles case-insensitive input and common variations.
+// Returns (event, true) if valid, (EventComment, false) if invalid.
+func NormalizeAction(action string) (ReviewEvent, bool) {
+	normalized := strings.ToUpper(strings.TrimSpace(action))
+	// Handle hyphenated variant
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+
+	switch normalized {
+	case "APPROVE":
+		return EventApprove, true
+	case "REQUEST_CHANGES":
+		return EventRequestChanges, true
+	case "COMMENT":
+		return EventComment, true
+	default:
+		return EventComment, false
+	}
+}
+
 // BuildReviewComments converts positioned findings to GitHub review comments.
 // Only findings with a valid DiffPosition (InDiff() == true) are included.
 // This function is pure and does not modify the input.
@@ -61,24 +91,67 @@ func FormatFindingComment(f domain.Finding) string {
 }
 
 // DetermineReviewEvent determines the appropriate ReviewEvent based on finding severities.
+// This function uses the default review actions (legacy behavior).
 // Returns:
 //   - EventApprove if no findings (in diff)
 //   - EventRequestChanges if any high or critical severity findings (in diff)
 //   - EventComment otherwise
 func DetermineReviewEvent(findings []PositionedFinding) ReviewEvent {
+	// Use empty ReviewActions to trigger default/fallback behavior
+	return DetermineReviewEventWithActions(findings, ReviewActions{})
+}
+
+// DetermineReviewEventWithActions determines the appropriate ReviewEvent based on
+// finding severities and the provided action configuration.
+// Returns:
+//   - Configured action for the highest severity found in diff
+//   - OnClean action if no findings in diff
+//   - Fallback to sensible defaults if action is not configured
+func DetermineReviewEventWithActions(findings []PositionedFinding, actions ReviewActions) ReviewEvent {
 	inDiffFindings := filterInDiff(findings)
 
+	// No findings = clean code
 	if len(inDiffFindings) == 0 {
-		return EventApprove
+		if actions.OnClean != "" {
+			if event, valid := NormalizeAction(actions.OnClean); valid {
+				return event
+			}
+		}
+		return EventApprove // default for clean
 	}
 
-	for _, pf := range inDiffFindings {
-		sev := strings.ToLower(pf.Finding.Severity)
-		if sev == "high" || sev == "critical" {
-			return EventRequestChanges
+	// Find highest severity present
+	severityOrder := []string{"critical", "high", "medium", "low"}
+	actionMap := map[string]string{
+		"critical": actions.OnCritical,
+		"high":     actions.OnHigh,
+		"medium":   actions.OnMedium,
+		"low":      actions.OnLow,
+	}
+	defaultMap := map[string]ReviewEvent{
+		"critical": EventRequestChanges,
+		"high":     EventRequestChanges,
+		"medium":   EventComment,
+		"low":      EventComment,
+	}
+
+	for _, severity := range severityOrder {
+		// Check if any finding has this severity
+		for _, pf := range inDiffFindings {
+			if strings.ToLower(pf.Finding.Severity) == severity {
+				// Found this severity - use configured action or default
+				if action := actionMap[severity]; action != "" {
+					if event, valid := NormalizeAction(action); valid {
+						return event
+					}
+				}
+				// Fallback to default for this severity
+				return defaultMap[severity]
+			}
 		}
 	}
 
+	// No known severity found - treat as comment
 	return EventComment
 }
 

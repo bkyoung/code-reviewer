@@ -120,3 +120,138 @@ observability:
 		t.Error("expected metrics to be disabled from file config")
 	}
 }
+
+func TestReviewActionsDefaults(t *testing.T) {
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{},
+		FileName:    "nonexistent",
+		EnvPrefix:   "CR",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Verify default review actions (sensible defaults)
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "request_changes" {
+		t.Errorf("expected OnHigh 'request_changes', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "comment" {
+		t.Errorf("expected OnMedium 'comment', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "comment" {
+		t.Errorf("expected OnLow 'comment', got %s", cfg.Review.Actions.OnLow)
+	}
+	if cfg.Review.Actions.OnClean != "approve" {
+		t.Errorf("expected OnClean 'approve', got %s", cfg.Review.Actions.OnClean)
+	}
+}
+
+func TestReviewActionsFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  actions:
+    onCritical: comment
+    onHigh: approve
+    onMedium: request_changes
+    onLow: approve
+    onClean: comment
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Verify file overrides defaults
+	if cfg.Review.Actions.OnCritical != "comment" {
+		t.Errorf("expected OnCritical 'comment', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "approve" {
+		t.Errorf("expected OnHigh 'approve', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "request_changes" {
+		t.Errorf("expected OnMedium 'request_changes', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "approve" {
+		t.Errorf("expected OnLow 'approve', got %s", cfg.Review.Actions.OnLow)
+	}
+	if cfg.Review.Actions.OnClean != "comment" {
+		t.Errorf("expected OnClean 'comment', got %s", cfg.Review.Actions.OnClean)
+	}
+}
+
+func TestReviewActionsEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  actions:
+    onCritical: comment
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	// Environment variable should override file
+	t.Setenv("CR_REVIEW_ACTIONS_ONCRITICAL", "approve")
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Verify env var overrides file
+	if cfg.Review.Actions.OnCritical != "approve" {
+		t.Errorf("expected OnCritical 'approve' from env var, got %s", cfg.Review.Actions.OnCritical)
+	}
+}
+
+func TestReviewActionsMerge(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			Instructions: "base instructions",
+			Actions: config.ReviewActions{
+				OnCritical: "request_changes",
+				OnHigh:     "request_changes",
+			},
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			Actions: config.ReviewActions{
+				OnHigh:   "approve",
+				OnMedium: "comment",
+			},
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	// Overlay with non-empty actions should replace
+	if merged.Review.Actions.OnHigh != "approve" {
+		t.Errorf("expected OnHigh 'approve' from overlay, got %s", merged.Review.Actions.OnHigh)
+	}
+	if merged.Review.Actions.OnMedium != "comment" {
+		t.Errorf("expected OnMedium 'comment' from overlay, got %s", merged.Review.Actions.OnMedium)
+	}
+	// Instructions should be preserved from base (overlay is empty)
+	if merged.Review.Instructions != "base instructions" {
+		t.Errorf("expected base instructions to be preserved, got %s", merged.Review.Instructions)
+	}
+}

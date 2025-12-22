@@ -203,7 +203,14 @@ func run() error {
 		DefaultOutput:       cfg.Output.Directory,
 		DefaultRepo:         repoName,
 		DefaultInstructions: cfg.Review.Instructions,
-		Version:             version.Value(),
+		DefaultReviewActions: cli.DefaultReviewActions{
+			OnCritical: cfg.Review.Actions.OnCritical,
+			OnHigh:     cfg.Review.Actions.OnHigh,
+			OnMedium:   cfg.Review.Actions.OnMedium,
+			OnLow:      cfg.Review.Actions.OnLow,
+			OnClean:    cfg.Review.Actions.OnClean,
+		},
+		Version: version.Value(),
 	})
 
 	if err := root.ExecuteContext(ctx); err != nil {
@@ -545,7 +552,7 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 	// Map findings to positioned findings with diff positions
 	positionedFindings := githubadapter.MapFindings(req.Review.Findings, req.Diff)
 
-	// Build the post request
+	// Build the post request with review action configuration
 	postReq := usecasegithub.PostReviewRequest{
 		Owner:      req.Owner,
 		Repo:       req.Repo,
@@ -553,6 +560,13 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 		CommitSHA:  req.CommitSHA,
 		Review:     req.Review,
 		Findings:   positionedFindings,
+		ReviewActions: githubadapter.ReviewActions{
+			OnCritical: req.ActionOnCritical,
+			OnHigh:     req.ActionOnHigh,
+			OnMedium:   req.ActionOnMedium,
+			OnLow:      req.ActionOnLow,
+			OnClean:    req.ActionOnClean,
+		},
 	}
 
 	// Post the review
