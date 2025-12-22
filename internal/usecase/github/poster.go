@@ -92,18 +92,14 @@ type PostReviewResult struct {
 // It converts domain findings to GitHub review comments, determines the
 // appropriate review event based on severity, and posts the review.
 //
-// If BotUsername is set, previous reviews from that bot are dismissed before
-// posting the new review. Dismiss failures are logged but do not block posting.
+// If BotUsername is set, previous reviews from that bot are dismissed AFTER
+// posting the new review succeeds. This ensures the PR always has at least one
+// review signal - if posting fails, previous reviews are preserved.
+// Dismiss failures are logged but do not affect the result.
 //
 // Findings without a DiffPosition (not in diff) are silently skipped and
 // counted in CommentsSkipped.
 func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*PostReviewResult, error) {
-	// Dismiss previous bot reviews if BotUsername is set
-	var dismissedCount int
-	if req.BotUsername != "" {
-		dismissedCount = p.dismissStaleReviews(ctx, req.Owner, req.Repo, req.PullNumber, req.BotUsername)
-	}
-
 	// Count in-diff vs out-of-diff findings
 	inDiffCount := github.CountInDiffFindings(req.Findings)
 	skippedCount := len(req.Findings) - inDiffCount
@@ -116,7 +112,7 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 		event = github.DetermineReviewEventWithActions(req.Findings, req.ReviewActions)
 	}
 
-	// Call the client
+	// Call the client to create the new review first
 	input := github.CreateReviewInput{
 		Owner:      req.Owner,
 		Repo:       req.Repo,
@@ -130,6 +126,13 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	resp, err := p.client.CreateReview(ctx, input)
 	if err != nil {
 		return nil, err
+	}
+
+	// Dismiss previous bot reviews AFTER successful post
+	// This ensures PR always has review signal - if post failed, old reviews remain
+	var dismissedCount int
+	if req.BotUsername != "" {
+		dismissedCount = p.dismissStaleReviews(ctx, req.Owner, req.Repo, req.PullNumber, req.BotUsername)
 	}
 
 	return &PostReviewResult{

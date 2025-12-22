@@ -564,3 +564,36 @@ func TestReviewPoster_PostReview_NoBotReviewsToDissmiss(t *testing.T) {
 	assert.Equal(t, 0, result.DismissedCount)
 	assert.Empty(t, client.DismissedIDs)
 }
+
+func TestReviewPoster_PostReview_NoDismissalOnCreateFailure(t *testing.T) {
+	// Verify that if CreateReview fails, no reviews are dismissed.
+	// This ensures the PR always maintains review signal.
+	listCalled := false
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			listCalled = true
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "bot[bot]"}, State: "APPROVED"},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return nil, errors.New("create review failed")
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	_, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create review failed")
+	// ListReviews should NOT have been called since dismissal happens after CreateReview
+	assert.False(t, listCalled, "ListReviews should not be called when CreateReview fails")
+	// No reviews should have been dismissed
+	assert.Empty(t, client.DismissedIDs)
+}
