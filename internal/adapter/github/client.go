@@ -186,12 +186,15 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 		}
 		allReviews = append(allReviews, pageReviews...)
 
-		// Validate pagination URL to prevent SSRF attacks
+		// Validate and resolve pagination URL to prevent SSRF attacks
+		// This also handles relative URLs by resolving against baseURL
 		if next != "" {
-			if err := c.validatePaginationURL(next); err != nil {
+			resolved, err := c.ValidateAndResolvePaginationURL(next)
+			if err != nil {
 				// Return error instead of silently truncating - fail secure
 				return nil, fmt.Errorf("unsafe pagination URL in Link header: %w", err)
 			}
+			next = resolved
 		}
 		nextURL = next
 	}
@@ -221,42 +224,49 @@ func sortReviewsChronologically(reviews []ReviewSummary) {
 	})
 }
 
-// validatePaginationURL validates that a pagination URL is safe to follow.
-// This prevents SSRF attacks via malicious Link header manipulation.
-// Returns an error describing the validation failure, or nil if the URL is trusted.
-func (c *Client) validatePaginationURL(rawURL string) error {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-
+// ValidateAndResolvePaginationURL validates and resolves a pagination URL.
+// This prevents SSRF attacks while supporting relative URLs and enterprise setups.
+// Returns the resolved absolute URL or an error if validation fails.
+func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) {
 	base, err := url.Parse(c.baseURL)
 	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
+		return "", fmt.Errorf("invalid base URL: %w", err)
 	}
 
-	// Require absolute URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Resolve relative URLs against baseURL
 	if !parsed.IsAbs() {
-		return fmt.Errorf("URL must be absolute, got: %s", rawURL)
+		parsed = base.ResolveReference(parsed)
 	}
 
-	// Require matching scheme (prevent http downgrade attacks)
-	if parsed.Scheme != base.Scheme {
-		return fmt.Errorf("scheme mismatch: expected %s, got %s", base.Scheme, parsed.Scheme)
+	// Prevent scheme downgrade attacks (https -> http)
+	// Allow http in tests, but never downgrade from https
+	if base.Scheme == "https" && parsed.Scheme == "http" {
+		return "", fmt.Errorf("scheme downgrade not allowed: %s -> %s", base.Scheme, parsed.Scheme)
 	}
 
-	// Require matching host (includes port if present)
-	if parsed.Host != base.Host {
-		return fmt.Errorf("host mismatch: expected %s, got %s", base.Host, parsed.Host)
+	// Allow baseURL host OR the canonical GitHub API host
+	// This supports enterprise setups where redirects may occur
+	allowedHosts := map[string]bool{
+		base.Host:            true,
+		"api.github.com":     true,
+		"api.github.com:443": true,
+	}
+	if !allowedHosts[parsed.Host] {
+		return "", fmt.Errorf("untrusted host: %s (expected %s or api.github.com)", parsed.Host, base.Host)
 	}
 
 	// Require path starts with expected GitHub API prefix
 	// This prevents redirecting to other endpoints on the same host
 	if !strings.HasPrefix(parsed.Path, "/repos/") {
-		return fmt.Errorf("unexpected API path: %s (must start with /repos/)", parsed.Path)
+		return "", fmt.Errorf("unexpected API path: %s (must start with /repos/)", parsed.Path)
 	}
 
-	return nil
+	return parsed.String(), nil
 }
 
 // fetchReviewsPage fetches a single page of reviews and returns the next page URL if present.

@@ -491,59 +491,53 @@ func TestClient_ListReviews_SSRFProtection_DifferentHost(t *testing.T) {
 	// Should return error instead of silently truncating
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsafe pagination URL")
-	assert.Contains(t, err.Error(), "host mismatch")
+	assert.Contains(t, err.Error(), "untrusted host")
 	assert.Equal(t, 1, pageCount, "should only fetch first page")
 }
 
 func TestClient_ListReviews_SSRFProtection_SchemeDowngrade(t *testing.T) {
-	// Test that the client rejects scheme changes in pagination URLs
-	// Even with same host, a scheme change could indicate MITM or attack
-	pageCount := 0
-	var serverURL string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pageCount++
-		w.Header().Set("Content-Type", "application/json")
-
-		if pageCount == 1 {
-			// Return Link header with https instead of http (scheme mismatch)
-			// The test server uses http, so this tests that we reject scheme changes
-			w.Header().Set("Link", `<https://`+r.Host+`/repos/owner/repo/pulls/123/reviews?page=2>; rel="next"`)
-			reviews := []github.ReviewSummary{
-				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
-			}
-			json.NewEncoder(w).Encode(reviews)
-		} else {
-			t.Fatal("client followed scheme-changed Link header!")
-		}
-	}))
-	defer server.Close()
-	serverURL = server.URL
+	// Test that we reject https->http downgrades but allow http->https upgrades
+	// This is tested via the validateAndResolvePaginationURL function directly
+	// since httptest servers use http and we can't easily test https->http
 
 	client := github.NewClient("test-token")
-	client.SetBaseURL(serverURL) // http://...
 
-	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+	// Simulate an https base URL (production scenario)
+	client.SetBaseURL("https://api.github.com")
 
+	// Test: https base -> http link should be rejected (downgrade attack)
+	_, err := client.ValidateAndResolvePaginationURL("http://api.github.com/repos/owner/repo/pulls/1/reviews?page=2")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scheme mismatch")
+	assert.Contains(t, err.Error(), "scheme downgrade not allowed")
+
+	// Test: http base -> https link should be allowed (upgrade is safe)
+	client.SetBaseURL("http://localhost:8080")
+	resolved, err := client.ValidateAndResolvePaginationURL("https://localhost:8080/repos/owner/repo/pulls/1/reviews?page=2")
+	require.NoError(t, err)
+	assert.Equal(t, "https://localhost:8080/repos/owner/repo/pulls/1/reviews?page=2", resolved)
 }
 
-func TestClient_ListReviews_SSRFProtection_RelativeURL(t *testing.T) {
-	// Test that the client rejects relative URLs in Link header
+func TestClient_ListReviews_RelativeURLResolution(t *testing.T) {
+	// Test that the client correctly resolves relative URLs in Link header
+	// This supports various GitHub/enterprise configurations
 	pageCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pageCount++
 		w.Header().Set("Content-Type", "application/json")
 
 		if pageCount == 1 {
-			// Return relative URL (no scheme/host)
+			// Return relative URL (no scheme/host) - should be resolved against baseURL
 			w.Header().Set("Link", `</repos/owner/repo/pulls/123/reviews?page=2>; rel="next"`)
 			reviews := []github.ReviewSummary{
-				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED", SubmittedAt: "2024-01-01T00:00:00Z"},
 			}
 			json.NewEncoder(w).Encode(reviews)
 		} else {
-			t.Fatal("client followed relative Link header!")
+			// Second page - no more pages
+			reviews := []github.ReviewSummary{
+				{ID: 2, User: github.User{Login: "bot"}, State: "COMMENTED", SubmittedAt: "2024-01-02T00:00:00Z"},
+			}
+			json.NewEncoder(w).Encode(reviews)
 		}
 	}))
 	defer server.Close()
@@ -551,10 +545,11 @@ func TestClient_ListReviews_SSRFProtection_RelativeURL(t *testing.T) {
 	client := github.NewClient("test-token")
 	client.SetBaseURL(server.URL)
 
-	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "URL must be absolute")
+	require.NoError(t, err)
+	assert.Len(t, reviews, 2, "should have fetched both pages")
+	assert.Equal(t, 2, pageCount, "should have made two requests")
 }
 
 func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
