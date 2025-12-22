@@ -9,9 +9,8 @@ providers:
     model: "static-model"
 
   # OpenAI provider (GPT models)
-  # Note: gpt-5.2-codex not yet available in API (Dec 2025)
   openai:
-    enabled: false
+    enabled: true
     model: "gpt-5.2"
     apiKey: "${OPENAI_API_KEY}"
 
@@ -23,7 +22,7 @@ providers:
 
   # Google Gemini provider
   gemini:
-    enabled: false
+    enabled: true
     model: "gemini-3-pro-preview"
     apiKey: "${GEMINI_API_KEY}"
 

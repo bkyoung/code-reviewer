@@ -35,6 +35,23 @@ func isO1Model(model string) bool {
 	return false
 }
 
+// usesMaxCompletionTokens checks if the model requires max_completion_tokens instead of max_tokens.
+// This includes reasoning models (o1, o3, o4) and newer GPT models (gpt-5+).
+func usesMaxCompletionTokens(model string) bool {
+	if isO1Model(model) {
+		return true
+	}
+	modelLower := strings.ToLower(model)
+	// GPT-5 and later models use max_completion_tokens
+	newModelFamilies := []string{"gpt-5", "gpt-6", "gpt-7", "gpt-8", "gpt-9"}
+	for _, family := range newModelFamilies {
+		if strings.HasPrefix(modelLower, family) {
+			return true
+		}
+	}
+	return false
+}
+
 // HTTPClient is an HTTP client for the OpenAI API.
 type HTTPClient struct {
 	apiKey    string
@@ -146,9 +163,9 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 	// o1-series models have different API requirements
 	isO1 := isO1Model(c.model)
 
-	// Set token limits
+	// Set token limits - newer models (o1+, gpt-5+) use max_completion_tokens
 	if options.MaxTokens > 0 {
-		if isO1 {
+		if usesMaxCompletionTokens(c.model) {
 			reqBody.MaxCompletionTokens = options.MaxTokens
 		} else {
 			reqBody.MaxTokens = options.MaxTokens

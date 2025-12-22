@@ -400,8 +400,14 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				wg.Done()
 			}()
 
-			// Build provider-specific prompt
-			providerReq, err := o.deps.PromptBuilder(projectContext, diff, req, name)
+			// Filter binary files before building prompt (saves tokens, prevents impossible findings)
+			textDiff, binaryFiles := FilterBinaryFiles(diff)
+			if len(binaryFiles) > 0 {
+				log.Printf("[%s] Filtered %d binary file(s) from review", name, len(binaryFiles))
+			}
+
+			// Build provider-specific prompt using filtered diff
+			providerReq, err := o.deps.PromptBuilder(projectContext, textDiff, req, name)
 			if err != nil {
 				resultsChan <- struct {
 					review    domain.Review
@@ -707,4 +713,29 @@ func validateRequest(req BranchRequest) error {
 		return errors.New("output directory is required")
 	}
 	return nil
+}
+
+// FilterBinaryFiles separates a diff into text files and binary files.
+// The text diff is suitable for sending to LLMs (excludes binary files to save tokens).
+// The full diff (with binary files) should be used for GitHub posting so binary
+// file changes are visible in the summary.
+func FilterBinaryFiles(diff domain.Diff) (textDiff domain.Diff, binaryFiles []domain.FileDiff) {
+	textFiles := make([]domain.FileDiff, 0, len(diff.Files))
+	binaryFiles = make([]domain.FileDiff, 0)
+
+	for _, f := range diff.Files {
+		if f.IsBinary {
+			binaryFiles = append(binaryFiles, f)
+		} else {
+			textFiles = append(textFiles, f)
+		}
+	}
+
+	textDiff = domain.Diff{
+		FromCommitHash: diff.FromCommitHash,
+		ToCommitHash:   diff.ToCommitHash,
+		Files:          textFiles,
+	}
+
+	return textDiff, binaryFiles
 }

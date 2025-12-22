@@ -618,3 +618,39 @@ func TestHTTPClient_WithObservability_Error(t *testing.T) {
 	assert.Equal(t, 1, stats.ErrorCount)
 	assert.Equal(t, 1, stats.ByProvider["openai"].Errors)
 }
+
+func TestHTTPClient_Call_GPT5_UsesMaxCompletionTokens(t *testing.T) {
+	// GPT-5 models should use max_completion_tokens (like o1 models) but still support temperature
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify gpt-5 model uses max_completion_tokens, not max_tokens
+		assert.Equal(t, 2000, req.MaxCompletionTokens, "gpt-5 models should use max_completion_tokens")
+		assert.Equal(t, 0, req.MaxTokens, "gpt-5 models should not set max_tokens")
+
+		// GPT-5 models should still support temperature (unlike o1 models)
+		assert.Equal(t, 0.7, req.Temperature)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:      "chatcmpl-gpt5",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "gpt-5.2",
+			Choices: []openai.Choice{
+				{Index: 0, Message: openai.Message{Role: "assistant", Content: "gpt-5 response"}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+		})
+	}))
+	defer server.Close()
+
+	client := openai.NewHTTPClient("test-key", "gpt-5.2", testProviderConfig(), testHTTPConfig())
+	client.SetBaseURL(server.URL)
+
+	resp, err := client.Call(context.Background(), "test", openai.CallOptions{MaxTokens: 2000, Temperature: 0.7})
+	require.NoError(t, err)
+	assert.Equal(t, "gpt-5 response", resp.Text)
+}

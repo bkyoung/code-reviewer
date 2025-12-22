@@ -552,13 +552,28 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 	// Map findings to positioned findings with diff positions
 	positionedFindings := githubadapter.MapFindings(req.Review.Findings, req.Diff)
 
+	// Build summary appendix for edge cases (out-of-diff findings, binary files, renames)
+	appendix := githubadapter.BuildSummaryAppendix(positionedFindings, req.Diff)
+
+	// Create review with enhanced summary if appendix exists
+	enhancedReview := req.Review
+	if appendix != "" {
+		enhancedReview = domain.Review{
+			ProviderName: req.Review.ProviderName,
+			ModelName:    req.Review.ModelName,
+			Summary:      githubadapter.AppendSections(req.Review.Summary, appendix),
+			Findings:     req.Review.Findings,
+			Cost:         req.Review.Cost,
+		}
+	}
+
 	// Build the post request with review action configuration
 	postReq := usecasegithub.PostReviewRequest{
 		Owner:      req.Owner,
 		Repo:       req.Repo,
 		PullNumber: req.PRNumber,
 		CommitSHA:  req.CommitSHA,
-		Review:     req.Review,
+		Review:     enhancedReview,
 		Findings:   positionedFindings,
 		ReviewActions: githubadapter.ReviewActions{
 			OnCritical: req.ActionOnCritical,
