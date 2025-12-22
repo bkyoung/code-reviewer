@@ -1,0 +1,319 @@
+package github_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/bkyoung/code-reviewer/internal/adapter/github"
+	"github.com/bkyoung/code-reviewer/internal/diff"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewClient(t *testing.T) {
+	client := github.NewClient("test-token")
+
+	require.NotNil(t, client)
+}
+
+func TestClient_CreateReview_Success(t *testing.T) {
+	requestReceived := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived = true
+
+		// Verify request method and path
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/repos/owner/repo/pulls/123/reviews", r.URL.Path)
+
+		// Verify headers
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/vnd.github+json", r.Header.Get("Accept"))
+		assert.Equal(t, "2022-11-28", r.Header.Get("X-GitHub-Api-Version"))
+
+		// Parse and verify request body
+		var req github.CreateReviewRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		assert.Equal(t, "sha123", req.CommitID)
+		assert.Equal(t, github.EventComment, req.Event)
+		assert.Equal(t, "Review summary", req.Body)
+		assert.Len(t, req.Comments, 2)
+
+		// Send response
+		resp := github.CreateReviewResponse{
+			ID:      456,
+			State:   "COMMENTED",
+			HTMLURL: "https://github.com/owner/repo/pull/123#pullrequestreview-456",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	findings := []github.PositionedFinding{
+		{
+			Finding:      makeFinding("file1.go", 10, "low", "Issue 1"),
+			DiffPosition: diff.IntPtr(5),
+		},
+		{
+			Finding:      makeFinding("file2.go", 20, "low", "Issue 2"),
+			DiffPosition: diff.IntPtr(15),
+		},
+	}
+
+	resp, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 123,
+		CommitSHA:  "sha123",
+		Event:      github.EventComment,
+		Summary:    "Review summary",
+		Findings:   findings,
+	})
+
+	require.NoError(t, err)
+	require.True(t, requestReceived)
+	assert.Equal(t, int64(456), resp.ID)
+	assert.Equal(t, "COMMENTED", resp.State)
+}
+
+func TestClient_CreateReview_FiltersDiffPosition(t *testing.T) {
+	var receivedCommentCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req github.CreateReviewRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		receivedCommentCount = len(req.Comments)
+
+		resp := github.CreateReviewResponse{ID: 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	// Mix of in-diff and out-of-diff findings
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("a.go", 1, "high", "a"), DiffPosition: diff.IntPtr(1)},
+		{Finding: makeFinding("b.go", 2, "low", "b"), DiffPosition: nil}, // Out of diff
+		{Finding: makeFinding("c.go", 3, "low", "c"), DiffPosition: diff.IntPtr(3)},
+	}
+
+	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+		Event:      github.EventComment,
+		Summary:    "Test",
+		Findings:   findings,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, receivedCommentCount) // Only 2 in-diff findings
+}
+
+func TestClient_CreateReview_AuthenticationError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Bad credentials",
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("bad-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication")
+}
+
+func TestClient_CreateReview_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Not Found",
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "nonexistent",
+		Repo:       "repo",
+		PullNumber: 999,
+		CommitSHA:  "sha",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid request")
+}
+
+func TestClient_CreateReview_ValidationError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Validation Failed",
+			Errors: []struct {
+				Resource string `json:"resource"`
+				Field    string `json:"field"`
+				Code     string `json:"code"`
+				Message  string `json:"message"`
+			}{
+				{Field: "position", Code: "invalid"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid request")
+}
+
+func TestClient_CreateReview_RateLimitWithRetry(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+				Message: "API rate limit exceeded",
+			})
+			return
+		}
+		// Succeed on third try
+		resp := github.CreateReviewResponse{ID: 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+	client.SetMaxRetries(5)
+	client.SetInitialBackoff(10 * time.Millisecond) // Fast for testing
+
+	resp, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), resp.ID)
+	assert.Equal(t, 3, callCount)
+}
+
+func TestClient_CreateReview_ServerError(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+				Message: "Service temporarily unavailable",
+			})
+			return
+		}
+		// Succeed on retry
+		resp := github.CreateReviewResponse{ID: 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+	client.SetMaxRetries(3)
+	client.SetInitialBackoff(10 * time.Millisecond)
+
+	resp, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), resp.ID)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestClient_CreateReview_ContextCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond) // Slow response
+		resp := github.CreateReviewResponse{ID: 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := client.CreateReview(ctx, github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClient_CreateReview_EmptyFindings(t *testing.T) {
+	var receivedRequest github.CreateReviewRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedRequest)
+		resp := github.CreateReviewResponse{ID: 1, State: "APPROVED"}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	resp, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+		Event:      github.EventApprove,
+		Summary:    "LGTM!",
+		Findings:   []github.PositionedFinding{},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), resp.ID)
+	assert.Empty(t, receivedRequest.Comments)
+	assert.Equal(t, "LGTM!", receivedRequest.Body)
+}

@@ -188,10 +188,11 @@ func run() error {
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
-		BranchReviewer: orchestrator,
-		DefaultOutput:  cfg.Output.Directory,
-		DefaultRepo:    repoName,
-		Version:        version.Value(),
+		BranchReviewer:      orchestrator,
+		DefaultOutput:       cfg.Output.Directory,
+		DefaultRepo:         repoName,
+		DefaultInstructions: cfg.Review.Instructions,
+		Version:             version.Value(),
 	})
 
 	if err := root.ExecuteContext(ctx); err != nil {
