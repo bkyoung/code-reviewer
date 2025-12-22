@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
@@ -246,6 +247,12 @@ func (c *Client) validatePaginationURL(rawURL string) error {
 	// Require matching host (includes port if present)
 	if parsed.Host != base.Host {
 		return fmt.Errorf("host mismatch: expected %s, got %s", base.Host, parsed.Host)
+	}
+
+	// Require path starts with expected GitHub API prefix
+	// This prevents redirecting to other endpoints on the same host
+	if !strings.HasPrefix(parsed.Path, "/repos/") {
+		return fmt.Errorf("unexpected API path: %s (must start with /repos/)", parsed.Path)
 	}
 
 	return nil

@@ -517,6 +517,38 @@ func TestClient_ListReviews_SSRFProtection_RelativeURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "URL must be absolute")
 }
 
+func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
+	// Test that the client rejects pagination URLs with unexpected path prefix
+	// This prevents redirecting to other endpoints on the same host
+	pageCount := 0
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// Return Link header pointing to a different API endpoint on same host
+			w.Header().Set("Link", `<`+serverURL+`/admin/secrets?page=2>; rel="next"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			t.Fatal("client followed Link to unexpected path!")
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected API path")
+}
+
 func TestClient_ListReviews_PathEscaping(t *testing.T) {
 	// Test that owner/repo with special characters are properly escaped
 	// to prevent path injection attacks

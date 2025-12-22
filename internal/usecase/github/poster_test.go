@@ -378,6 +378,35 @@ func TestReviewPoster_PostReview_DismissesBotReviews(t *testing.T) {
 	assert.Equal(t, []int64{100, 101}, client.DismissedIDs)
 }
 
+func TestReviewPoster_PostReview_CaseInsensitiveBotUsername(t *testing.T) {
+	// GitHub usernames are case-insensitive, so "GitHub-Actions[bot]" should match "github-actions[bot]"
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				// Different case than what's configured
+				{ID: 100, User: github.User{Login: "GitHub-Actions[bot]"}, State: "APPROVED"},
+				{ID: 101, User: github.User{Login: "GITHUB-ACTIONS[BOT]"}, State: "CHANGES_REQUESTED"},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 200, HTMLURL: "https://example.com/review"}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "github-actions[bot]", // lowercase
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.DismissedCount, "should dismiss both reviews despite case difference")
+	assert.Equal(t, []int64{100, 101}, client.DismissedIDs)
+}
+
 func TestReviewPoster_PostReview_NoDismissWhenBotUsernameEmpty(t *testing.T) {
 	listCalled := false
 	client := &MockReviewClient{

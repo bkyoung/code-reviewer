@@ -4,6 +4,7 @@ package github
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/github"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -169,7 +170,8 @@ func (p *ReviewPoster) dismissStaleReviews(ctx context.Context, owner, repo stri
 // shouldDismissReview returns true if the review should be dismissed.
 // A review should be dismissed if it's from the bot and not already dismissed.
 func shouldDismissReview(review github.ReviewSummary, botUsername string) bool {
-	if review.User.Login != botUsername {
+	// Case-insensitive comparison for usernames (GitHub usernames are case-insensitive)
+	if !strings.EqualFold(review.User.Login, botUsername) {
 		return false
 	}
 
