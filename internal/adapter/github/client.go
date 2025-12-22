@@ -255,15 +255,20 @@ func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) 
 		return "", fmt.Errorf("untrusted host: %s (expected %s)", parsed.Host, base.Host)
 	}
 
-	// Require path starts with expected GitHub API prefix
-	// This prevents redirecting to other endpoints on the same host
-	// Support both api.github.com (/repos/...) and GHES (/api/v3/repos/...)
-	expectedPrefix := strings.TrimSuffix(base.Path, "/") + "/repos/"
-	if base.Path == "" || base.Path == "/" {
-		expectedPrefix = "/repos/"
+	// Validate path is a GitHub API repos endpoint
+	// The host check above is the primary SSRF defense; this provides defense in depth
+	// Accept both /repos/... and /api/v3/repos/... patterns for GHES compatibility
+	if !strings.Contains(parsed.Path, "/repos/") {
+		return "", fmt.Errorf("unexpected API path: %s (must be a /repos/ endpoint)", parsed.Path)
 	}
-	if !strings.HasPrefix(parsed.Path, expectedPrefix) {
-		return "", fmt.Errorf("unexpected API path: %s (must start with %s)", parsed.Path, expectedPrefix)
+
+	// Block known dangerous paths even on the same host (defense in depth)
+	dangerousPaths := []string{"/admin", "/settings", "/stafftools", "/_private", "/setup"}
+	pathLower := strings.ToLower(parsed.Path)
+	for _, dangerous := range dangerousPaths {
+		if strings.Contains(pathLower, dangerous) {
+			return "", fmt.Errorf("blocked path pattern in URL: %s", parsed.Path)
+		}
 	}
 
 	return parsed.String(), nil

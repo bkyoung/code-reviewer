@@ -554,8 +554,7 @@ func TestClient_ListReviews_RelativeURLResolution(t *testing.T) {
 }
 
 func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
-	// Test that the client rejects pagination URLs with unexpected path prefix
-	// This prevents redirecting to other endpoints on the same host
+	// Test that the client rejects pagination URLs without /repos/ in path
 	pageCount := 0
 	var serverURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -563,8 +562,8 @@ func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if pageCount == 1 {
-			// Return Link header pointing to a different API endpoint on same host
-			w.Header().Set("Link", `<`+serverURL+`/admin/secrets?page=2>; rel="next"`)
+			// Return Link header pointing to a non-repos endpoint
+			w.Header().Set("Link", `<`+serverURL+`/users/foo/followers?page=2>; rel="next"`)
 			reviews := []github.ReviewSummary{
 				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
 			}
@@ -582,7 +581,48 @@ func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
 	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected API path")
+	assert.Contains(t, err.Error(), "must be a /repos/ endpoint")
+}
+
+func TestClient_ListReviews_SSRFProtection_BlocksDangerousPaths(t *testing.T) {
+	// Test that known dangerous paths are blocked even if they contain /repos/
+	dangerousPaths := []string{
+		"/admin/repos/evil",
+		"/repos/owner/repo/settings/secrets",
+		"/stafftools/repos/audit",
+		"/_private/repos/internal",
+	}
+
+	for _, dangerousPath := range dangerousPaths {
+		t.Run(dangerousPath, func(t *testing.T) {
+			pageCount := 0
+			var serverURL string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				pageCount++
+				w.Header().Set("Content-Type", "application/json")
+
+				if pageCount == 1 {
+					w.Header().Set("Link", `<`+serverURL+dangerousPath+`?page=2>; rel="next"`)
+					reviews := []github.ReviewSummary{
+						{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+					}
+					json.NewEncoder(w).Encode(reviews)
+				} else {
+					t.Fatal("client followed dangerous Link!")
+				}
+			}))
+			defer server.Close()
+			serverURL = server.URL
+
+			client := github.NewClient("test-token")
+			client.SetBaseURL(server.URL)
+
+			_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "blocked path pattern")
+		})
+	}
 }
 
 func TestClient_ListReviews_GitHubEnterprisePathPrefix(t *testing.T) {
@@ -622,6 +662,41 @@ func TestClient_ListReviews_GitHubEnterprisePathPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, reviews, 2, "should have fetched both pages")
 	assert.Equal(t, 2, pageCount, "should have made two requests")
+}
+
+func TestClient_ListReviews_RealisticPaginationURL(t *testing.T) {
+	// Test with a realistic GitHub pagination URL format
+	pageCount := 0
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// Realistic GitHub Link header format
+			w.Header().Set("Link", `<`+serverURL+`/repos/octocat/hello-world/pulls/42/reviews?per_page=100&page=2>; rel="next", <`+serverURL+`/repos/octocat/hello-world/pulls/42/reviews?per_page=100&page=5>; rel="last"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED", SubmittedAt: "2024-01-01T00:00:00Z"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			reviews := []github.ReviewSummary{
+				{ID: 2, User: github.User{Login: "bot"}, State: "COMMENTED", SubmittedAt: "2024-01-02T00:00:00Z"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "octocat", "hello-world", 42)
+
+	require.NoError(t, err)
+	assert.Len(t, reviews, 2)
+	assert.Equal(t, 2, pageCount)
 }
 
 func TestClient_ListReviews_PathEscaping(t *testing.T) {
