@@ -327,6 +327,9 @@ func TestClient_ListReviews_Success(t *testing.T) {
 		assert.Equal(t, "GET", r.Method)
 		assert.Equal(t, "/repos/owner/repo/pulls/123/reviews", r.URL.Path)
 
+		// Verify pagination parameter (max per_page)
+		assert.Equal(t, "100", r.URL.Query().Get("per_page"))
+
 		// Verify headers
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 		assert.Equal(t, "application/vnd.github+json", r.Header.Get("Accept"))
@@ -365,6 +368,56 @@ func TestClient_ListReviews_Success(t *testing.T) {
 	assert.Equal(t, "APPROVED", reviews[0].State)
 	assert.Equal(t, int64(101), reviews[1].ID)
 	assert.Equal(t, "human-reviewer", reviews[1].User.Login)
+}
+
+func TestClient_ListReviews_Pagination(t *testing.T) {
+	pageCount := 0
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		switch pageCount {
+		case 1:
+			// First page - return Link header with next page (use full URL with scheme)
+			w.Header().Set("Link", `<`+serverURL+`/repos/owner/repo/pulls/123/reviews?per_page=100&page=2>; rel="next", <`+serverURL+`/repos/owner/repo/pulls/123/reviews?per_page=100&page=3>; rel="last"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+				{ID: 2, User: github.User{Login: "bot"}, State: "COMMENTED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		case 2:
+			// Second page - has another page
+			w.Header().Set("Link", `<`+serverURL+`/repos/owner/repo/pulls/123/reviews?per_page=100&page=3>; rel="next", <`+serverURL+`/repos/owner/repo/pulls/123/reviews?per_page=100&page=3>; rel="last"`)
+			reviews := []github.ReviewSummary{
+				{ID: 3, User: github.User{Login: "human"}, State: "CHANGES_REQUESTED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		case 3:
+			// Last page - no next link
+			reviews := []github.ReviewSummary{
+				{ID: 4, User: github.User{Login: "bot"}, State: "DISMISSED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		default:
+			t.Fatal("unexpected page request")
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL // Set after server starts so we have the actual URL
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, pageCount, "should have fetched all 3 pages")
+	require.Len(t, reviews, 4, "should have all 4 reviews from 3 pages")
+	assert.Equal(t, int64(1), reviews[0].ID)
+	assert.Equal(t, int64(2), reviews[1].ID)
+	assert.Equal(t, int64(3), reviews[2].ID)
+	assert.Equal(t, int64(4), reviews[3].ID)
 }
 
 func TestClient_ListReviews_Empty(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
@@ -165,10 +166,28 @@ func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*Cr
 
 // ListReviews fetches all reviews for a pull request.
 // Returns reviews in chronological order (oldest first).
+// Handles GitHub API pagination to ensure all reviews are returned.
 func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber int) ([]ReviewSummary, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews",
+	var allReviews []ReviewSummary
+
+	// Start with the first page, using max per_page to minimize API calls
+	nextURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100",
 		c.baseURL, owner, repo, pullNumber)
 
+	for nextURL != "" {
+		pageReviews, next, err := c.fetchReviewsPage(ctx, nextURL)
+		if err != nil {
+			return nil, err
+		}
+		allReviews = append(allReviews, pageReviews...)
+		nextURL = next
+	}
+
+	return allReviews, nil
+}
+
+// fetchReviewsPage fetches a single page of reviews and returns the next page URL if present.
+func (c *Client) fetchReviewsPage(ctx context.Context, url string) ([]ReviewSummary, string, error) {
 	var resp *http.Response
 	err := llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
 		req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -215,16 +234,35 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 	}, c.retryConf)
 
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	var reviews []ReviewSummary
 	if err := json.NewDecoder(resp.Body).Decode(&reviews); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	return reviews, nil
+	// Parse Link header for pagination
+	nextURL := parseNextLink(resp.Header.Get("Link"))
+
+	return reviews, nextURL, nil
+}
+
+// parseNextLink extracts the "next" URL from the GitHub Link header.
+// Format: <url>; rel="next", <url>; rel="last"
+func parseNextLink(linkHeader string) string {
+	if linkHeader == "" {
+		return ""
+	}
+
+	// Match pattern: <URL>; rel="next"
+	re := regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+	matches := re.FindStringSubmatch(linkHeader)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
 }
 
 // DismissReview dismisses a pull request review with the given message.
