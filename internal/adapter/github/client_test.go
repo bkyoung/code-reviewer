@@ -20,6 +20,33 @@ func TestNewClient(t *testing.T) {
 	require.NotNil(t, client)
 }
 
+func TestSetBaseURL_TrimsTrailingSlash(t *testing.T) {
+	// Test that trailing slashes are normalized to prevent double-slash URLs
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify no double slashes in path
+		assert.NotContains(t, r.URL.Path, "//", "URL should not contain double slashes")
+		assert.Equal(t, "/repos/owner/repo/pulls/1/reviews", r.URL.Path)
+
+		resp := github.CreateReviewResponse{ID: 1, State: "COMMENTED", HTMLURL: "https://example.com"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	// Set base URL WITH trailing slash - should be normalized
+	client.SetBaseURL(server.URL + "/")
+
+	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "abc123",
+		Event:      github.EventComment,
+	})
+	require.NoError(t, err)
+}
+
 func TestClient_CreateReview_Success(t *testing.T) {
 	requestReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
