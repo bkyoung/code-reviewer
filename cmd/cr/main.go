@@ -13,6 +13,7 @@ import (
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/cli"
 	"github.com/bkyoung/code-reviewer/internal/adapter/git"
+	githubadapter "github.com/bkyoung/code-reviewer/internal/adapter/github"
 	"github.com/bkyoung/code-reviewer/internal/adapter/llm/anthropic"
 	"github.com/bkyoung/code-reviewer/internal/adapter/llm/gemini"
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
@@ -29,6 +30,7 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/determinism"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/redaction"
+	usecasegithub "github.com/bkyoung/code-reviewer/internal/usecase/github"
 	"github.com/bkyoung/code-reviewer/internal/usecase/merge"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 	"github.com/bkyoung/code-reviewer/internal/version"
@@ -171,6 +173,14 @@ func run() error {
 		}
 	}
 
+	// Create GitHub poster if token is available
+	var githubPoster review.GitHubPoster
+	if githubToken := os.Getenv("GITHUB_TOKEN"); githubToken != "" {
+		githubClient := githubadapter.NewClient(githubToken)
+		reviewPoster := usecasegithub.NewReviewPoster(githubClient)
+		githubPoster = &githubPosterAdapter{poster: reviewPoster}
+	}
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
 		Git:           gitEngine,
 		Providers:     providers,
@@ -185,6 +195,7 @@ func run() error {
 		Logger:        reviewLogger,
 		PlanningAgent: planningAgent,
 		RepoDir:       repoDir,
+		GitHubPoster:  githubPoster,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
@@ -521,3 +532,39 @@ var _ review.MarkdownWriter = (*markdown.Writer)(nil)
 var _ review.JSONWriter = (*json.Writer)(nil)
 var _ review.SARIFWriter = (*sarif.Writer)(nil)
 var _ review.Redactor = (*redaction.Engine)(nil)
+var _ review.GitHubPoster = (*githubPosterAdapter)(nil)
+
+// githubPosterAdapter bridges review.GitHubPoster to the underlying GitHub client.
+// It handles diff position calculation and maps between usecase types.
+type githubPosterAdapter struct {
+	poster *usecasegithub.ReviewPoster
+}
+
+// PostReview implements review.GitHubPoster.
+func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubPostRequest) (*review.GitHubPostResult, error) {
+	// Map findings to positioned findings with diff positions
+	positionedFindings := githubadapter.MapFindings(req.Review.Findings, req.Diff)
+
+	// Build the post request
+	postReq := usecasegithub.PostReviewRequest{
+		Owner:      req.Owner,
+		Repo:       req.Repo,
+		PullNumber: req.PRNumber,
+		CommitSHA:  req.CommitSHA,
+		Review:     req.Review,
+		Findings:   positionedFindings,
+	}
+
+	// Post the review
+	result, err := a.poster.PostReview(ctx, postReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return &review.GitHubPostResult{
+		ReviewID:        result.ReviewID,
+		CommentsPosted:  result.CommentsPosted,
+		CommentsSkipped: result.CommentsSkipped,
+		HTMLURL:         result.HTMLURL,
+	}, nil
+}
