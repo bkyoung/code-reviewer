@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"time"
 
@@ -180,10 +181,34 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 			return nil, err
 		}
 		allReviews = append(allReviews, pageReviews...)
+
+		// Validate pagination URL to prevent SSRF attacks
+		// Only follow URLs that match our configured base URL host
+		if next != "" && !c.isTrustedURL(next) {
+			// Stop pagination if Link header points to untrusted host
+			break
+		}
 		nextURL = next
 	}
 
 	return allReviews, nil
+}
+
+// isTrustedURL validates that a URL's host matches the configured baseURL.
+// This prevents SSRF attacks via malicious Link header manipulation.
+func (c *Client) isTrustedURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return false
+	}
+
+	// Require matching host (includes port if present)
+	return parsed.Host == base.Host
 }
 
 // fetchReviewsPage fetches a single page of reviews and returns the next page URL if present.

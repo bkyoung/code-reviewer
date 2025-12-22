@@ -420,6 +420,39 @@ func TestClient_ListReviews_Pagination(t *testing.T) {
 	assert.Equal(t, int64(4), reviews[3].ID)
 }
 
+func TestClient_ListReviews_SSRFProtection(t *testing.T) {
+	// Test that the client stops pagination when Link header points to untrusted host
+	// This prevents SSRF attacks via malicious Link header manipulation
+	pageCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// First page - return Link header pointing to a DIFFERENT host (attacker-controlled)
+			w.Header().Set("Link", `<https://evil-attacker.com/steal-token?page=2>; rel="next"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			// This should never be reached
+			t.Fatal("client followed untrusted Link header - SSRF vulnerability!")
+		}
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, pageCount, "should only fetch first page, not follow malicious Link")
+	require.Len(t, reviews, 1, "should return reviews from first page only")
+	assert.Equal(t, int64(1), reviews[0].ID)
+}
+
 func TestClient_ListReviews_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
