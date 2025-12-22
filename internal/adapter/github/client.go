@@ -243,6 +243,11 @@ func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) 
 		parsed = base.ResolveReference(parsed)
 	}
 
+	// Only allow http/https schemes (defense in depth against file:, gopher:, etc.)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("unsupported scheme: %s (only http/https allowed)", parsed.Scheme)
+	}
+
 	// Prevent scheme downgrade attacks (https -> http)
 	// Allow http in tests, but never downgrade from https
 	if base.Scheme == "https" && parsed.Scheme == "http" {

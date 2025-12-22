@@ -625,6 +625,48 @@ func TestClient_ListReviews_SSRFProtection_BlocksDangerousPaths(t *testing.T) {
 	}
 }
 
+func TestClient_ListReviews_SSRFProtection_UnsupportedSchemes(t *testing.T) {
+	// Test that non-http/https schemes are rejected (defense in depth)
+	unsupportedSchemes := []string{
+		"file:///etc/passwd",
+		"gopher://evil.com/x",
+		"javascript:alert(1)",
+		"data:text/plain,evil",
+	}
+
+	for _, maliciousURL := range unsupportedSchemes {
+		t.Run(maliciousURL, func(t *testing.T) {
+			pageCount := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				pageCount++
+				w.Header().Set("Content-Type", "application/json")
+
+				if pageCount == 1 {
+					w.Header().Set("Link", `<`+maliciousURL+`>; rel="next"`)
+					reviews := []github.ReviewSummary{
+						{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+					}
+					json.NewEncoder(w).Encode(reviews)
+				} else {
+					t.Fatal("client followed malicious scheme Link!")
+				}
+			}))
+			defer server.Close()
+
+			client := github.NewClient("test-token")
+			client.SetBaseURL(server.URL)
+
+			_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+			require.Error(t, err)
+			// Error could be "unsupported scheme" or "untrusted host" depending on URL structure
+			assert.True(t, strings.Contains(err.Error(), "unsupported scheme") ||
+				strings.Contains(err.Error(), "untrusted host"),
+				"expected scheme or host validation error, got: %v", err)
+		})
+	}
+}
+
 func TestClient_ListReviews_GitHubEnterprisePathPrefix(t *testing.T) {
 	// Test that pagination works with GitHub Enterprise API path prefix (/api/v3)
 	pageCount := 0
