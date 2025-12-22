@@ -249,15 +249,10 @@ func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) 
 		return "", fmt.Errorf("scheme downgrade not allowed: %s -> %s", base.Scheme, parsed.Scheme)
 	}
 
-	// Allow baseURL host OR the canonical GitHub API host
-	// This supports enterprise setups where redirects may occur
-	allowedHosts := map[string]bool{
-		base.Host:            true,
-		"api.github.com":     true,
-		"api.github.com:443": true,
-	}
-	if !allowedHosts[parsed.Host] {
-		return "", fmt.Errorf("untrusted host: %s (expected %s or api.github.com)", parsed.Host, base.Host)
+	// Only trust the configured baseURL host
+	// This works for both public GitHub (api.github.com) and Enterprise setups
+	if parsed.Host != base.Host {
+		return "", fmt.Errorf("untrusted host: %s (expected %s)", parsed.Host, base.Host)
 	}
 
 	// Require path starts with expected GitHub API prefix
