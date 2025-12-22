@@ -61,15 +61,17 @@ func (e *Engine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef strin
 
 	fileDiffs := make([]domain.FileDiff, 0, len(patch.FilePatches()))
 	for _, fp := range patch.FilePatches() {
-		path, status := diffPathAndStatus(fp)
+		path, oldPath, status := diffPathAndStatus(fp)
 		patchText, err := encodeFilePatch(fp)
 		if err != nil {
 			return domain.Diff{}, fmt.Errorf("encode patch: %w", err)
 		}
 		fileDiffs = append(fileDiffs, domain.FileDiff{
-			Path:   path,
-			Status: status,
-			Patch:  patchText,
+			Path:     path,
+			OldPath:  oldPath,
+			Status:   status,
+			Patch:    patchText,
+			IsBinary: IsBinaryPatch(patchText),
 		})
 	}
 
@@ -120,19 +122,33 @@ func resolveCommit(repo *goGit.Repository, ref string) (*object.Commit, error) {
 	return nil, fmt.Errorf("unable to resolve ref %s", ref)
 }
 
-func diffPathAndStatus(fp formatdiff.FilePatch) (string, string) {
+// diffPathAndStatus returns the path, old path (for renames), and status for a file patch.
+// For renamed files, path is the new path and oldPath is the previous path.
+// For non-renames, oldPath is empty.
+func diffPathAndStatus(fp formatdiff.FilePatch) (path, oldPath, status string) {
 	from, to := fp.Files()
 
 	switch {
 	case from == nil && to != nil:
-		return to.Path(), domain.FileStatusAdded
+		return to.Path(), "", domain.FileStatusAdded
 	case from != nil && to == nil:
-		return from.Path(), domain.FileStatusDeleted
+		return from.Path(), "", domain.FileStatusDeleted
 	case from != nil && to != nil:
-		return to.Path(), domain.FileStatusModified
+		// Check if this is a rename (different paths)
+		if from.Path() != to.Path() {
+			return to.Path(), from.Path(), domain.FileStatusRenamed
+		}
+		return to.Path(), "", domain.FileStatusModified
 	default:
-		return "", domain.FileStatusModified
+		return "", "", domain.FileStatusModified
 	}
+}
+
+// IsBinaryPatch checks if a patch represents a binary file.
+// Git uses "Binary files ... differ" or "GIT binary patch" in the patch for binary files.
+func IsBinaryPatch(patchText string) bool {
+	return strings.Contains(patchText, "Binary files") ||
+		strings.Contains(patchText, "GIT binary patch")
 }
 
 func diffWithWorkingTree(ctx context.Context, repoDir, baseRef string) ([]domain.FileDiff, error) {
@@ -155,15 +171,17 @@ func diffWithWorkingTree(ctx context.Context, repoDir, baseRef string) ([]domain
 			continue
 		}
 		statusChar := selectStatusChar(line)
-		path := extractPath(line)
+		path, oldPath := ExtractPathAndOldPath(line)
 		patchOut, err := runGitCommand(ctx, repoDir, "diff", baseRef, "--", path)
 		if err != nil {
 			return nil, fmt.Errorf("git diff %s: %w", path, err)
 		}
 		diffs = append(diffs, domain.FileDiff{
-			Path:   path,
-			Status: mapGitStatus(statusChar),
-			Patch:  patchOut,
+			Path:     path,
+			OldPath:  oldPath,
+			Status:   MapGitStatus(statusChar),
+			Patch:    patchOut,
+			IsBinary: IsBinaryPatch(patchOut),
 		})
 	}
 	return diffs, nil
@@ -204,24 +222,32 @@ func selectStatusChar(line string) rune {
 	}
 }
 
-func extractPath(line string) string {
+// ExtractPathAndOldPath extracts both the current path and old path (for renames) from a git status line.
+// For renames, git status shows "R  old_path -> new_path".
+// Returns (newPath, oldPath) where oldPath is empty for non-renames.
+func ExtractPathAndOldPath(line string) (path, oldPath string) {
 	if len(line) <= 3 {
-		return strings.TrimSpace(line)
+		return strings.TrimSpace(line), ""
 	}
-	path := strings.TrimSpace(line[3:])
-	if strings.Contains(path, " -> ") {
-		parts := strings.Split(path, " -> ")
-		path = strings.TrimSpace(parts[len(parts)-1])
+	pathPart := strings.TrimSpace(line[3:])
+	if strings.Contains(pathPart, " -> ") {
+		parts := strings.Split(pathPart, " -> ")
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1]), strings.TrimSpace(parts[0])
+		}
 	}
-	return path
+	return pathPart, ""
 }
 
-func mapGitStatus(status rune) string {
+// MapGitStatus converts a git status character to a domain file status.
+func MapGitStatus(status rune) string {
 	switch status {
 	case 'A', '?':
 		return domain.FileStatusAdded
 	case 'D':
 		return domain.FileStatusDeleted
+	case 'R':
+		return domain.FileStatusRenamed
 	default:
 		return domain.FileStatusModified
 	}

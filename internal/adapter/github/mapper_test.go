@@ -293,3 +293,102 @@ func TestPositionedFinding_InDiff_False(t *testing.T) {
 		t.Error("expected InDiff() to return false when DiffPosition is nil")
 	}
 }
+
+func TestMapFindings_RenamedFile_NewPath(t *testing.T) {
+	// Finding uses the new path - should match
+	d := domain.Diff{
+		Files: []domain.FileDiff{
+			{
+				Path:    "new_name.go",
+				OldPath: "old_name.go",
+				Status:  domain.FileStatusRenamed,
+				Patch: `@@ -1,2 +1,3 @@
+ context line 1
++added line 2
+`,
+			},
+		},
+	}
+
+	findings := []domain.Finding{
+		{ID: "f1", File: "new_name.go", LineStart: 2},
+	}
+
+	result := github.MapFindings(findings, d)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+
+	if result[0].DiffPosition == nil {
+		t.Fatal("expected DiffPosition to be set for finding on new path")
+	}
+
+	if *result[0].DiffPosition != 2 {
+		t.Errorf("expected position 2, got %d", *result[0].DiffPosition)
+	}
+}
+
+func TestMapFindings_RenamedFile_OldPath(t *testing.T) {
+	// Finding uses the old path - should also match (LLM might reference old path)
+	d := domain.Diff{
+		Files: []domain.FileDiff{
+			{
+				Path:    "new_name.go",
+				OldPath: "old_name.go",
+				Status:  domain.FileStatusRenamed,
+				Patch: `@@ -1,2 +1,3 @@
+ context line 1
++added line 2
+`,
+			},
+		},
+	}
+
+	findings := []domain.Finding{
+		{ID: "f1", File: "old_name.go", LineStart: 2},
+	}
+
+	result := github.MapFindings(findings, d)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+
+	if result[0].DiffPosition == nil {
+		t.Fatal("expected DiffPosition to be set for finding on old path of renamed file")
+	}
+
+	if *result[0].DiffPosition != 2 {
+		t.Errorf("expected position 2, got %d", *result[0].DiffPosition)
+	}
+}
+
+func TestMapFindings_BinaryFile_Skipped(t *testing.T) {
+	// Binary files should be skipped when mapping positions
+	d := domain.Diff{
+		Files: []domain.FileDiff{
+			{
+				Path:     "image.png",
+				Status:   domain.FileStatusModified,
+				Patch:    "Binary files a/image.png and b/image.png differ",
+				IsBinary: true,
+			},
+		},
+	}
+
+	findings := []domain.Finding{
+		{ID: "f1", File: "image.png", LineStart: 1},
+	}
+
+	result := github.MapFindings(findings, d)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+
+	// Position should be nil for binary files
+	if result[0].DiffPosition != nil {
+		t.Errorf("expected nil DiffPosition for binary file, got %d", *result[0].DiffPosition)
+	}
+}

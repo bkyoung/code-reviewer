@@ -10,6 +10,7 @@ const (
 	FileStatusAdded    = "added"
 	FileStatusModified = "modified"
 	FileStatusDeleted  = "deleted"
+	FileStatusRenamed  = "renamed"
 )
 
 // Diff represents a cumulative diff between two refs.
@@ -21,9 +22,11 @@ type Diff struct {
 
 // FileDiff captures the change for a single file.
 type FileDiff struct {
-	Path   string
-	Status string
-	Patch  string
+	Path     string
+	OldPath  string // Set when Status == FileStatusRenamed
+	Status   string
+	Patch    string
+	IsBinary bool // True for binary files (patch contains "Binary files differ")
 }
 
 // Review is the output from an LLM provider.

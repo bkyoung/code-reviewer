@@ -803,3 +803,110 @@ func TestOrchestrator_ContextCancellation(t *testing.T) {
 		t.Error("expected an error after context cancellation")
 	}
 }
+
+func TestFilterBinaryFiles(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           domain.Diff
+		wantTextCount   int
+		wantBinaryCount int
+		wantTextPaths   []string
+		wantBinaryPaths []string
+	}{
+		{
+			name: "mixed text and binary files",
+			input: domain.Diff{
+				FromCommitHash: "abc123",
+				ToCommitHash:   "def456",
+				Files: []domain.FileDiff{
+					{Path: "main.go", IsBinary: false},
+					{Path: "image.png", IsBinary: true},
+					{Path: "utils.go", IsBinary: false},
+					{Path: "data.bin", IsBinary: true},
+				},
+			},
+			wantTextCount:   2,
+			wantBinaryCount: 2,
+			wantTextPaths:   []string{"main.go", "utils.go"},
+			wantBinaryPaths: []string{"image.png", "data.bin"},
+		},
+		{
+			name: "all text files",
+			input: domain.Diff{
+				FromCommitHash: "abc",
+				ToCommitHash:   "def",
+				Files: []domain.FileDiff{
+					{Path: "a.go", IsBinary: false},
+					{Path: "b.go", IsBinary: false},
+				},
+			},
+			wantTextCount:   2,
+			wantBinaryCount: 0,
+			wantTextPaths:   []string{"a.go", "b.go"},
+			wantBinaryPaths: []string{},
+		},
+		{
+			name: "all binary files",
+			input: domain.Diff{
+				FromCommitHash: "abc",
+				ToCommitHash:   "def",
+				Files: []domain.FileDiff{
+					{Path: "a.png", IsBinary: true},
+					{Path: "b.jpg", IsBinary: true},
+				},
+			},
+			wantTextCount:   0,
+			wantBinaryCount: 2,
+			wantTextPaths:   []string{},
+			wantBinaryPaths: []string{"a.png", "b.jpg"},
+		},
+		{
+			name: "empty diff",
+			input: domain.Diff{
+				FromCommitHash: "abc",
+				ToCommitHash:   "def",
+				Files:          []domain.FileDiff{},
+			},
+			wantTextCount:   0,
+			wantBinaryCount: 0,
+			wantTextPaths:   []string{},
+			wantBinaryPaths: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			textDiff, binaryFiles := review.FilterBinaryFiles(tt.input)
+
+			// Verify counts
+			if len(textDiff.Files) != tt.wantTextCount {
+				t.Errorf("text file count = %d, want %d", len(textDiff.Files), tt.wantTextCount)
+			}
+			if len(binaryFiles) != tt.wantBinaryCount {
+				t.Errorf("binary file count = %d, want %d", len(binaryFiles), tt.wantBinaryCount)
+			}
+
+			// Verify commit hashes are preserved
+			if textDiff.FromCommitHash != tt.input.FromCommitHash {
+				t.Errorf("FromCommitHash = %s, want %s", textDiff.FromCommitHash, tt.input.FromCommitHash)
+			}
+			if textDiff.ToCommitHash != tt.input.ToCommitHash {
+				t.Errorf("ToCommitHash = %s, want %s", textDiff.ToCommitHash, tt.input.ToCommitHash)
+			}
+
+			// Verify text file paths
+			for i, wantPath := range tt.wantTextPaths {
+				if i < len(textDiff.Files) && textDiff.Files[i].Path != wantPath {
+					t.Errorf("text file[%d].Path = %s, want %s", i, textDiff.Files[i].Path, wantPath)
+				}
+			}
+
+			// Verify binary file paths
+			for i, wantPath := range tt.wantBinaryPaths {
+				if i < len(binaryFiles) && binaryFiles[i].Path != wantPath {
+					t.Errorf("binary file[%d].Path = %s, want %s", i, binaryFiles[i].Path, wantPath)
+				}
+			}
+		})
+	}
+}
