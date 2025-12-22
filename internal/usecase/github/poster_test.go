@@ -597,3 +597,38 @@ func TestReviewPoster_PostReview_NoDismissalOnCreateFailure(t *testing.T) {
 	// No reviews should have been dismissed
 	assert.Empty(t, client.DismissedIDs)
 }
+
+func TestReviewPoster_PostReview_SkipsNewlyCreatedReview(t *testing.T) {
+	// Verify that the newly created review is not dismissed.
+	// This prevents the bot from dismissing its own fresh review.
+	const newReviewID = int64(200)
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "bot[bot]"}, State: "APPROVED"},          // Old review - should be dismissed
+				{ID: newReviewID, User: github.User{Login: "bot[bot]"}, State: "COMMENTED"}, // New review - should NOT be dismissed
+				{ID: 101, User: github.User{Login: "bot[bot]"}, State: "CHANGES_REQUESTED"}, // Old review - should be dismissed
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: newReviewID, State: "COMMENTED"}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, newReviewID, result.ReviewID)
+	// Only old reviews should be dismissed, not the newly created one
+	assert.Equal(t, 2, result.DismissedCount)
+	assert.Contains(t, client.DismissedIDs, int64(100))
+	assert.Contains(t, client.DismissedIDs, int64(101))
+	assert.NotContains(t, client.DismissedIDs, newReviewID, "newly created review should not be dismissed")
+}

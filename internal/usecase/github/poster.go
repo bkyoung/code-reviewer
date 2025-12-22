@@ -130,9 +130,10 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 
 	// Dismiss previous bot reviews AFTER successful post
 	// This ensures PR always has review signal - if post failed, old reviews remain
+	// Pass the new review ID to avoid dismissing the review we just created
 	var dismissedCount int
 	if req.BotUsername != "" {
-		dismissedCount = p.dismissStaleReviews(ctx, req.Owner, req.Repo, req.PullNumber, req.BotUsername)
+		dismissedCount = p.dismissStaleReviews(ctx, req.Owner, req.Repo, req.PullNumber, req.BotUsername, resp.ID)
 	}
 
 	return &PostReviewResult{
@@ -146,9 +147,10 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 }
 
 // dismissStaleReviews finds and dismisses all previous reviews from the bot.
-// Returns the number of reviews dismissed. Errors are logged but do not
-// block the review posting workflow.
-func (p *ReviewPoster) dismissStaleReviews(ctx context.Context, owner, repo string, pullNumber int, botUsername string) int {
+// The excludeReviewID parameter specifies a review ID to skip (typically the
+// newly created review). Returns the number of reviews dismissed. Errors are
+// logged but do not block the review posting workflow.
+func (p *ReviewPoster) dismissStaleReviews(ctx context.Context, owner, repo string, pullNumber int, botUsername string, excludeReviewID int64) int {
 	reviews, err := p.client.ListReviews(ctx, owner, repo, pullNumber)
 	if err != nil {
 		log.Printf("warning: failed to list reviews for dismissal: %v", err)
@@ -157,6 +159,10 @@ func (p *ReviewPoster) dismissStaleReviews(ctx context.Context, owner, repo stri
 
 	var dismissedCount int
 	for _, review := range reviews {
+		// Skip the newly created review to avoid dismissing our own fresh review
+		if review.ID == excludeReviewID {
+			continue
+		}
 		if shouldDismissReview(review, botUsername) {
 			_, err := p.client.DismissReview(ctx, owner, repo, pullNumber, review.ID, "Superseded by new review")
 			if err != nil {
