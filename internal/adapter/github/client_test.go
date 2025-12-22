@@ -20,31 +20,44 @@ func TestNewClient(t *testing.T) {
 	require.NotNil(t, client)
 }
 
-func TestSetBaseURL_TrimsTrailingSlash(t *testing.T) {
-	// Test that trailing slashes are normalized to prevent double-slash URLs
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify no double slashes in path
-		assert.NotContains(t, r.URL.Path, "//", "URL should not contain double slashes")
-		assert.Equal(t, "/repos/owner/repo/pulls/1/reviews", r.URL.Path)
+func TestSetBaseURL_TrimsTrailingSlashes(t *testing.T) {
+	// Test that ALL trailing slashes are normalized to prevent double-slash URLs
+	testCases := []struct {
+		name   string
+		suffix string
+	}{
+		{"single slash", "/"},
+		{"double slash", "//"},
+		{"triple slash", "///"},
+	}
 
-		resp := github.CreateReviewResponse{ID: 1, State: "COMMENTED", HTMLURL: "https://example.com"}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify no double slashes in path
+				assert.NotContains(t, r.URL.Path, "//", "URL should not contain double slashes")
+				assert.Equal(t, "/repos/owner/repo/pulls/1/reviews", r.URL.Path)
 
-	client := github.NewClient("test-token")
-	// Set base URL WITH trailing slash - should be normalized
-	client.SetBaseURL(server.URL + "/")
+				resp := github.CreateReviewResponse{ID: 1, State: "COMMENTED", HTMLURL: "https://example.com"}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
 
-	_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
-		Owner:      "owner",
-		Repo:       "repo",
-		PullNumber: 1,
-		CommitSHA:  "abc123",
-		Event:      github.EventComment,
-	})
-	require.NoError(t, err)
+			client := github.NewClient("test-token")
+			// Set base URL WITH trailing slashes - should all be normalized
+			client.SetBaseURL(server.URL + tc.suffix)
+
+			_, err := client.CreateReview(context.Background(), github.CreateReviewInput{
+				Owner:      "owner",
+				Repo:       "repo",
+				PullNumber: 1,
+				CommitSHA:  "abc123",
+				Event:      github.EventComment,
+			})
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestClient_CreateReview_Success(t *testing.T) {

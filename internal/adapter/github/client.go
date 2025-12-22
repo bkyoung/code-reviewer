@@ -48,9 +48,9 @@ func NewClient(token string) *Client {
 }
 
 // SetBaseURL sets a custom base URL (for testing).
-// Trailing slashes are trimmed to ensure consistent URL construction.
+// All trailing slashes are trimmed to ensure consistent URL construction.
 func (c *Client) SetBaseURL(baseURL string) {
-	c.baseURL = strings.TrimSuffix(baseURL, "/")
+	c.baseURL = strings.TrimRight(baseURL, "/")
 }
 
 // SetTimeout sets the HTTP timeout.
