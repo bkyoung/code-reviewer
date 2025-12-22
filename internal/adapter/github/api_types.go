@@ -17,6 +17,26 @@ const (
 	EventRequestChanges ReviewEvent = "REQUEST_CHANGES"
 )
 
+// ReviewState represents the state of a submitted review.
+type ReviewState string
+
+const (
+	// StatePending is a review that hasn't been submitted yet.
+	StatePending ReviewState = "PENDING"
+
+	// StateApproved is a review that approved the PR.
+	StateApproved ReviewState = "APPROVED"
+
+	// StateChangesRequested is a review that requested changes.
+	StateChangesRequested ReviewState = "CHANGES_REQUESTED"
+
+	// StateCommented is a review with comments but no approval/rejection.
+	StateCommented ReviewState = "COMMENTED"
+
+	// StateDismissed is a review that was dismissed.
+	StateDismissed ReviewState = "DISMISSED"
+)
+
 // CreateReviewRequest is the request body for POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews.
 type CreateReviewRequest struct {
 	// CommitID is the SHA of the commit to review (must be the head commit of the PR).

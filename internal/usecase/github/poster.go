@@ -185,12 +185,12 @@ func shouldDismissReview(review github.ReviewSummary, botUsername string) bool {
 	}
 
 	// Skip already dismissed reviews
-	if review.State == "DISMISSED" {
+	if review.State == string(github.StateDismissed) {
 		return false
 	}
 
 	// Skip pending reviews (not yet submitted)
-	if review.State == "PENDING" {
+	if review.State == string(github.StatePending) {
 		return false
 	}
 
