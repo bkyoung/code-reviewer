@@ -61,6 +61,9 @@ type flexibleFinding struct {
 
 // toFinding converts a flexibleFinding to a domain.Finding, preferring camelCase.
 // Uses domain.NewFinding to generate deterministic IDs for proper deduplication.
+// This is intentional: using domain.Finding{} resulted in empty IDs causing all
+// findings to collapse during deduplication. The deterministic ID is computed
+// from content, making the change backward-compatible for merge logic.
 func (f flexibleFinding) toFinding() domain.Finding {
 	lineStart := f.LineStart
 	if lineStart == 0 && f.LineStartSC != 0 {

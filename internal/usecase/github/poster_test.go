@@ -3,6 +3,7 @@ package github_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/github"
@@ -14,7 +15,9 @@ import (
 )
 
 // MockReviewClient is a mock implementation of the ReviewClient interface.
+// It uses a mutex to protect shared state for thread safety in concurrent scenarios.
 type MockReviewClient struct {
+	mu                sync.Mutex
 	CreateReviewFunc  func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
 	ListReviewsFunc   func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error)
 	DismissReviewFunc func(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error)
@@ -23,7 +26,9 @@ type MockReviewClient struct {
 }
 
 func (m *MockReviewClient) CreateReview(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+	m.mu.Lock()
 	m.LastInput = &input
+	m.mu.Unlock()
 	if m.CreateReviewFunc != nil {
 		return m.CreateReviewFunc(ctx, input)
 	}
@@ -38,11 +43,22 @@ func (m *MockReviewClient) ListReviews(ctx context.Context, owner, repo string, 
 }
 
 func (m *MockReviewClient) DismissReview(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error) {
+	m.mu.Lock()
 	m.DismissedIDs = append(m.DismissedIDs, reviewID)
+	m.mu.Unlock()
 	if m.DismissReviewFunc != nil {
 		return m.DismissReviewFunc(ctx, owner, repo, pullNumber, reviewID, message)
 	}
 	return &github.DismissReviewResponse{ID: reviewID, State: "DISMISSED"}, nil
+}
+
+// GetDismissedIDs returns a copy of dismissed IDs in a thread-safe manner.
+func (m *MockReviewClient) GetDismissedIDs() []int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]int64, len(m.DismissedIDs))
+	copy(result, m.DismissedIDs)
+	return result
 }
 
 func TestNewReviewPoster(t *testing.T) {
@@ -375,7 +391,7 @@ func TestReviewPoster_PostReview_DismissesBotReviews(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(200), result.ReviewID)
 	assert.Equal(t, 2, result.DismissedCount)
-	assert.Equal(t, []int64{100, 101}, client.DismissedIDs)
+	assert.Equal(t, []int64{100, 101}, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_CaseInsensitiveBotUsername(t *testing.T) {
@@ -404,7 +420,7 @@ func TestReviewPoster_PostReview_CaseInsensitiveBotUsername(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, result.DismissedCount, "should dismiss both reviews despite case difference")
-	assert.Equal(t, []int64{100, 101}, client.DismissedIDs)
+	assert.Equal(t, []int64{100, 101}, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_NoDismissWhenBotUsernameEmpty(t *testing.T) {
@@ -452,7 +468,7 @@ func TestReviewPoster_PostReview_SkipsAlreadyDismissedReviews(t *testing.T) {
 	require.NoError(t, err)
 	// Only the APPROVED one should be dismissed, not the already DISMISSED one
 	assert.Equal(t, 1, result.DismissedCount)
-	assert.Equal(t, []int64{101}, client.DismissedIDs)
+	assert.Equal(t, []int64{101}, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_SkipsPendingReviews(t *testing.T) {
@@ -477,7 +493,7 @@ func TestReviewPoster_PostReview_SkipsPendingReviews(t *testing.T) {
 	require.NoError(t, err)
 	// Only COMMENTED should be dismissed, not PENDING
 	assert.Equal(t, 1, result.DismissedCount)
-	assert.Equal(t, []int64{101}, client.DismissedIDs)
+	assert.Equal(t, []int64{101}, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_ListFailureContinues(t *testing.T) {
@@ -562,7 +578,7 @@ func TestReviewPoster_PostReview_NoBotReviewsToDissmiss(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.DismissedCount)
-	assert.Empty(t, client.DismissedIDs)
+	assert.Empty(t, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_NoDismissalOnCreateFailure(t *testing.T) {
@@ -595,7 +611,7 @@ func TestReviewPoster_PostReview_NoDismissalOnCreateFailure(t *testing.T) {
 	// ListReviews should NOT have been called since dismissal happens after CreateReview
 	assert.False(t, listCalled, "ListReviews should not be called when CreateReview fails")
 	// No reviews should have been dismissed
-	assert.Empty(t, client.DismissedIDs)
+	assert.Empty(t, client.GetDismissedIDs())
 }
 
 func TestReviewPoster_PostReview_SkipsNewlyCreatedReview(t *testing.T) {
@@ -628,7 +644,7 @@ func TestReviewPoster_PostReview_SkipsNewlyCreatedReview(t *testing.T) {
 	assert.Equal(t, newReviewID, result.ReviewID)
 	// Only old reviews should be dismissed, not the newly created one
 	assert.Equal(t, 2, result.DismissedCount)
-	assert.Contains(t, client.DismissedIDs, int64(100))
-	assert.Contains(t, client.DismissedIDs, int64(101))
-	assert.NotContains(t, client.DismissedIDs, newReviewID, "newly created review should not be dismissed")
+	assert.Contains(t, client.GetDismissedIDs(), int64(100))
+	assert.Contains(t, client.GetDismissedIDs(), int64(101))
+	assert.NotContains(t, client.GetDismissedIDs(), newReviewID, "newly created review should not be dismissed")
 }
