@@ -517,6 +517,32 @@ func TestClient_ListReviews_SSRFProtection_RelativeURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "URL must be absolute")
 }
 
+func TestClient_ListReviews_PathEscaping(t *testing.T) {
+	// Test that owner/repo with special characters are properly escaped
+	// to prevent path injection attacks
+	var receivedRawPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Use RawPath to see the escaped version (before server decoding)
+		// If RawPath is empty, the path had no escaping needed
+		receivedRawPath = r.URL.RawPath
+		if receivedRawPath == "" {
+			receivedRawPath = r.URL.Path
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]github.ReviewSummary{})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	// Owner with path traversal attempt - slashes should be escaped
+	_, err := client.ListReviews(context.Background(), "owner/../admin", "repo", 123)
+	require.NoError(t, err)
+	// The RawPath should contain %2F (escaped slash), preventing path traversal
+	assert.Contains(t, receivedRawPath, "%2F")
+}
+
 func TestClient_ListReviews_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

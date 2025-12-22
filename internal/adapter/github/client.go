@@ -96,14 +96,14 @@ func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*Cr
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Build URL
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews",
-		c.baseURL, input.Owner, input.Repo, input.PullNumber)
+	// Build URL with path-escaped segments to prevent path injection
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews",
+		c.baseURL, url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.PullNumber)
 
 	// Execute with retry
 	var resp *http.Response
 	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
-		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(jsonData))
 		if reqErr != nil {
 			return &llmhttp.Error{
 				Type:      llmhttp.ErrTypeUnknown,
@@ -172,8 +172,9 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 	var allReviews []ReviewSummary
 
 	// Start with the first page, using max per_page to minimize API calls
+	// Path-escape owner/repo to prevent path injection attacks
 	nextURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100",
-		c.baseURL, owner, repo, pullNumber)
+		c.baseURL, url.PathEscape(owner), url.PathEscape(repo), pullNumber)
 
 	for nextURL != "" {
 		pageReviews, next, err := c.fetchReviewsPage(ctx, nextURL)
@@ -228,10 +229,10 @@ func (c *Client) validatePaginationURL(rawURL string) error {
 }
 
 // fetchReviewsPage fetches a single page of reviews and returns the next page URL if present.
-func (c *Client) fetchReviewsPage(ctx context.Context, url string) ([]ReviewSummary, string, error) {
+func (c *Client) fetchReviewsPage(ctx context.Context, pageURL string) ([]ReviewSummary, string, error) {
 	var resp *http.Response
 	err := llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
-		req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+		req, reqErr := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
 		if reqErr != nil {
 			return &llmhttp.Error{
 				Type:      llmhttp.ErrTypeUnknown,
@@ -315,12 +316,13 @@ func (c *Client) DismissReview(ctx context.Context, owner, repo string, pullNumb
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/dismissals",
-		c.baseURL, owner, repo, pullNumber, reviewID)
+	// Path-escape owner/repo to prevent path injection attacks
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/dismissals",
+		c.baseURL, url.PathEscape(owner), url.PathEscape(repo), pullNumber, reviewID)
 
 	var resp *http.Response
 	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
-		req, reqErr := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(jsonData))
+		req, reqErr := http.NewRequestWithContext(ctx, "PUT", apiURL, bytes.NewReader(jsonData))
 		if reqErr != nil {
 			return &llmhttp.Error{
 				Type:      llmhttp.ErrTypeUnknown,
