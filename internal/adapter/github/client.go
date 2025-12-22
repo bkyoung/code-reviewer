@@ -183,10 +183,11 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 		allReviews = append(allReviews, pageReviews...)
 
 		// Validate pagination URL to prevent SSRF attacks
-		// Only follow URLs that match our configured base URL host
-		if next != "" && !c.isTrustedURL(next) {
-			// Stop pagination if Link header points to untrusted host
-			break
+		if next != "" {
+			if err := c.validatePaginationURL(next); err != nil {
+				// Return error instead of silently truncating - fail secure
+				return nil, fmt.Errorf("unsafe pagination URL in Link header: %w", err)
+			}
 		}
 		nextURL = next
 	}
@@ -194,21 +195,36 @@ func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber
 	return allReviews, nil
 }
 
-// isTrustedURL validates that a URL's host matches the configured baseURL.
+// validatePaginationURL validates that a pagination URL is safe to follow.
 // This prevents SSRF attacks via malicious Link header manipulation.
-func (c *Client) isTrustedURL(rawURL string) bool {
+// Returns an error describing the validation failure, or nil if the URL is trusted.
+func (c *Client) validatePaginationURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return false
+		return fmt.Errorf("invalid URL: %w", err)
 	}
 
 	base, err := url.Parse(c.baseURL)
 	if err != nil {
-		return false
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	// Require absolute URL
+	if !parsed.IsAbs() {
+		return fmt.Errorf("URL must be absolute, got: %s", rawURL)
+	}
+
+	// Require matching scheme (prevent http downgrade attacks)
+	if parsed.Scheme != base.Scheme {
+		return fmt.Errorf("scheme mismatch: expected %s, got %s", base.Scheme, parsed.Scheme)
 	}
 
 	// Require matching host (includes port if present)
-	return parsed.Host == base.Host
+	if parsed.Host != base.Host {
+		return fmt.Errorf("host mismatch: expected %s, got %s", base.Host, parsed.Host)
+	}
+
+	return nil
 }
 
 // fetchReviewsPage fetches a single page of reviews and returns the next page URL if present.

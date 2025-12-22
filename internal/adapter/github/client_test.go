@@ -420,8 +420,8 @@ func TestClient_ListReviews_Pagination(t *testing.T) {
 	assert.Equal(t, int64(4), reviews[3].ID)
 }
 
-func TestClient_ListReviews_SSRFProtection(t *testing.T) {
-	// Test that the client stops pagination when Link header points to untrusted host
+func TestClient_ListReviews_SSRFProtection_DifferentHost(t *testing.T) {
+	// Test that the client returns an error when Link header points to untrusted host
 	// This prevents SSRF attacks via malicious Link header manipulation
 	pageCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -430,7 +430,8 @@ func TestClient_ListReviews_SSRFProtection(t *testing.T) {
 
 		if pageCount == 1 {
 			// First page - return Link header pointing to a DIFFERENT host (attacker-controlled)
-			w.Header().Set("Link", `<https://evil-attacker.com/steal-token?page=2>; rel="next"`)
+			// Use http:// to match test server scheme, so we test host validation specifically
+			w.Header().Set("Link", `<http://evil-attacker.com/steal-token?page=2>; rel="next"`)
 			reviews := []github.ReviewSummary{
 				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
 			}
@@ -445,12 +446,75 @@ func TestClient_ListReviews_SSRFProtection(t *testing.T) {
 	client := github.NewClient("test-token")
 	client.SetBaseURL(server.URL)
 
-	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
 
-	require.NoError(t, err)
-	assert.Equal(t, 1, pageCount, "should only fetch first page, not follow malicious Link")
-	require.Len(t, reviews, 1, "should return reviews from first page only")
-	assert.Equal(t, int64(1), reviews[0].ID)
+	// Should return error instead of silently truncating
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe pagination URL")
+	assert.Contains(t, err.Error(), "host mismatch")
+	assert.Equal(t, 1, pageCount, "should only fetch first page")
+}
+
+func TestClient_ListReviews_SSRFProtection_SchemeDowngrade(t *testing.T) {
+	// Test that the client rejects scheme changes in pagination URLs
+	// Even with same host, a scheme change could indicate MITM or attack
+	pageCount := 0
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// Return Link header with https instead of http (scheme mismatch)
+			// The test server uses http, so this tests that we reject scheme changes
+			w.Header().Set("Link", `<https://`+r.Host+`/repos/owner/repo/pulls/123/reviews?page=2>; rel="next"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			t.Fatal("client followed scheme-changed Link header!")
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(serverURL) // http://...
+
+	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scheme mismatch")
+}
+
+func TestClient_ListReviews_SSRFProtection_RelativeURL(t *testing.T) {
+	// Test that the client rejects relative URLs in Link header
+	pageCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// Return relative URL (no scheme/host)
+			w.Header().Set("Link", `</repos/owner/repo/pulls/123/reviews?page=2>; rel="next"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			t.Fatal("client followed relative Link header!")
+		}
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL must be absolute")
 }
 
 func TestClient_ListReviews_Empty(t *testing.T) {
