@@ -255,3 +255,81 @@ func TestReviewActionsMerge(t *testing.T) {
 		t.Errorf("expected base instructions to be preserved, got %s", merged.Review.Instructions)
 	}
 }
+
+func TestBotUsernameDefault(t *testing.T) {
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{},
+		FileName:    "nonexistent",
+		EnvPrefix:   "CR_TEST_BOTUSER",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	if cfg.Review.BotUsername != "github-actions[bot]" {
+		t.Errorf("expected default BotUsername 'github-actions[bot]', got %s", cfg.Review.BotUsername)
+	}
+}
+
+func TestBotUsernameFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  botUsername: "custom-bot[bot]"
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_BOTUSER2",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	if cfg.Review.BotUsername != "custom-bot[bot]" {
+		t.Errorf("expected BotUsername 'custom-bot[bot]' from file, got %s", cfg.Review.BotUsername)
+	}
+}
+
+func TestBotUsernameMerge(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			BotUsername: "base-bot[bot]",
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			BotUsername: "overlay-bot[bot]",
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	if merged.Review.BotUsername != "overlay-bot[bot]" {
+		t.Errorf("expected BotUsername 'overlay-bot[bot]' from overlay, got %s", merged.Review.BotUsername)
+	}
+}
+
+func TestBotUsernameMergePreservesBase(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			BotUsername: "base-bot[bot]",
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			// Empty BotUsername should preserve base
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	if merged.Review.BotUsername != "base-bot[bot]" {
+		t.Errorf("expected BotUsername 'base-bot[bot]' from base, got %s", merged.Review.BotUsername)
+	}
+}

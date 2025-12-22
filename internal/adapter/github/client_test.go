@@ -317,3 +317,163 @@ func TestClient_CreateReview_EmptyFindings(t *testing.T) {
 	assert.Empty(t, receivedRequest.Comments)
 	assert.Equal(t, "LGTM!", receivedRequest.Body)
 }
+
+func TestClient_ListReviews_Success(t *testing.T) {
+	requestReceived := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived = true
+
+		// Verify request method and path
+		assert.Equal(t, "GET", r.Method)
+		assert.Equal(t, "/repos/owner/repo/pulls/123/reviews", r.URL.Path)
+
+		// Verify headers
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/vnd.github+json", r.Header.Get("Accept"))
+		assert.Equal(t, "2022-11-28", r.Header.Get("X-GitHub-Api-Version"))
+
+		// Send response
+		reviews := []github.ReviewSummary{
+			{
+				ID:          100,
+				User:        github.User{Login: "github-actions[bot]", Type: "Bot"},
+				State:       "APPROVED",
+				SubmittedAt: "2024-01-01T00:00:00Z",
+			},
+			{
+				ID:          101,
+				User:        github.User{Login: "human-reviewer", Type: "User"},
+				State:       "CHANGES_REQUESTED",
+				SubmittedAt: "2024-01-02T00:00:00Z",
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(reviews)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	require.True(t, requestReceived)
+	require.Len(t, reviews, 2)
+	assert.Equal(t, int64(100), reviews[0].ID)
+	assert.Equal(t, "github-actions[bot]", reviews[0].User.Login)
+	assert.Equal(t, "APPROVED", reviews[0].State)
+	assert.Equal(t, int64(101), reviews[1].ID)
+	assert.Equal(t, "human-reviewer", reviews[1].User.Login)
+}
+
+func TestClient_ListReviews_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]github.ReviewSummary{})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 1)
+
+	require.NoError(t, err)
+	assert.Empty(t, reviews)
+}
+
+func TestClient_ListReviews_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Not Found",
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.ListReviews(context.Background(), "nonexistent", "repo", 999)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid request")
+}
+
+func TestClient_DismissReview_Success(t *testing.T) {
+	var receivedRequest github.DismissReviewRequest
+	requestReceived := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived = true
+
+		// Verify request method and path
+		assert.Equal(t, "PUT", r.Method)
+		assert.Equal(t, "/repos/owner/repo/pulls/123/reviews/456/dismissals", r.URL.Path)
+
+		// Verify headers
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/vnd.github+json", r.Header.Get("Accept"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "2022-11-28", r.Header.Get("X-GitHub-Api-Version"))
+
+		// Parse request body
+		json.NewDecoder(r.Body).Decode(&receivedRequest)
+
+		// Send response
+		resp := github.DismissReviewResponse{
+			ID:    456,
+			State: "DISMISSED",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	resp, err := client.DismissReview(context.Background(), "owner", "repo", 123, 456, "Superseded by new review")
+
+	require.NoError(t, err)
+	require.True(t, requestReceived)
+	assert.Equal(t, int64(456), resp.ID)
+	assert.Equal(t, "DISMISSED", resp.State)
+	assert.Equal(t, "Superseded by new review", receivedRequest.Message)
+}
+
+func TestClient_DismissReview_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Not Found",
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.DismissReview(context.Background(), "owner", "repo", 123, 999, "message")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid request")
+}
+
+func TestClient_DismissReview_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(github.GitHubErrorResponse{
+			Message: "Resource not accessible by integration",
+		})
+	}))
+	defer server.Close()
+
+	client := github.NewClient("test-token")
+	client.SetBaseURL(server.URL)
+
+	_, err := client.DismissReview(context.Background(), "owner", "repo", 123, 456, "message")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication")
+}

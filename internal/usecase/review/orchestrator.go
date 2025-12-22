@@ -95,6 +95,10 @@ type GitHubPostRequest struct {
 	ActionOnMedium   string
 	ActionOnLow      string
 	ActionOnClean    string
+
+	// BotUsername is the bot username for auto-dismissing stale reviews.
+	// If set, previous reviews from this user are dismissed before posting.
+	BotUsername string
 }
 
 // GitHubPostResult contains the result of posting a review.
@@ -202,6 +206,11 @@ type BranchRequest struct {
 	ActionOnMedium   string // Action for medium severity findings
 	ActionOnLow      string // Action for low severity findings
 	ActionOnClean    string // Action when no findings in diff
+
+	// BotUsername is the bot username for auto-dismissing stale reviews.
+	// If set, previous reviews from this user are dismissed before posting.
+	// Default: "github-actions[bot]"
+	BotUsername string
 }
 
 // Result captures the orchestrator outcome.
@@ -656,6 +665,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			ActionOnMedium:   req.ActionOnMedium,
 			ActionOnLow:      req.ActionOnLow,
 			ActionOnClean:    req.ActionOnClean,
+			BotUsername:      req.BotUsername,
 		})
 		if err != nil {
 			// Log warning but don't fail the review

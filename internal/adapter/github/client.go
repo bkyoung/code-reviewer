@@ -162,3 +162,138 @@ func (c *Client) CreateReview(ctx context.Context, input CreateReviewInput) (*Cr
 
 	return &reviewResp, nil
 }
+
+// ListReviews fetches all reviews for a pull request.
+// Returns reviews in chronological order (oldest first).
+func (c *Client) ListReviews(ctx context.Context, owner, repo string, pullNumber int) ([]ReviewSummary, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews",
+		c.baseURL, owner, repo, pullNumber)
+
+	var resp *http.Response
+	err := llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
+		req, reqErr := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if reqErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeUnknown,
+				Message:   reqErr.Error(),
+				Retryable: false,
+				Provider:  providerName,
+			}
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		var callErr error
+		resp, callErr = c.httpClient.Do(req)
+		if callErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeTimeout,
+				Message:   callErr.Error(),
+				Retryable: true,
+				Provider:  providerName,
+			}
+		}
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				return &llmhttp.Error{
+					Type:       llmhttp.ErrTypeUnknown,
+					Message:    fmt.Sprintf("HTTP %d (failed to read response: %v)", resp.StatusCode, readErr),
+					StatusCode: resp.StatusCode,
+					Retryable:  resp.StatusCode >= 500,
+					Provider:   providerName,
+				}
+			}
+			return MapHTTPError(resp.StatusCode, bodyBytes)
+		}
+
+		return nil
+	}, c.retryConf)
+
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var reviews []ReviewSummary
+	if err := json.NewDecoder(resp.Body).Decode(&reviews); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return reviews, nil
+}
+
+// DismissReview dismisses a pull request review with the given message.
+// Returns an error if the request fails after all retries.
+func (c *Client) DismissReview(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*DismissReviewResponse, error) {
+	reqBody := DismissReviewRequest{Message: message}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews/%d/dismissals",
+		c.baseURL, owner, repo, pullNumber, reviewID)
+
+	var resp *http.Response
+	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
+		req, reqErr := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(jsonData))
+		if reqErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeUnknown,
+				Message:   reqErr.Error(),
+				Retryable: false,
+				Provider:  providerName,
+			}
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		var callErr error
+		resp, callErr = c.httpClient.Do(req)
+		if callErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeTimeout,
+				Message:   callErr.Error(),
+				Retryable: true,
+				Provider:  providerName,
+			}
+		}
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				return &llmhttp.Error{
+					Type:       llmhttp.ErrTypeUnknown,
+					Message:    fmt.Sprintf("HTTP %d (failed to read response: %v)", resp.StatusCode, readErr),
+					StatusCode: resp.StatusCode,
+					Retryable:  resp.StatusCode >= 500,
+					Provider:   providerName,
+				}
+			}
+			return MapHTTPError(resp.StatusCode, bodyBytes)
+		}
+
+		return nil
+	}, c.retryConf)
+
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var dismissResp DismissReviewResponse
+	if err := json.NewDecoder(resp.Body).Decode(&dismissResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &dismissResp, nil
+}

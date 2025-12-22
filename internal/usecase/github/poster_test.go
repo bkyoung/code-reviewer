@@ -15,8 +15,11 @@ import (
 
 // MockReviewClient is a mock implementation of the ReviewClient interface.
 type MockReviewClient struct {
-	CreateReviewFunc func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
-	LastInput        *github.CreateReviewInput
+	CreateReviewFunc  func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
+	ListReviewsFunc   func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error)
+	DismissReviewFunc func(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error)
+	LastInput         *github.CreateReviewInput
+	DismissedIDs      []int64
 }
 
 func (m *MockReviewClient) CreateReview(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
@@ -25,6 +28,21 @@ func (m *MockReviewClient) CreateReview(ctx context.Context, input github.Create
 		return m.CreateReviewFunc(ctx, input)
 	}
 	return &github.CreateReviewResponse{ID: 1}, nil
+}
+
+func (m *MockReviewClient) ListReviews(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+	if m.ListReviewsFunc != nil {
+		return m.ListReviewsFunc(ctx, owner, repo, pullNumber)
+	}
+	return []github.ReviewSummary{}, nil
+}
+
+func (m *MockReviewClient) DismissReview(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error) {
+	m.DismissedIDs = append(m.DismissedIDs, reviewID)
+	if m.DismissReviewFunc != nil {
+		return m.DismissReviewFunc(ctx, owner, repo, pullNumber, reviewID, message)
+	}
+	return &github.DismissReviewResponse{ID: reviewID, State: "DISMISSED"}, nil
 }
 
 func TestNewReviewPoster(t *testing.T) {
@@ -329,4 +347,191 @@ func makeFinding(file string, line int, severity, description string) domain.Fin
 		Category:    "test",
 		Description: description,
 	}
+}
+
+func TestReviewPoster_PostReview_DismissesBotReviews(t *testing.T) {
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "github-actions[bot]"}, State: "APPROVED"},
+				{ID: 101, User: github.User{Login: "github-actions[bot]"}, State: "CHANGES_REQUESTED"},
+				{ID: 102, User: github.User{Login: "human-user"}, State: "COMMENTED"},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 200, HTMLURL: "https://example.com/review"}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "github-actions[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(200), result.ReviewID)
+	assert.Equal(t, 2, result.DismissedCount)
+	assert.Equal(t, []int64{100, 101}, client.DismissedIDs)
+}
+
+func TestReviewPoster_PostReview_NoDismissWhenBotUsernameEmpty(t *testing.T) {
+	listCalled := false
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			listCalled = true
+			return []github.ReviewSummary{}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "", // Empty - no dismiss
+	})
+
+	require.NoError(t, err)
+	assert.False(t, listCalled)
+	assert.Equal(t, 0, result.DismissedCount)
+}
+
+func TestReviewPoster_PostReview_SkipsAlreadyDismissedReviews(t *testing.T) {
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "bot[bot]"}, State: "DISMISSED"},
+				{ID: 101, User: github.User{Login: "bot[bot]"}, State: "APPROVED"},
+			}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Only the APPROVED one should be dismissed, not the already DISMISSED one
+	assert.Equal(t, 1, result.DismissedCount)
+	assert.Equal(t, []int64{101}, client.DismissedIDs)
+}
+
+func TestReviewPoster_PostReview_SkipsPendingReviews(t *testing.T) {
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "bot[bot]"}, State: "PENDING"},
+				{ID: 101, User: github.User{Login: "bot[bot]"}, State: "COMMENTED"},
+			}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Only COMMENTED should be dismissed, not PENDING
+	assert.Equal(t, 1, result.DismissedCount)
+	assert.Equal(t, []int64{101}, client.DismissedIDs)
+}
+
+func TestReviewPoster_PostReview_ListFailureContinues(t *testing.T) {
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return nil, errors.New("list failed")
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 200}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	// Should succeed despite list failure
+	require.NoError(t, err)
+	assert.Equal(t, int64(200), result.ReviewID)
+	assert.Equal(t, 0, result.DismissedCount)
+}
+
+func TestReviewPoster_PostReview_DismissFailureContinues(t *testing.T) {
+	dismissCalls := 0
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "bot[bot]"}, State: "APPROVED"},
+				{ID: 101, User: github.User{Login: "bot[bot]"}, State: "CHANGES_REQUESTED"},
+			}, nil
+		},
+		DismissReviewFunc: func(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error) {
+			dismissCalls++
+			if reviewID == 100 {
+				return nil, errors.New("dismiss failed")
+			}
+			return &github.DismissReviewResponse{ID: reviewID, State: "DISMISSED"}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 200}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	// Should succeed despite partial dismiss failure
+	require.NoError(t, err)
+	assert.Equal(t, int64(200), result.ReviewID)
+	assert.Equal(t, 2, dismissCalls) // Both were attempted
+	assert.Equal(t, 1, result.DismissedCount)
+}
+
+func TestReviewPoster_PostReview_NoBotReviewsToDissmiss(t *testing.T) {
+	client := &MockReviewClient{
+		ListReviewsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error) {
+			return []github.ReviewSummary{
+				{ID: 100, User: github.User{Login: "human-user"}, State: "APPROVED"},
+			}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.DismissedCount)
+	assert.Empty(t, client.DismissedIDs)
 }

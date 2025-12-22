@@ -115,6 +115,11 @@ type ReviewConfig struct {
 
 	// Actions configures the GitHub review action based on finding severity.
 	Actions ReviewActions `yaml:"actions"`
+
+	// BotUsername is the GitHub username of the bot for auto-dismissing stale reviews.
+	// When set, previous reviews from this user are dismissed before posting a new review.
+	// Default: "github-actions[bot]"
+	BotUsername string `yaml:"botUsername"`
 }
 
 // ReviewActions maps finding severities to GitHub review actions.
@@ -268,6 +273,11 @@ func chooseReview(base, overlay ReviewConfig) ReviewConfig {
 	// Actions: overlay wins if any field is non-empty
 	if overlay.Actions.hasAny() {
 		result.Actions = mergeReviewActions(base.Actions, overlay.Actions)
+	}
+
+	// BotUsername: overlay wins if non-empty
+	if overlay.BotUsername != "" {
+		result.BotUsername = overlay.BotUsername
 	}
 
 	return result

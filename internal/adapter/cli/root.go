@@ -44,6 +44,7 @@ type Dependencies struct {
 	DefaultRepo          string
 	DefaultInstructions  string // From config review.instructions
 	DefaultReviewActions DefaultReviewActions
+	DefaultBotUsername   string // Bot username for auto-dismissing stale reviews
 	Version              string
 }
 
@@ -76,7 +77,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Use:   "review",
 		Short: "Run a code review",
 	}
-	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions))
+	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions, deps.DefaultBotUsername))
 	root.AddCommand(reviewCmd)
 
 	var showVersion bool
@@ -100,7 +101,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	return root
 }
 
-func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string, defaultActions DefaultReviewActions) *cobra.Command {
+func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string, defaultActions DefaultReviewActions, defaultBotUsername string) *cobra.Command {
 	var baseRef string
 	var targetRef string
 	var outputDir string
@@ -174,6 +175,12 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedActionLow := resolveAction(actionLow, defaultActions.OnLow)
 			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
 
+			// Resolve bot username: use default if set, otherwise "github-actions[bot]"
+			resolvedBotUsername := defaultBotUsername
+			if resolvedBotUsername == "" {
+				resolvedBotUsername = "github-actions[bot]"
+			}
+
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:            baseRef,
 				TargetRef:          targetRef,
@@ -195,6 +202,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				ActionOnMedium:     resolvedActionMedium,
 				ActionOnLow:        resolvedActionLow,
 				ActionOnClean:      resolvedActionClean,
+				BotUsername:        resolvedBotUsername,
 			})
 			return err
 		},

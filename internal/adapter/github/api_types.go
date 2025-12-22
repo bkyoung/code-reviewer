@@ -74,3 +74,26 @@ type GitHubErrorResponse struct {
 		Message  string `json:"message"`
 	} `json:"errors,omitempty"`
 }
+
+// ReviewSummary represents a review from the list reviews endpoint.
+// See: https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request
+type ReviewSummary struct {
+	ID          int64  `json:"id"`
+	NodeID      string `json:"node_id"`
+	User        User   `json:"user"`
+	Body        string `json:"body"`
+	State       string `json:"state"` // PENDING, APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+	CommitID    string `json:"commit_id"`
+	SubmittedAt string `json:"submitted_at,omitempty"`
+}
+
+// DismissReviewRequest is the request body for PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals.
+type DismissReviewRequest struct {
+	Message string `json:"message"`
+}
+
+// DismissReviewResponse is the response from dismissing a review.
+type DismissReviewResponse struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"` // Should be "DISMISSED"
+}
