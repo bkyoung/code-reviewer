@@ -60,6 +60,10 @@ type flexibleFinding struct {
 }
 
 // toFinding converts a flexibleFinding to a domain.Finding, preferring camelCase.
+// Uses domain.NewFinding to generate deterministic IDs for proper deduplication.
+// This is intentional: using domain.Finding{} resulted in empty IDs causing all
+// findings to collapse during deduplication. The deterministic ID is computed
+// from content, making the change backward-compatible for merge logic.
 func (f flexibleFinding) toFinding() domain.Finding {
 	lineStart := f.LineStart
 	if lineStart == 0 && f.LineStartSC != 0 {
@@ -69,7 +73,7 @@ func (f flexibleFinding) toFinding() domain.Finding {
 	if lineEnd == 0 && f.LineEndSC != 0 {
 		lineEnd = f.LineEndSC
 	}
-	return domain.Finding{
+	return domain.NewFinding(domain.FindingInput{
 		File:        f.File,
 		LineStart:   lineStart,
 		LineEnd:     lineEnd,
@@ -78,7 +82,7 @@ func (f flexibleFinding) toFinding() domain.Finding {
 		Description: f.Description,
 		Suggestion:  f.Suggestion,
 		Evidence:    f.Evidence,
-	}
+	})
 }
 
 // flexibleResponse handles both string summaries and object summaries.

@@ -17,6 +17,26 @@ const (
 	EventRequestChanges ReviewEvent = "REQUEST_CHANGES"
 )
 
+// ReviewState represents the state of a submitted review.
+type ReviewState string
+
+const (
+	// StatePending is a review that hasn't been submitted yet.
+	StatePending ReviewState = "PENDING"
+
+	// StateApproved is a review that approved the PR.
+	StateApproved ReviewState = "APPROVED"
+
+	// StateChangesRequested is a review that requested changes.
+	StateChangesRequested ReviewState = "CHANGES_REQUESTED"
+
+	// StateCommented is a review with comments but no approval/rejection.
+	StateCommented ReviewState = "COMMENTED"
+
+	// StateDismissed is a review that was dismissed.
+	StateDismissed ReviewState = "DISMISSED"
+)
+
 // CreateReviewRequest is the request body for POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews.
 type CreateReviewRequest struct {
 	// CommitID is the SHA of the commit to review (must be the head commit of the PR).
@@ -73,4 +93,27 @@ type GitHubErrorResponse struct {
 		Code     string `json:"code"`
 		Message  string `json:"message"`
 	} `json:"errors,omitempty"`
+}
+
+// ReviewSummary represents a review from the list reviews endpoint.
+// See: https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request
+type ReviewSummary struct {
+	ID          int64  `json:"id"`
+	NodeID      string `json:"node_id"`
+	User        User   `json:"user"`
+	Body        string `json:"body"`
+	State       string `json:"state"` // PENDING, APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+	CommitID    string `json:"commit_id"`
+	SubmittedAt string `json:"submitted_at,omitempty"`
+}
+
+// DismissReviewRequest is the request body for PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals.
+type DismissReviewRequest struct {
+	Message string `json:"message"`
+}
+
+// DismissReviewResponse is the response from dismissing a review.
+type DismissReviewResponse struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"` // Should be "DISMISSED"
 }

@@ -210,7 +210,8 @@ func run() error {
 			OnLow:      cfg.Review.Actions.OnLow,
 			OnClean:    cfg.Review.Actions.OnClean,
 		},
-		Version: version.Value(),
+		DefaultBotUsername: cfg.Review.BotUsername,
+		Version:            version.Value(),
 	})
 
 	if err := root.ExecuteContext(ctx); err != nil {
@@ -582,6 +583,7 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 			OnLow:      req.ActionOnLow,
 			OnClean:    req.ActionOnClean,
 		},
+		BotUsername: req.BotUsername,
 	}
 
 	// Post the review
