@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -582,6 +583,45 @@ func TestClient_ListReviews_SSRFProtection_WrongPathPrefix(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected API path")
+}
+
+func TestClient_ListReviews_GitHubEnterprisePathPrefix(t *testing.T) {
+	// Test that pagination works with GitHub Enterprise API path prefix (/api/v3)
+	pageCount := 0
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		// Verify requests use the /api/v3 prefix
+		assert.True(t, strings.HasPrefix(r.URL.Path, "/api/v3/repos/"), "path should have /api/v3 prefix")
+
+		if pageCount == 1 {
+			// Return Link with GHES-style path prefix
+			w.Header().Set("Link", `<`+serverURL+`/api/v3/repos/owner/repo/pulls/123/reviews?page=2>; rel="next"`)
+			reviews := []github.ReviewSummary{
+				{ID: 1, User: github.User{Login: "bot"}, State: "APPROVED", SubmittedAt: "2024-01-01T00:00:00Z"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		} else {
+			reviews := []github.ReviewSummary{
+				{ID: 2, User: github.User{Login: "bot"}, State: "COMMENTED", SubmittedAt: "2024-01-02T00:00:00Z"},
+			}
+			json.NewEncoder(w).Encode(reviews)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := github.NewClient("test-token")
+	// Set base URL with GHES-style path prefix
+	client.SetBaseURL(server.URL + "/api/v3")
+
+	reviews, err := client.ListReviews(context.Background(), "owner", "repo", 123)
+
+	require.NoError(t, err)
+	assert.Len(t, reviews, 2, "should have fetched both pages")
+	assert.Equal(t, 2, pageCount, "should have made two requests")
 }
 
 func TestClient_ListReviews_PathEscaping(t *testing.T) {

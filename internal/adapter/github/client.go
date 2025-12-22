@@ -257,8 +257,13 @@ func (c *Client) ValidateAndResolvePaginationURL(rawURL string) (string, error) 
 
 	// Require path starts with expected GitHub API prefix
 	// This prevents redirecting to other endpoints on the same host
-	if !strings.HasPrefix(parsed.Path, "/repos/") {
-		return "", fmt.Errorf("unexpected API path: %s (must start with /repos/)", parsed.Path)
+	// Support both api.github.com (/repos/...) and GHES (/api/v3/repos/...)
+	expectedPrefix := strings.TrimSuffix(base.Path, "/") + "/repos/"
+	if base.Path == "" || base.Path == "/" {
+		expectedPrefix = "/repos/"
+	}
+	if !strings.HasPrefix(parsed.Path, expectedPrefix) {
+		return "", fmt.Errorf("unexpected API path: %s (must start with %s)", parsed.Path, expectedPrefix)
 	}
 
 	return parsed.String(), nil
