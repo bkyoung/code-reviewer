@@ -97,7 +97,8 @@ type GitHubPostRequest struct {
 	ActionOnClean    string
 
 	// BotUsername is the bot username for auto-dismissing stale reviews.
-	// If set, previous reviews from this user are dismissed before posting.
+	// If set, previous reviews from this user are dismissed AFTER the new
+	// review posts successfully. This ensures the PR always has review signal.
 	BotUsername string
 }
 
@@ -208,7 +209,8 @@ type BranchRequest struct {
 	ActionOnClean    string // Action when no findings in diff
 
 	// BotUsername is the bot username for auto-dismissing stale reviews.
-	// If set, previous reviews from this user are dismissed before posting.
+	// If set, previous reviews from this user are dismissed AFTER the new
+	// review posts successfully. This ensures the PR always has review signal.
 	// Default: "github-actions[bot]"
 	BotUsername string
 }
