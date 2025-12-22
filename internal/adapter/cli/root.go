@@ -105,6 +105,13 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var noArchitecture bool
 	var noAutoContext bool
 
+	// GitHub integration flags
+	var postGitHubReview bool
+	var githubOwner string
+	var githubRepo string
+	var prNumber int
+	var commitSHA string
+
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
 		Short: "Review a branch against a base reference",
@@ -130,6 +137,19 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				customInstructions = defaultInstructions
 			}
 
+			// Validate GitHub flags if posting to GitHub
+			if postGitHubReview {
+				if githubOwner == "" || githubRepo == "" {
+					return fmt.Errorf("--github-owner and --github-repo are required when --post-github-review is set")
+				}
+				if prNumber <= 0 {
+					return fmt.Errorf("--pr-number must be a positive integer when --post-github-review is set")
+				}
+				if commitSHA == "" {
+					return fmt.Errorf("--commit-sha is required when --post-github-review is set")
+				}
+			}
+
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:            baseRef,
 				TargetRef:          targetRef,
@@ -141,6 +161,11 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				NoArchitecture:     noArchitecture,
 				NoAutoContext:      noAutoContext,
 				Interactive:        interactive,
+				PostToGitHub:       postGitHubReview,
+				GitHubOwner:        githubOwner,
+				GitHubRepo:         githubRepo,
+				PRNumber:           prNumber,
+				CommitSHA:          commitSHA,
 			})
 			return err
 		},
@@ -164,6 +189,13 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	_ = cmd.Flags().MarkHidden("plan-only") // Not yet implemented
 	cmd.Flags().BoolVar(&noArchitecture, "no-architecture", false, "Skip loading ARCHITECTURE.md")
 	cmd.Flags().BoolVar(&noAutoContext, "no-auto-context", false, "Disable automatic context gathering (design docs, relevant docs)")
+
+	// GitHub integration flags
+	cmd.Flags().BoolVar(&postGitHubReview, "post-github-review", false, "Post review as GitHub PR review with inline comments")
+	cmd.Flags().StringVar(&githubOwner, "github-owner", "", "GitHub repository owner (required with --post-github-review)")
+	cmd.Flags().StringVar(&githubRepo, "github-repo", "", "GitHub repository name (required with --post-github-review)")
+	cmd.Flags().IntVar(&prNumber, "pr-number", 0, "Pull request number (required with --post-github-review)")
+	cmd.Flags().StringVar(&commitSHA, "commit-sha", "", "Head commit SHA (required with --post-github-review)")
 
 	return cmd
 }

@@ -74,6 +74,29 @@ type Store interface {
 	Close() error
 }
 
+// GitHubPoster defines the outbound port for posting reviews to GitHub PRs.
+type GitHubPoster interface {
+	PostReview(ctx context.Context, req GitHubPostRequest) (*GitHubPostResult, error)
+}
+
+// GitHubPostRequest contains all data needed to post a review to GitHub.
+type GitHubPostRequest struct {
+	Owner     string
+	Repo      string
+	PRNumber  int
+	CommitSHA string
+	Review    domain.Review
+	Diff      domain.Diff // For calculating diff positions
+}
+
+// GitHubPostResult contains the result of posting a review.
+type GitHubPostResult struct {
+	ReviewID        int64
+	CommentsPosted  int
+	CommentsSkipped int
+	HTMLURL         string
+}
+
 // StorePrecisionPrior represents precision tracking for a provider/category combination.
 type StorePrecisionPrior struct {
 	Provider string
@@ -134,6 +157,7 @@ type OrchestratorDeps struct {
 	Logger        Logger         // Optional: structured logging for warnings and info
 	PlanningAgent *PlanningAgent // Optional: interactive planning agent (only works in TTY mode)
 	RepoDir       string         // Repository directory for context gathering (optional)
+	GitHubPoster  GitHubPoster   // Optional: posts review to GitHub PR with inline comments
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -155,6 +179,13 @@ type BranchRequest struct {
 	NoArchitecture     bool     // Skip loading ARCHITECTURE.md
 	NoAutoContext      bool     // Disable automatic context gathering (design docs, relevant docs)
 	Interactive        bool     // Enable interactive planning mode (requires TTY)
+
+	// GitHub integration fields (for posting inline review comments)
+	PostToGitHub bool   // Enable posting review to GitHub PR
+	GitHubOwner  string // Repository owner (user or org)
+	GitHubRepo   string // Repository name
+	PRNumber     int    // Pull request number
+	CommitSHA    string // Head commit SHA for the review
 }
 
 // Result captures the orchestrator outcome.
@@ -163,6 +194,7 @@ type Result struct {
 	JSONPaths     map[string]string
 	SARIFPaths    map[string]string
 	Reviews       []domain.Review
+	GitHubResult  *GitHubPostResult // Set when PostToGitHub is enabled
 }
 
 // Orchestrator implements the core review flow for Phase 1.
@@ -587,11 +619,51 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	jsonPaths["merged"] = mergedJSONPath
 	sarifPaths["merged"] = mergedSARIFPath
 
+	// Post review to GitHub if enabled
+	var githubResult *GitHubPostResult
+	if req.PostToGitHub && o.deps.GitHubPoster != nil {
+		result, err := o.deps.GitHubPoster.PostReview(ctx, GitHubPostRequest{
+			Owner:     req.GitHubOwner,
+			Repo:      req.GitHubRepo,
+			PRNumber:  req.PRNumber,
+			CommitSHA: req.CommitSHA,
+			Review:    mergedReview,
+			Diff:      diff,
+		})
+		if err != nil {
+			// Log warning but don't fail the review
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to post review to GitHub", map[string]interface{}{
+					"owner":    req.GitHubOwner,
+					"repo":     req.GitHubRepo,
+					"prNumber": req.PRNumber,
+					"error":    err.Error(),
+				})
+			} else {
+				log.Printf("warning: failed to post review to GitHub: %v\n", err)
+			}
+		} else {
+			githubResult = result
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogInfo(ctx, "posted review to GitHub", map[string]interface{}{
+					"reviewID":        result.ReviewID,
+					"commentsPosted":  result.CommentsPosted,
+					"commentsSkipped": result.CommentsSkipped,
+					"url":             result.HTMLURL,
+				})
+			} else {
+				log.Printf("Posted review to GitHub: %d comments (%d skipped) - %s\n",
+					result.CommentsPosted, result.CommentsSkipped, result.HTMLURL)
+			}
+		}
+	}
+
 	return Result{
 		MarkdownPaths: markdownPaths,
 		JSONPaths:     jsonPaths,
 		SARIFPaths:    sarifPaths,
 		Reviews:       append(reviews, mergedReview),
+		GitHubResult:  githubResult,
 	}, nil
 }
 
