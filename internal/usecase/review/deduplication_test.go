@@ -548,6 +548,53 @@ func TestReconcileFindings_EmptyInputs(t *testing.T) {
 	}
 }
 
+func TestReconcileFindings_DoesNotMutateInputState(t *testing.T) {
+	// Verify that ReconcileFindings does not mutate the original state
+	firstSeen := time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC)
+	existingFinding := createTestFinding("file1.go", 10, "high", "security", "SQL injection")
+	trackedFinding := createTrackedFindingFromFinding(t, existingFinding, firstSeen)
+
+	// Capture original values
+	originalSeenCount := trackedFinding.SeenCount
+	originalLastSeen := trackedFinding.LastSeen
+
+	state := TrackingState{
+		Target: ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			trackedFinding.Fingerprint: trackedFinding,
+		},
+	}
+
+	// Re-detect the same finding - this will update SeenCount/LastSeen in returned state
+	newFindings := []domain.Finding{
+		createTestFinding("file1.go", 10, "high", "security", "SQL injection"),
+	}
+
+	timestamp := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	newState, _ := ReconcileFindings(state, newFindings, nil, "def456", timestamp)
+
+	// Verify the returned state WAS updated
+	fp := trackedFinding.Fingerprint
+	if newState.Findings[fp].SeenCount != originalSeenCount+1 {
+		t.Errorf("new state SeenCount = %d, want %d", newState.Findings[fp].SeenCount, originalSeenCount+1)
+	}
+	if !newState.Findings[fp].LastSeen.Equal(timestamp) {
+		t.Errorf("new state LastSeen = %v, want %v", newState.Findings[fp].LastSeen, timestamp)
+	}
+
+	// Verify the original state was NOT mutated
+	if state.Findings[fp].SeenCount != originalSeenCount {
+		t.Errorf("original state SeenCount was mutated: got %d, want %d", state.Findings[fp].SeenCount, originalSeenCount)
+	}
+	if !state.Findings[fp].LastSeen.Equal(originalLastSeen) {
+		t.Errorf("original state LastSeen was mutated: got %v, want %v", state.Findings[fp].LastSeen, originalLastSeen)
+	}
+}
+
 // Helper functions
 
 func createTestFinding(file string, line int, severity, category, description string) domain.Finding {
