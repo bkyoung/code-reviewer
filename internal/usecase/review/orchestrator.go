@@ -775,6 +775,15 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			} else if updatedState.Target.Repository != "" {
 				// Non-empty Repository indicates reconciliation produced valid state
 				reconciledState = &updatedState
+			} else if trackingState != nil && len(trackingState.Findings) > 0 {
+				// Edge case: had prior findings but reconciliation returned invalid state
+				// This shouldn't happen with well-formed state; log for debugging
+				if o.deps.Logger != nil {
+					o.deps.Logger.LogWarning(ctx, "reconciliation returned invalid state, tracking may be incomplete", map[string]interface{}{
+						"priorFindingsCount": len(trackingState.Findings),
+						"targetRepository":   updatedState.Target.Repository,
+					})
+				}
 			}
 
 			// TODO(#60): Detect status updates from PR comment replies and reactions
