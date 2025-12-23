@@ -158,6 +158,15 @@ The workflow needs:
 - `security-events: write` - Upload SARIF to Code Scanning
 - `pull-requests: write` - Post review comments on PRs
 
+**Important**: To allow the bot to post `APPROVE` or `REQUEST_CHANGES` reviews (not just comments), you must enable this repository setting:
+
+1. Go to **Settings** → **Actions** → **General**
+2. Scroll to **Workflow permissions**
+3. Check **"Allow GitHub Actions to create and approve pull requests"**
+4. Click **Save**
+
+Without this setting, reviews will fail with a 422 error when attempting to approve PRs. This is a GitHub security feature to prevent malicious PRs from self-approving.
+
 ### Output Formats
 
 The workflow generates two outputs:
@@ -311,6 +320,20 @@ planning:
 - For public repos: Should work automatically
 - For private repos: Requires GitHub Advanced Security
 - Contact your GitHub organization admin to enable
+
+### Review Fails with "GitHub Actions is not permitted to approve"
+
+**Error**: `HTTP 422: GitHub Actions is not permitted to approve pull request`
+
+**Cause**: GitHub Actions cannot approve PRs by default (security feature to prevent self-approving malicious PRs).
+
+**Solution**:
+1. Go to **Settings** → **Actions** → **General**
+2. Scroll to **Workflow permissions**
+3. Check **"Allow GitHub Actions to create and approve pull requests"**
+4. Click **Save**
+
+This is required for `APPROVE` and `REQUEST_CHANGES` review events. Without it, the bot can only post `COMMENT` reviews.
 
 ### No Comment Posted to PR
 

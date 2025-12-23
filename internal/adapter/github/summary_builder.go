@@ -169,6 +169,9 @@ func escapeMarkdownTableCell(s string) string {
 // The actions parameter determines which severities appear in "Files Requiring Attention".
 // Any severity configured to trigger REQUEST_CHANGES will be included.
 // If actions is empty/default, critical and high severities are included.
+//
+// When findings exist but none trigger REQUEST_CHANGES, the summary shows
+// "✅ Approved with suggestions" to indicate a non-blocking approval.
 func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actions ReviewActions) string {
 	fileCount := len(d.Files)
 
@@ -184,14 +187,29 @@ func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actio
 		return fmt.Sprintf("✅ **No issues found.** Reviewed %d files.", fileCount)
 	}
 
+	// Check if any finding would trigger REQUEST_CHANGES
+	// Use the shared HasBlockingFindings function to ensure consistency
+	// with DetermineReviewEventWithActions
+	hasBlockingFindings := HasBlockingFindings(findings, actions)
+
 	var sb strings.Builder
+
+	// Show approval prefix only when the review will actually be APPROVE
+	// (not when onNonBlocking is set to COMMENT)
+	if !hasBlockingFindings {
+		resolvedEvent := resolveNonBlockingEvent(actions)
+		if resolvedEvent == EventApprove {
+			sb.WriteString("✅ **Approved with suggestions.** ")
+		}
+	}
+
+	attentionSeverities := getAttentionSeverities(actions)
 
 	// Badge line
 	sb.WriteString(formatBadgeLine(fileCount, counts))
 	sb.WriteString("\n\n")
 
 	// Files requiring attention (based on configured blocking severities)
-	attentionSeverities := getAttentionSeverities(actions)
 	if section := formatFilesRequiringAttention(inDiffFindings, attentionSeverities); section != "" {
 		sb.WriteString(section)
 		sb.WriteString("\n")
@@ -204,6 +222,17 @@ func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actio
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// resolveNonBlockingEvent returns the event that will be used for non-blocking reviews.
+// This mirrors the logic in DetermineReviewEventWithActions for the non-blocking case.
+func resolveNonBlockingEvent(actions ReviewActions) ReviewEvent {
+	if actions.OnNonBlocking != "" {
+		if event, valid := NormalizeAction(actions.OnNonBlocking); valid {
+			return event
+		}
+	}
+	return EventApprove // default
 }
 
 // countBySeverity returns counts for each severity level.
