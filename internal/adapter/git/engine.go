@@ -61,7 +61,7 @@ func (e *Engine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef strin
 
 	fileDiffs, err := patchToFileDiffs(patch)
 	if err != nil {
-		return domain.Diff{}, err
+		return domain.Diff{}, fmt.Errorf("convert patch to file diffs: %w", err)
 	}
 
 	return domain.Diff{
@@ -90,7 +90,14 @@ func (e *Engine) CurrentBranch(ctx context.Context) (string, error) {
 
 // GetIncrementalDiff creates a diff between two specific commits.
 // This is used for incremental reviews where we only want changes since the last reviewed commit.
+// Note: go-git operations don't support context cancellation internally, so cancellation
+// is best-effort (checked at start only).
 func (e *Engine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error) {
+	// Check context cancellation first
+	if ctx.Err() != nil {
+		return domain.Diff{}, ctx.Err()
+	}
+
 	repo, err := goGit.PlainOpenWithOptions(e.repoDir, &goGit.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return domain.Diff{}, fmt.Errorf("open repo: %w", err)
@@ -115,7 +122,7 @@ func (e *Engine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit st
 
 	fileDiffs, err := patchToFileDiffs(patch)
 	if err != nil {
-		return domain.Diff{}, err
+		return domain.Diff{}, fmt.Errorf("convert patch to file diffs: %w", err)
 	}
 
 	return domain.Diff{
