@@ -58,6 +58,9 @@ func FingerprintFromFinding(f Finding) FindingFingerprint {
 	return NewFindingFingerprint(f.File, f.Category, f.Severity, f.Description)
 }
 
+// MaxStatusReasonLength is the maximum allowed length for a status reason.
+const MaxStatusReasonLength = 500
+
 // TrackedFinding wraps a Finding with tracking metadata.
 type TrackedFinding struct {
 	Finding     Finding
@@ -66,6 +69,22 @@ type TrackedFinding struct {
 	FirstSeen   time.Time
 	LastSeen    time.Time
 	SeenCount   int
+
+	// StatusReason provides context for why the finding has its current status.
+	// For example: "Intentional design choice" or "Fixed in refactor".
+	StatusReason string
+
+	// ReviewCommit is the commit SHA where this finding was first reviewed.
+	// This field is immutable after creation.
+	ReviewCommit string
+
+	// ResolvedAt records when the finding was resolved.
+	// This is cleared when the finding is reopened (transitions to open).
+	ResolvedAt *time.Time
+
+	// ResolvedIn is the commit SHA where the finding was fixed.
+	// This is cleared when the finding is reopened (transitions to open).
+	ResolvedIn *string
 }
 
 // TrackedFindingInput captures information needed to create a TrackedFinding.
@@ -75,6 +94,12 @@ type TrackedFindingInput struct {
 	FirstSeen time.Time
 	LastSeen  time.Time
 	SeenCount int
+
+	// Optional transition metadata
+	StatusReason string
+	ReviewCommit string
+	ResolvedAt   *time.Time
+	ResolvedIn   *string
 }
 
 // NewTrackedFinding constructs a TrackedFinding with validation.
@@ -104,27 +129,46 @@ func NewTrackedFinding(input TrackedFindingInput) (TrackedFinding, error) {
 			input.LastSeen, input.FirstSeen)
 	}
 
+	if len(input.StatusReason) > MaxStatusReasonLength {
+		return TrackedFinding{}, fmt.Errorf("status reason exceeds %d characters: got %d",
+			MaxStatusReasonLength, len(input.StatusReason))
+	}
+
+	// Validate consistency between status and resolution fields
+	if input.Status == FindingStatusResolved && (input.ResolvedAt == nil || input.ResolvedAt.IsZero()) {
+		return TrackedFinding{}, fmt.Errorf("resolved status requires valid ResolvedAt timestamp")
+	}
+	if input.Status != FindingStatusResolved && (input.ResolvedAt != nil || input.ResolvedIn != nil) {
+		return TrackedFinding{}, fmt.Errorf("ResolvedAt/ResolvedIn should only be set when status is resolved")
+	}
+
 	fingerprint := FingerprintFromFinding(input.Finding)
 
 	return TrackedFinding{
-		Finding:     input.Finding,
-		Fingerprint: fingerprint,
-		Status:      input.Status,
-		FirstSeen:   input.FirstSeen,
-		LastSeen:    input.LastSeen,
-		SeenCount:   input.SeenCount,
+		Finding:      input.Finding,
+		Fingerprint:  fingerprint,
+		Status:       input.Status,
+		FirstSeen:    input.FirstSeen,
+		LastSeen:     input.LastSeen,
+		SeenCount:    input.SeenCount,
+		StatusReason: input.StatusReason,
+		ReviewCommit: input.ReviewCommit,
+		ResolvedAt:   input.ResolvedAt,
+		ResolvedIn:   input.ResolvedIn,
 	}, nil
 }
 
 // NewTrackedFindingFromFinding creates a new TrackedFinding in open status.
 // This is a convenience constructor for first-time findings.
-func NewTrackedFindingFromFinding(f Finding, timestamp time.Time) (TrackedFinding, error) {
+// The reviewCommit parameter records which commit this finding was first reviewed in.
+func NewTrackedFindingFromFinding(f Finding, timestamp time.Time, reviewCommit string) (TrackedFinding, error) {
 	return NewTrackedFinding(TrackedFindingInput{
-		Finding:   f,
-		Status:    FindingStatusOpen,
-		FirstSeen: timestamp,
-		LastSeen:  timestamp,
-		SeenCount: 1,
+		Finding:      f,
+		Status:       FindingStatusOpen,
+		FirstSeen:    timestamp,
+		LastSeen:     timestamp,
+		SeenCount:    1,
+		ReviewCommit: reviewCommit,
 	})
 }
 
@@ -134,12 +178,56 @@ func (tf *TrackedFinding) MarkSeen(seenAt time.Time) {
 	tf.SeenCount++
 }
 
-// UpdateStatus changes the finding status.
-func (tf *TrackedFinding) UpdateStatus(status FindingStatus) error {
+// UpdateStatus changes the finding status with appropriate side effects.
+//
+// Transition behaviors:
+//   - Any → open: Clears StatusReason, ResolvedAt, and ResolvedIn (reopening).
+//     The reason, currentCommit, and timestamp parameters are ignored for this transition.
+//   - Any → resolved: Sets ResolvedAt to timestamp, and ResolvedIn if currentCommit is provided
+//   - Any → acknowledged/disputed: Updates status and reason, clears ResolvedAt and ResolvedIn
+//
+// The reason parameter provides context for the status change (max 500 chars).
+// The currentCommit parameter is used when transitioning to resolved.
+// The timestamp parameter is used for ResolvedAt when transitioning to resolved.
+func (tf *TrackedFinding) UpdateStatus(status FindingStatus, reason string, currentCommit string, timestamp time.Time) error {
 	if !status.IsValid() {
 		return fmt.Errorf("invalid status: %s", status)
 	}
+
+	// Handle transition to open (reopen) - clear resolution metadata
+	// Note: reason, currentCommit, and timestamp are ignored for this transition
+	if status == FindingStatusOpen {
+		tf.Status = status
+		tf.StatusReason = ""
+		tf.ResolvedAt = nil
+		tf.ResolvedIn = nil
+		return nil
+	}
+
+	// Validate reason length only for statuses that use it
+	if len(reason) > MaxStatusReasonLength {
+		return fmt.Errorf("status reason exceeds %d characters: got %d",
+			MaxStatusReasonLength, len(reason))
+	}
+
+	// Handle transition to resolved - set resolution metadata
+	if status == FindingStatusResolved {
+		tf.Status = status
+		tf.StatusReason = reason
+		tf.ResolvedAt = &timestamp
+		if currentCommit != "" {
+			tf.ResolvedIn = &currentCommit
+		} else {
+			tf.ResolvedIn = nil
+		}
+		return nil
+	}
+
+	// For other statuses (acknowledged, disputed), update status/reason and clear resolution fields
 	tf.Status = status
+	tf.StatusReason = reason
+	tf.ResolvedAt = nil
+	tf.ResolvedIn = nil
 	return nil
 }
 

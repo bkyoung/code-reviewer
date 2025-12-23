@@ -65,7 +65,7 @@ func TestRenderAndParseTrackingComment_RoundTrip(t *testing.T) {
 		Evidence:    true,
 	})
 
-	trackedFinding, err := domain.NewTrackedFindingFromFinding(finding, now)
+	trackedFinding, err := domain.NewTrackedFindingFromFinding(finding, now, "abc123")
 	if err != nil {
 		t.Fatalf("failed to create tracked finding: %v", err)
 	}
@@ -299,13 +299,20 @@ func createTestTrackedFinding(t *testing.T, file string, status domain.FindingSt
 		Evidence:    false,
 	})
 
-	tf, err := domain.NewTrackedFinding(domain.TrackedFindingInput{
+	input := domain.TrackedFindingInput{
 		Finding:   finding,
 		Status:    status,
 		FirstSeen: timestamp,
 		LastSeen:  timestamp,
 		SeenCount: 1,
-	})
+	}
+
+	// Resolved status requires ResolvedAt
+	if status == domain.FindingStatusResolved {
+		input.ResolvedAt = &timestamp
+	}
+
+	tf, err := domain.NewTrackedFinding(input)
 	if err != nil {
 		t.Fatalf("failed to create tracked finding: %v", err)
 	}

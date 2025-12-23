@@ -66,7 +66,7 @@ func TestGitHubStore_Load_ExistingComment(t *testing.T) {
 		Suggestion:  "",
 		Evidence:    false,
 	})
-	trackedFinding, _ := domain.NewTrackedFindingFromFinding(finding, now)
+	trackedFinding, _ := domain.NewTrackedFindingFromFinding(finding, now, "abc123")
 
 	existingState := review.TrackingState{
 		Target: review.ReviewTarget{

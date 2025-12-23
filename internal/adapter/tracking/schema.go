@@ -52,6 +52,12 @@ type trackedFindingJSON struct {
 	LastSeen    time.Time `json:"last_seen"`
 	SeenCount   int       `json:"seen_count"`
 
+	// Status transition metadata
+	StatusReason string  `json:"status_reason,omitempty"`
+	ReviewCommit string  `json:"review_commit,omitempty"`
+	ResolvedAt   *string `json:"resolved_at,omitempty"`
+	ResolvedIn   *string `json:"resolved_in,omitempty"`
+
 	// Finding fields (flattened for readability)
 	FindingID   string `json:"finding_id"`
 	File        string `json:"file"`
@@ -238,21 +244,33 @@ func stateToJSON(state review.TrackingState) trackingStateJSON {
 	findings := make([]trackedFindingJSON, 0, len(state.Findings))
 	for _, fpStr := range fingerprints {
 		f := state.Findings[domain.FindingFingerprint(fpStr)]
+
+		// Convert ResolvedAt to RFC3339 string pointer
+		var resolvedAtStr *string
+		if f.ResolvedAt != nil {
+			str := f.ResolvedAt.Format(time.RFC3339)
+			resolvedAtStr = &str
+		}
+
 		findings = append(findings, trackedFindingJSON{
-			Fingerprint: string(f.Fingerprint),
-			Status:      string(f.Status),
-			FirstSeen:   f.FirstSeen,
-			LastSeen:    f.LastSeen,
-			SeenCount:   f.SeenCount,
-			FindingID:   f.Finding.ID,
-			File:        f.Finding.File,
-			LineStart:   f.Finding.LineStart,
-			LineEnd:     f.Finding.LineEnd,
-			Severity:    f.Finding.Severity,
-			Category:    f.Finding.Category,
-			Description: f.Finding.Description,
-			Suggestion:  f.Finding.Suggestion,
-			Evidence:    f.Finding.Evidence,
+			Fingerprint:  string(f.Fingerprint),
+			Status:       string(f.Status),
+			FirstSeen:    f.FirstSeen,
+			LastSeen:     f.LastSeen,
+			SeenCount:    f.SeenCount,
+			StatusReason: f.StatusReason,
+			ReviewCommit: f.ReviewCommit,
+			ResolvedAt:   resolvedAtStr,
+			ResolvedIn:   f.ResolvedIn,
+			FindingID:    f.Finding.ID,
+			File:         f.Finding.File,
+			LineStart:    f.Finding.LineStart,
+			LineEnd:      f.Finding.LineEnd,
+			Severity:     f.Finding.Severity,
+			Category:     f.Finding.Category,
+			Description:  f.Finding.Description,
+			Suggestion:   f.Finding.Suggestion,
+			Evidence:     f.Finding.Evidence,
 		})
 	}
 
@@ -311,13 +329,47 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 			status = domain.FindingStatusOpen
 		}
 
+		// Parse ResolvedAt from RFC3339 string
+		var resolvedAt *time.Time
+		if fJSON.ResolvedAt != nil {
+			t, err := time.Parse(time.RFC3339, *fJSON.ResolvedAt)
+			if err != nil {
+				log.Printf("warning: invalid resolved_at timestamp %q for finding %s: %v",
+					*fJSON.ResolvedAt, fJSON.Fingerprint, err)
+			} else {
+				resolvedAt = &t
+			}
+		}
+
+		// Design decision: When loading persisted data, we prefer graceful degradation
+		// over hard failures. If resolved status lacks ResolvedAt (possibly due to
+		// schema migration or data corruption), downgrade to open rather than fail.
+		// This differs from NewTrackedFinding which enforces strict invariants for
+		// new data - appropriate since creation is controllable, loading is not.
+		if status == domain.FindingStatusResolved && resolvedAt == nil {
+			log.Printf("warning: resolved status requires ResolvedAt for finding %s, defaulting to 'open'",
+				fJSON.Fingerprint)
+			status = domain.FindingStatusOpen
+		}
+
+		// Clear resolution fields for non-resolved statuses to maintain invariant
+		resolvedIn := fJSON.ResolvedIn
+		if status != domain.FindingStatusResolved {
+			resolvedAt = nil
+			resolvedIn = nil
+		}
+
 		findings[fingerprint] = domain.TrackedFinding{
-			Finding:     finding,
-			Fingerprint: fingerprint,
-			Status:      status,
-			FirstSeen:   fJSON.FirstSeen,
-			LastSeen:    fJSON.LastSeen,
-			SeenCount:   fJSON.SeenCount,
+			Finding:      finding,
+			Fingerprint:  fingerprint,
+			Status:       status,
+			FirstSeen:    fJSON.FirstSeen,
+			LastSeen:     fJSON.LastSeen,
+			SeenCount:    fJSON.SeenCount,
+			StatusReason: fJSON.StatusReason,
+			ReviewCommit: fJSON.ReviewCommit,
+			ResolvedAt:   resolvedAt,
+			ResolvedIn:   resolvedIn,
 		}
 	}
 
