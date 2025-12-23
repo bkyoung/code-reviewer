@@ -90,12 +90,11 @@ type GitHubPostRequest struct {
 
 	// ReviewActions configures the GitHub review action for each severity level.
 	// Empty values use sensible defaults.
-	ActionOnCritical    string
-	ActionOnHigh        string
-	ActionOnMedium      string
-	ActionOnLow         string
-	ActionOnClean       string
-	ActionOnNonBlocking string
+	ActionOnCritical string
+	ActionOnHigh     string
+	ActionOnMedium   string
+	ActionOnLow      string
+	ActionOnClean    string
 
 	// BotUsername is the bot username for auto-dismissing stale reviews.
 	// If set, previous reviews from this user are dismissed AFTER the new
@@ -203,12 +202,11 @@ type BranchRequest struct {
 
 	// Review action configuration (configures GitHub review action per severity)
 	// Values: "approve", "comment", "request_changes" (case-insensitive)
-	ActionOnCritical    string // Action for critical severity findings
-	ActionOnHigh        string // Action for high severity findings
-	ActionOnMedium      string // Action for medium severity findings
-	ActionOnLow         string // Action for low severity findings
-	ActionOnClean       string // Action when no findings in diff
-	ActionOnNonBlocking string // Action when findings exist but none block
+	ActionOnCritical string // Action for critical severity findings
+	ActionOnHigh     string // Action for high severity findings
+	ActionOnMedium   string // Action for medium severity findings
+	ActionOnLow      string // Action for low severity findings
+	ActionOnClean    string // Action when no findings in diff
 
 	// BotUsername is the bot username for auto-dismissing stale reviews.
 	// If set, previous reviews from this user are dismissed AFTER the new
@@ -659,19 +657,18 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	var githubResult *GitHubPostResult
 	if req.PostToGitHub && o.deps.GitHubPoster != nil {
 		result, err := o.deps.GitHubPoster.PostReview(ctx, GitHubPostRequest{
-			Owner:               req.GitHubOwner,
-			Repo:                req.GitHubRepo,
-			PRNumber:            req.PRNumber,
-			CommitSHA:           req.CommitSHA,
-			Review:              mergedReview,
-			Diff:                diff,
-			ActionOnCritical:    req.ActionOnCritical,
-			ActionOnHigh:        req.ActionOnHigh,
-			ActionOnMedium:      req.ActionOnMedium,
-			ActionOnLow:         req.ActionOnLow,
-			ActionOnClean:       req.ActionOnClean,
-			ActionOnNonBlocking: req.ActionOnNonBlocking,
-			BotUsername:         req.BotUsername,
+			Owner:            req.GitHubOwner,
+			Repo:             req.GitHubRepo,
+			PRNumber:         req.PRNumber,
+			CommitSHA:        req.CommitSHA,
+			Review:           mergedReview,
+			Diff:             diff,
+			ActionOnCritical: req.ActionOnCritical,
+			ActionOnHigh:     req.ActionOnHigh,
+			ActionOnMedium:   req.ActionOnMedium,
+			ActionOnLow:      req.ActionOnLow,
+			ActionOnClean:    req.ActionOnClean,
+			BotUsername:      req.BotUsername,
 		})
 		if err != nil {
 			// Log warning but don't fail the review

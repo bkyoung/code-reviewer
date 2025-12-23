@@ -10,12 +10,11 @@ import (
 // ReviewActions configures the GitHub review action for each finding severity level.
 // This mirrors config.ReviewActions but lives in the adapter layer to avoid coupling.
 type ReviewActions struct {
-	OnCritical    string // Action for critical severity findings
-	OnHigh        string // Action for high severity findings
-	OnMedium      string // Action for medium severity findings
-	OnLow         string // Action for low severity findings
-	OnClean       string // Action when no findings in diff
-	OnNonBlocking string // Action when findings exist but none trigger REQUEST_CHANGES
+	OnCritical string // Action for critical severity findings
+	OnHigh     string // Action for high severity findings
+	OnMedium   string // Action for medium severity findings
+	OnLow      string // Action for low severity findings
+	OnClean    string // Action when no findings in diff
 }
 
 // NormalizeAction converts a string action to ReviewEvent.
@@ -105,9 +104,9 @@ func DetermineReviewEvent(findings []PositionedFinding) ReviewEvent {
 // DetermineReviewEventWithActions determines the appropriate ReviewEvent based on
 // finding severities and the provided action configuration.
 // Returns:
-//   - OnClean action if no findings in diff (default: APPROVE)
-//   - OnNonBlocking action if findings exist but none trigger REQUEST_CHANGES (default: APPROVE)
-//   - REQUEST_CHANGES if any finding would trigger it based on severity configuration
+//   - Configured action for the highest severity found in diff
+//   - OnClean action if no findings in diff
+//   - Fallback to sensible defaults if action is not configured
 func DetermineReviewEventWithActions(findings []PositionedFinding, actions ReviewActions) ReviewEvent {
 	inDiffFindings := filterInDiff(findings)
 
@@ -121,7 +120,7 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 		return EventApprove // default for clean
 	}
 
-	// Build severity configuration
+	// Find highest severity present
 	severityOrder := []string{"critical", "high", "medium", "low"}
 	actionMap := map[string]string{
 		"critical": actions.OnCritical,
@@ -129,91 +128,31 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 		"medium":   actions.OnMedium,
 		"low":      actions.OnLow,
 	}
-	// Default blocking behavior: critical and high trigger REQUEST_CHANGES
-	defaultBlockingMap := map[string]bool{
-		"critical": true,
-		"high":     true,
-		"medium":   false,
-		"low":      false,
+	defaultMap := map[string]ReviewEvent{
+		"critical": EventRequestChanges,
+		"high":     EventRequestChanges,
+		"medium":   EventComment,
+		"low":      EventComment,
 	}
 
-	// Check if any finding would trigger REQUEST_CHANGES
-	var wouldBlock bool
-	var highestBlockingSeverity string
-
 	for _, severity := range severityOrder {
+		// Check if any finding has this severity
 		for _, pf := range inDiffFindings {
 			if strings.ToLower(pf.Finding.Severity) == severity {
-				// Check if this severity triggers REQUEST_CHANGES
-				if wouldTriggerRequestChanges(actionMap[severity], defaultBlockingMap[severity]) {
-					wouldBlock = true
-					if highestBlockingSeverity == "" {
-						highestBlockingSeverity = severity
+				// Found this severity - use configured action or default
+				if action := actionMap[severity]; action != "" {
+					if event, valid := NormalizeAction(action); valid {
+						return event
 					}
 				}
+				// Fallback to default for this severity
+				return defaultMap[severity]
 			}
 		}
 	}
 
-	// If no findings would block, use OnNonBlocking action
-	if !wouldBlock {
-		if actions.OnNonBlocking != "" {
-			if event, valid := NormalizeAction(actions.OnNonBlocking); valid {
-				return event
-			}
-		}
-		// Default for non-blocking: APPROVE (findings exist but are informational)
-		return EventApprove
-	}
-
-	// At least one finding would block - return REQUEST_CHANGES
-	// (The highest blocking severity's action is REQUEST_CHANGES by definition)
-	return EventRequestChanges
-}
-
-// wouldTriggerRequestChanges checks if the given action would result in REQUEST_CHANGES.
-func wouldTriggerRequestChanges(action string, defaultBlocking bool) bool {
-	if action == "" {
-		return defaultBlocking
-	}
-	event, valid := NormalizeAction(action)
-	return valid && event == EventRequestChanges
-}
-
-// HasBlockingFindings checks if any in-diff finding would trigger REQUEST_CHANGES
-// based on the provided action configuration.
-// This is exported so that summary_builder can use the same logic to determine
-// whether to show "Approved with suggestions" prefix.
-func HasBlockingFindings(findings []PositionedFinding, actions ReviewActions) bool {
-	inDiffFindings := filterInDiff(findings)
-	if len(inDiffFindings) == 0 {
-		return false
-	}
-
-	severityOrder := []string{"critical", "high", "medium", "low"}
-	actionMap := map[string]string{
-		"critical": actions.OnCritical,
-		"high":     actions.OnHigh,
-		"medium":   actions.OnMedium,
-		"low":      actions.OnLow,
-	}
-	defaultBlockingMap := map[string]bool{
-		"critical": true,
-		"high":     true,
-		"medium":   false,
-		"low":      false,
-	}
-
-	for _, severity := range severityOrder {
-		for _, pf := range inDiffFindings {
-			if strings.ToLower(pf.Finding.Severity) == severity {
-				if wouldTriggerRequestChanges(actionMap[severity], defaultBlockingMap[severity]) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	// No known severity found - treat as comment
+	return EventComment
 }
 
 // CountInDiffFindings returns the count of findings that are in the diff.

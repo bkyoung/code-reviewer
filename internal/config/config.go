@@ -141,10 +141,6 @@ type ReviewActions struct {
 
 	// OnClean is the action when no findings are present in the diff.
 	OnClean string `yaml:"onClean"`
-
-	// OnNonBlocking is the action when findings exist but none trigger REQUEST_CHANGES.
-	// This allows posting APPROVE with informational comments for low-severity issues.
-	OnNonBlocking string `yaml:"onNonBlocking"`
 }
 
 // Merge combines multiple configuration instances, prioritising the latter ones.
@@ -291,7 +287,7 @@ func chooseReview(base, overlay ReviewConfig) ReviewConfig {
 
 // hasAny returns true if any action field is non-empty.
 func (a ReviewActions) hasAny() bool {
-	return a.OnCritical != "" || a.OnHigh != "" || a.OnMedium != "" || a.OnLow != "" || a.OnClean != "" || a.OnNonBlocking != ""
+	return a.OnCritical != "" || a.OnHigh != "" || a.OnMedium != "" || a.OnLow != "" || a.OnClean != ""
 }
 
 // mergeReviewActions merges two ReviewActions, with overlay taking precedence for non-empty fields.
@@ -311,9 +307,6 @@ func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
 	}
 	if overlay.OnClean != "" {
 		result.OnClean = overlay.OnClean
-	}
-	if overlay.OnNonBlocking != "" {
-		result.OnNonBlocking = overlay.OnNonBlocking
 	}
 	return result
 }
