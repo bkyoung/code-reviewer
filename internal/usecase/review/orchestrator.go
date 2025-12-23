@@ -12,9 +12,23 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
-// GitEngine abstracts the cumulative diff retrieval.
+// GitEngine abstracts git operations for code review.
 type GitEngine interface {
+	// GetCumulativeDiff returns the diff between two refs (branches or commits).
 	GetCumulativeDiff(ctx context.Context, baseRef, targetRef string, includeUncommitted bool) (domain.Diff, error)
+
+	// GetIncrementalDiff returns the diff between two specific commits.
+	// Used for incremental reviews where we only want changes since the last reviewed commit.
+	GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error)
+
+	// CommitExists checks if a commit SHA exists in the repository.
+	// Used for force-push detection - if the last reviewed commit no longer exists,
+	// we fall back to full diff.
+	// Returns (false, nil) if the commit genuinely doesn't exist.
+	// Returns (false, error) if there was an error checking (e.g., repo access failure).
+	CommitExists(ctx context.Context, commitSHA string) (bool, error)
+
+	// CurrentBranch returns the name of the checked-out branch.
 	CurrentBranch(ctx context.Context) (string, error)
 }
 
@@ -172,6 +186,10 @@ type OrchestratorDeps struct {
 	PlanningAgent *PlanningAgent // Optional: interactive planning agent (only works in TTY mode)
 	RepoDir       string         // Repository directory for context gathering (optional)
 	GitHubPoster  GitHubPoster   // Optional: posts review to GitHub PR with inline comments
+
+	// Incremental review support (Epic #53)
+	TrackingStore TrackingStore // Optional: tracks reviewed commits for incremental reviews
+	DiffComputer  *DiffComputer // Optional: computes incremental vs full diffs (auto-created if nil)
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -233,7 +251,12 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator wires the orchestrator dependencies.
+// If DiffComputer is not provided but Git is, it will be auto-created.
 func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
+	// Auto-wire DiffComputer if not provided
+	if deps.DiffComputer == nil && deps.Git != nil {
+		deps.DiffComputer = NewDiffComputer(deps.Git)
+	}
 	return &Orchestrator{deps: deps}
 }
 
@@ -263,8 +286,12 @@ func (o *Orchestrator) validateDependencies() error {
 	if o.deps.SeedGenerator == nil {
 		return errors.New("seed generator is required")
 	}
+	if o.deps.DiffComputer == nil {
+		return errors.New("diff computer is required (use NewOrchestrator for auto-wiring)")
+	}
 	// Redactor is optional
 	// Store is optional
+	// TrackingStore is optional
 	return nil
 }
 
@@ -278,7 +305,36 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		return Result{}, err
 	}
 
-	diff, err := o.deps.Git.GetCumulativeDiff(ctx, req.BaseRef, req.TargetRef, req.IncludeUncommitted)
+	// Load tracking state for incremental reviews (GitHub mode only)
+	var trackingState *TrackingState
+	if o.deps.TrackingStore != nil && req.PRNumber > 0 {
+		target := ReviewTarget{
+			Repository: fmt.Sprintf("%s/%s", req.GitHubOwner, req.GitHubRepo),
+			PRNumber:   req.PRNumber,
+			Branch:     req.TargetRef,
+			BaseSHA:    req.BaseRef,
+			HeadSHA:    req.CommitSHA,
+		}
+
+		state, err := o.deps.TrackingStore.Load(ctx, target)
+		if err != nil {
+			// Log warning but continue - tracking failures shouldn't break reviews
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to load tracking state", map[string]interface{}{
+					"error":    err.Error(),
+					"prNumber": req.PRNumber,
+				})
+			} else {
+				log.Printf("warning: failed to load tracking state: %v\n", err)
+			}
+		} else {
+			trackingState = &state
+		}
+	}
+
+	// Compute diff (incremental if tracking state available, full otherwise)
+	// DiffComputer is auto-wired in NewOrchestrator when Git is provided
+	diff, err := o.deps.DiffComputer.ComputeDiffForReview(ctx, req, trackingState)
 	if err != nil {
 		return Result{}, err
 	}
@@ -697,6 +753,45 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			} else {
 				log.Printf("Posted review to GitHub: %d comments (%d skipped) - %s\n",
 					result.CommentsPosted, result.CommentsSkipped, result.HTMLURL)
+			}
+		}
+	}
+
+	// Save tracking state after successful review
+	if trackingState != nil && o.deps.TrackingStore != nil {
+		if req.CommitSHA == "" {
+			// Warn that tracking will not be updated due to missing CommitSHA
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "skipping tracking state update: CommitSHA is empty", map[string]interface{}{
+					"prNumber": req.PRNumber,
+				})
+			} else {
+				log.Printf("warning: skipping tracking state update: CommitSHA is empty (PR #%d)\n", req.PRNumber)
+			}
+		} else {
+			// Update the tracking state with the new reviewed commit
+			trackingState.ReviewedCommits = append(trackingState.ReviewedCommits, req.CommitSHA)
+			trackingState.LastUpdated = time.Now()
+
+			if err := o.deps.TrackingStore.Save(ctx, *trackingState); err != nil {
+				// Log warning but don't fail the review
+				if o.deps.Logger != nil {
+					o.deps.Logger.LogWarning(ctx, "failed to save tracking state", map[string]interface{}{
+						"error":     err.Error(),
+						"prNumber":  req.PRNumber,
+						"commitSHA": req.CommitSHA,
+					})
+				} else {
+					log.Printf("warning: failed to save tracking state: %v\n", err)
+				}
+			} else {
+				if o.deps.Logger != nil {
+					o.deps.Logger.LogInfo(ctx, "saved tracking state", map[string]interface{}{
+						"prNumber":        req.PRNumber,
+						"commitSHA":       req.CommitSHA,
+						"reviewedCommits": len(trackingState.ReviewedCommits),
+					})
+				}
 			}
 		}
 	}

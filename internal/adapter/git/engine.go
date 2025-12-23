@@ -59,20 +59,9 @@ func (e *Engine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef strin
 		return domain.Diff{}, fmt.Errorf("compute patch: %w", err)
 	}
 
-	fileDiffs := make([]domain.FileDiff, 0, len(patch.FilePatches()))
-	for _, fp := range patch.FilePatches() {
-		path, oldPath, status := diffPathAndStatus(fp)
-		patchText, err := encodeFilePatch(fp)
-		if err != nil {
-			return domain.Diff{}, fmt.Errorf("encode patch: %w", err)
-		}
-		fileDiffs = append(fileDiffs, domain.FileDiff{
-			Path:     path,
-			OldPath:  oldPath,
-			Status:   status,
-			Patch:    patchText,
-			IsBinary: IsBinaryPatch(patchText),
-		})
+	fileDiffs, err := patchToFileDiffs(patch)
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("convert patch to file diffs: %w", err)
 	}
 
 	return domain.Diff{
@@ -99,6 +88,77 @@ func (e *Engine) CurrentBranch(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("detached HEAD")
 }
 
+// GetIncrementalDiff creates a diff between two specific commits.
+// This is used for incremental reviews where we only want changes since the last reviewed commit.
+// Note: go-git operations don't support context cancellation internally, so cancellation
+// is best-effort (checked at start only).
+func (e *Engine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error) {
+	// Check context cancellation first
+	if ctx.Err() != nil {
+		return domain.Diff{}, ctx.Err()
+	}
+
+	repo, err := goGit.PlainOpenWithOptions(e.repoDir, &goGit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("open repo: %w", err)
+	}
+
+	fromHash := plumbing.NewHash(fromCommit)
+	fromObj, err := repo.CommitObject(fromHash)
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("resolve from commit %s: %w", fromCommit, err)
+	}
+
+	toHash := plumbing.NewHash(toCommit)
+	toObj, err := repo.CommitObject(toHash)
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("resolve to commit %s: %w", toCommit, err)
+	}
+
+	patch, err := fromObj.Patch(toObj)
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("compute patch: %w", err)
+	}
+
+	fileDiffs, err := patchToFileDiffs(patch)
+	if err != nil {
+		return domain.Diff{}, fmt.Errorf("convert patch to file diffs: %w", err)
+	}
+
+	return domain.Diff{
+		FromCommitHash: fromCommit,
+		ToCommitHash:   toCommit,
+		Files:          fileDiffs,
+	}, nil
+}
+
+// CommitExists checks if a commit SHA exists in the repository.
+// Used for force-push detection - if the previously reviewed commit no longer exists,
+// we should fall back to a full diff.
+// Returns (false, nil) if the commit genuinely doesn't exist.
+// Returns (false, error) if there was an error checking (e.g., repo access failure, context cancelled).
+func (e *Engine) CommitExists(ctx context.Context, commitSHA string) (bool, error) {
+	// Check context cancellation first
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+
+	repo, err := goGit.PlainOpenWithOptions(e.repoDir, &goGit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return false, fmt.Errorf("open repo: %w", err)
+	}
+
+	hash := plumbing.NewHash(commitSHA)
+	_, err = repo.CommitObject(hash)
+	if err != nil {
+		if err == plumbing.ErrObjectNotFound {
+			return false, nil // Commit genuinely doesn't exist
+		}
+		return false, fmt.Errorf("check commit %s: %w", commitSHA, err)
+	}
+	return true, nil
+}
+
 func resolveCommit(repo *goGit.Repository, ref string) (*object.Commit, error) {
 	candidates := []string{
 		ref,
@@ -120,6 +180,27 @@ func resolveCommit(repo *goGit.Repository, ref string) (*object.Commit, error) {
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("unable to resolve ref %s", ref)
+}
+
+// patchToFileDiffs converts a go-git patch into a slice of domain FileDiffs.
+// This is shared between GetCumulativeDiff and GetIncrementalDiff.
+func patchToFileDiffs(patch *object.Patch) ([]domain.FileDiff, error) {
+	fileDiffs := make([]domain.FileDiff, 0, len(patch.FilePatches()))
+	for _, fp := range patch.FilePatches() {
+		path, oldPath, status := diffPathAndStatus(fp)
+		patchText, err := encodeFilePatch(fp)
+		if err != nil {
+			return nil, fmt.Errorf("encode patch: %w", err)
+		}
+		fileDiffs = append(fileDiffs, domain.FileDiff{
+			Path:     path,
+			OldPath:  oldPath,
+			Status:   status,
+			Patch:    patchText,
+			IsBinary: IsBinaryPatch(patchText),
+		})
+	}
+	return fileDiffs, nil
 }
 
 // diffPathAndStatus returns the path, old path (for renames), and status for a file patch.

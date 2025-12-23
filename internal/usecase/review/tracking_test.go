@@ -236,6 +236,46 @@ func TestTrackingState_ActiveFindings_AllResolved(t *testing.T) {
 	}
 }
 
+func TestTrackingState_LatestReviewedCommit(t *testing.T) {
+	tests := []struct {
+		name            string
+		reviewedCommits []string
+		want            string
+	}{
+		{
+			name:            "empty returns empty string",
+			reviewedCommits: []string{},
+			want:            "",
+		},
+		{
+			name:            "nil returns empty string",
+			reviewedCommits: nil,
+			want:            "",
+		},
+		{
+			name:            "single commit",
+			reviewedCommits: []string{"abc123"},
+			want:            "abc123",
+		},
+		{
+			name:            "multiple commits returns last",
+			reviewedCommits: []string{"abc123", "def456", "ghi789"},
+			want:            "ghi789",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := TrackingState{
+				ReviewedCommits: tt.reviewedCommits,
+			}
+			if got := state.LatestReviewedCommit(); got != tt.want {
+				t.Errorf("LatestReviewedCommit() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func createTestTrackedFinding(t *testing.T, file string, status domain.FindingStatus, timestamp time.Time) domain.TrackedFinding {
 	t.Helper()
 

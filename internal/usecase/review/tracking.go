@@ -98,6 +98,15 @@ func (ts TrackingState) ActiveFindings() []domain.TrackedFinding {
 	return active
 }
 
+// LatestReviewedCommit returns the most recently reviewed commit SHA.
+// Returns empty string if no commits have been reviewed.
+func (ts TrackingState) LatestReviewedCommit() string {
+	if len(ts.ReviewedCommits) == 0 {
+		return ""
+	}
+	return ts.ReviewedCommits[len(ts.ReviewedCommits)-1]
+}
+
 // TrackingStore manages persistence of finding tracking state.
 // Implementations can store state in GitHub PR comments, SQLite, or in-memory.
 type TrackingStore interface {
