@@ -286,8 +286,12 @@ func (o *Orchestrator) validateDependencies() error {
 	if o.deps.SeedGenerator == nil {
 		return errors.New("seed generator is required")
 	}
+	if o.deps.DiffComputer == nil {
+		return errors.New("diff computer is required (use NewOrchestrator for auto-wiring)")
+	}
 	// Redactor is optional
 	// Store is optional
+	// TrackingStore is optional
 	return nil
 }
 

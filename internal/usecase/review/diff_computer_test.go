@@ -16,17 +16,25 @@ type mockGitEngine struct {
 	incrementalDiffErr error
 	commitExistsMap    map[string]bool
 	commitExistsErr    error // If set, CommitExists returns this error
+
+	// Call counters for verification
+	cumulativeDiffCalls  int
+	incrementalDiffCalls int
+	commitExistsCalls    int
 }
 
 func (m *mockGitEngine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef string, includeUncommitted bool) (domain.Diff, error) {
+	m.cumulativeDiffCalls++
 	return m.cumulativeDiff, m.cumulativeDiffErr
 }
 
 func (m *mockGitEngine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error) {
+	m.incrementalDiffCalls++
 	return m.incrementalDiff, m.incrementalDiffErr
 }
 
 func (m *mockGitEngine) CommitExists(ctx context.Context, commitSHA string) (bool, error) {
+	m.commitExistsCalls++
 	if m.commitExistsErr != nil {
 		return false, m.commitExistsErr
 	}
@@ -259,15 +267,7 @@ func TestDiffComputer_SameCommitAlreadyReviewed_ReturnsEmptyDiff(t *testing.T) {
 	ctx := context.Background()
 	currentHead := "head456"
 
-	git := &mockGitEngine{
-		commitExistsMap: map[string]bool{currentHead: true},
-		// Incremental diff from same commit to same commit should be empty
-		incrementalDiff: domain.Diff{
-			FromCommitHash: currentHead,
-			ToCommitHash:   currentHead,
-			Files:          []domain.FileDiff{},
-		},
-	}
+	git := &mockGitEngine{}
 	computer := NewDiffComputer(git)
 
 	req := BranchRequest{
@@ -289,6 +289,17 @@ func TestDiffComputer_SameCommitAlreadyReviewed_ReturnsEmptyDiff(t *testing.T) {
 	// Should return empty diff (nothing new to review)
 	if len(diff.Files) != 0 {
 		t.Errorf("Files count = %d, want 0 (nothing new)", len(diff.Files))
+	}
+
+	// Verify early return - no git methods should be called
+	if git.commitExistsCalls != 0 {
+		t.Errorf("CommitExists called %d times, want 0 (early return)", git.commitExistsCalls)
+	}
+	if git.incrementalDiffCalls != 0 {
+		t.Errorf("GetIncrementalDiff called %d times, want 0 (early return)", git.incrementalDiffCalls)
+	}
+	if git.cumulativeDiffCalls != 0 {
+		t.Errorf("GetCumulativeDiff called %d times, want 0 (early return)", git.cumulativeDiffCalls)
 	}
 }
 
