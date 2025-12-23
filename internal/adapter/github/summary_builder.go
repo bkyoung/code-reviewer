@@ -169,6 +169,9 @@ func escapeMarkdownTableCell(s string) string {
 // The actions parameter determines which severities appear in "Files Requiring Attention".
 // Any severity configured to trigger REQUEST_CHANGES will be included.
 // If actions is empty/default, critical and high severities are included.
+//
+// When findings exist but none trigger REQUEST_CHANGES, the summary shows
+// "✅ Approved with suggestions" to indicate a non-blocking approval.
 func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actions ReviewActions) string {
 	fileCount := len(d.Files)
 
@@ -184,14 +187,24 @@ func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actio
 		return fmt.Sprintf("✅ **No issues found.** Reviewed %d files.", fileCount)
 	}
 
+	// Check if any finding would trigger REQUEST_CHANGES
+	// Use the shared HasBlockingFindings function to ensure consistency
+	// with DetermineReviewEventWithActions
+	hasBlockingFindings := HasBlockingFindings(findings, actions)
+	attentionSeverities := getAttentionSeverities(actions)
+
 	var sb strings.Builder
+
+	// Show approval prefix for non-blocking findings
+	if !hasBlockingFindings {
+		sb.WriteString("✅ **Approved with suggestions.** ")
+	}
 
 	// Badge line
 	sb.WriteString(formatBadgeLine(fileCount, counts))
 	sb.WriteString("\n\n")
 
 	// Files requiring attention (based on configured blocking severities)
-	attentionSeverities := getAttentionSeverities(actions)
 	if section := formatFilesRequiringAttention(inDiffFindings, attentionSeverities); section != "" {
 		sb.WriteString(section)
 		sb.WriteString("\n")

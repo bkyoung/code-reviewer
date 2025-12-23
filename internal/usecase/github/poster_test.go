@@ -73,13 +73,14 @@ func TestReviewPoster_PostReview_Success(t *testing.T) {
 		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
 			return &github.CreateReviewResponse{
 				ID:      123,
-				State:   "COMMENTED",
+				State:   "APPROVED",
 				HTMLURL: "https://github.com/owner/repo/pull/1#review-123",
 			}, nil
 		},
 	}
 	poster := usecasegithub.NewReviewPoster(client)
 
+	// Low and medium findings don't block by default, so review should APPROVE
 	findings := []github.PositionedFinding{
 		{
 			Finding:      makeFinding("file1.go", 10, "low", "Issue 1"),
@@ -106,7 +107,7 @@ func TestReviewPoster_PostReview_Success(t *testing.T) {
 	assert.Equal(t, int64(123), result.ReviewID)
 	assert.Equal(t, 2, result.CommentsPosted)
 	assert.Equal(t, 0, result.CommentsSkipped)
-	assert.Equal(t, github.EventComment, result.Event)
+	assert.Equal(t, github.EventApprove, result.Event) // Non-blocking findings → APPROVE
 	assert.Equal(t, "https://github.com/owner/repo/pull/1#review-123", result.HTMLURL)
 }
 
@@ -127,14 +128,14 @@ func TestReviewPoster_PostReview_DeterminesEventFromSeverity(t *testing.T) {
 			expectedEvent: github.EventRequestChanges,
 		},
 		{
-			name:          "medium severity triggers COMMENT",
+			name:          "medium severity triggers APPROVE (non-blocking)",
 			severity:      "medium",
-			expectedEvent: github.EventComment,
+			expectedEvent: github.EventApprove,
 		},
 		{
-			name:          "low severity triggers COMMENT",
+			name:          "low severity triggers APPROVE (non-blocking)",
 			severity:      "low",
-			expectedEvent: github.EventComment,
+			expectedEvent: github.EventApprove,
 		},
 	}
 
@@ -273,17 +274,19 @@ func TestReviewPoster_PostReview_WithCustomReviewActions(t *testing.T) {
 	poster := usecasegithub.NewReviewPoster(client)
 
 	// With default actions, high severity would trigger REQUEST_CHANGES
-	// But with custom actions, we configure high to trigger COMMENT
+	// But with custom actions, we configure high to NOT block (just comment)
+	// Since no findings trigger REQUEST_CHANGES, we use OnNonBlocking
 	findings := []github.PositionedFinding{
 		{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
 	}
 
 	customActions := github.ReviewActions{
-		OnCritical: "request_changes",
-		OnHigh:     "comment", // Override high to just comment
-		OnMedium:   "approve", // Override medium to approve
-		OnLow:      "approve",
-		OnClean:    "approve",
+		OnCritical:    "request_changes",
+		OnHigh:        "comment", // Override high to NOT block
+		OnMedium:      "comment",
+		OnLow:         "comment",
+		OnClean:       "approve",
+		OnNonBlocking: "comment", // When no findings block, use COMMENT
 	}
 
 	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
@@ -296,7 +299,7 @@ func TestReviewPoster_PostReview_WithCustomReviewActions(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	// Should use COMMENT because custom actions configure high to COMMENT
+	// High doesn't block (OnHigh=comment), so uses OnNonBlocking=comment
 	assert.Equal(t, github.EventComment, result.Event)
 }
 

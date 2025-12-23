@@ -242,6 +242,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("review.actions.onMedium", "comment")
 	v.SetDefault("review.actions.onLow", "comment")
 	v.SetDefault("review.actions.onClean", "approve")
+	v.SetDefault("review.actions.onNonBlocking", "approve")
 
 	// Bot username for auto-dismissing stale reviews (Phase 2)
 	v.SetDefault("review.botUsername", "github-actions[bot]")
