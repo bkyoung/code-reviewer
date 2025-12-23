@@ -191,14 +191,19 @@ func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actio
 	// Use the shared HasBlockingFindings function to ensure consistency
 	// with DetermineReviewEventWithActions
 	hasBlockingFindings := HasBlockingFindings(findings, actions)
-	attentionSeverities := getAttentionSeverities(actions)
 
 	var sb strings.Builder
 
-	// Show approval prefix for non-blocking findings
+	// Show approval prefix only when the review will actually be APPROVE
+	// (not when onNonBlocking is set to COMMENT)
 	if !hasBlockingFindings {
-		sb.WriteString("✅ **Approved with suggestions.** ")
+		resolvedEvent := resolveNonBlockingEvent(actions)
+		if resolvedEvent == EventApprove {
+			sb.WriteString("✅ **Approved with suggestions.** ")
+		}
 	}
+
+	attentionSeverities := getAttentionSeverities(actions)
 
 	// Badge line
 	sb.WriteString(formatBadgeLine(fileCount, counts))
@@ -217,6 +222,17 @@ func BuildProgrammaticSummary(findings []PositionedFinding, d domain.Diff, actio
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// resolveNonBlockingEvent returns the event that will be used for non-blocking reviews.
+// This mirrors the logic in DetermineReviewEventWithActions for the non-blocking case.
+func resolveNonBlockingEvent(actions ReviewActions) ReviewEvent {
+	if actions.OnNonBlocking != "" {
+		if event, valid := NormalizeAction(actions.OnNonBlocking); valid {
+			return event
+		}
+	}
+	return EventApprove // default
 }
 
 // countBySeverity returns counts for each severity level.

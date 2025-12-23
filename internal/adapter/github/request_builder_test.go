@@ -349,15 +349,36 @@ func TestDetermineReviewEventWithActions(t *testing.T) {
 			expected: github.EventApprove,    // default OnClean=approve
 		},
 		{
-			name: "OnNonBlocking default is approve",
+			name: "OnNonBlocking defaults to approve when empty",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "low", "minor"), DiffPosition: diff.IntPtr(1)},
 			},
 			actions: github.ReviewActions{
-				OnLow: "comment", // doesn't block
-				// OnNonBlocking not set - should default to approve
+				OnLow:         "comment", // doesn't block
+				OnNonBlocking: "",        // explicitly empty - should default to approve
 			},
 			expected: github.EventApprove,
+		},
+		{
+			name: "OnNonBlocking can be set to comment",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "minor"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnLow:         "comment",
+				OnNonBlocking: "comment", // explicitly comment - should use comment
+			},
+			expected: github.EventComment,
+		},
+		{
+			name: "medium/low with blocking config triggers request_changes",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "medium", "code smell"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnMedium: "request_changes", // medium configured to block
+			},
+			expected: github.EventRequestChanges,
 		},
 	}
 
@@ -365,6 +386,106 @@ func TestDetermineReviewEventWithActions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			event := github.DetermineReviewEventWithActions(tt.findings, tt.actions)
 			assert.Equal(t, tt.expected, event)
+		})
+	}
+}
+
+func TestHasBlockingFindings(t *testing.T) {
+	tests := []struct {
+		name     string
+		findings []github.PositionedFinding
+		actions  github.ReviewActions
+		expected bool
+	}{
+		{
+			name:     "empty findings returns false",
+			findings: []github.PositionedFinding{},
+			actions:  github.ReviewActions{},
+			expected: false,
+		},
+		{
+			name: "critical severity blocks by default",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},
+			expected: true,
+		},
+		{
+			name: "high severity blocks by default",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "high", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},
+			expected: true,
+		},
+		{
+			name: "medium severity does not block by default",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "medium", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},
+			expected: false,
+		},
+		{
+			name: "low severity does not block by default",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},
+			expected: false,
+		},
+		{
+			name: "unknown severity does not block",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "info", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{},
+			expected: false,
+		},
+		{
+			name: "out of diff findings are ignored",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "issue"), DiffPosition: nil},
+			},
+			actions:  github.ReviewActions{},
+			expected: false,
+		},
+		{
+			name: "critical configured to comment does not block",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnCritical: "comment",
+			},
+			expected: false,
+		},
+		{
+			name: "medium configured to request_changes blocks",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "medium", "issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnMedium: "request_changes",
+			},
+			expected: true,
+		},
+		{
+			name: "mixed severities with one blocking",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "minor"), DiffPosition: diff.IntPtr(1)},
+				{Finding: makeFinding("b.go", 2, "high", "bug"), DiffPosition: diff.IntPtr(2)},
+			},
+			actions:  github.ReviewActions{},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := github.HasBlockingFindings(tt.findings, tt.actions)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

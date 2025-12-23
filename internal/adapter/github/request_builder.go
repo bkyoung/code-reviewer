@@ -38,6 +38,15 @@ func NormalizeAction(action string) (ReviewEvent, bool) {
 	}
 }
 
+// defaultBlockingSeverities defines which severities trigger REQUEST_CHANGES by default.
+// Critical and high block by default; medium and low do not.
+var defaultBlockingSeverities = map[string]bool{
+	"critical": true,
+	"high":     true,
+	"medium":   false,
+	"low":      false,
+}
+
 // BuildReviewComments converts positioned findings to GitHub review comments.
 // Only findings with a valid DiffPosition (InDiff() == true) are included.
 // This function is pure and does not modify the input.
@@ -121,54 +130,19 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 		return EventApprove // default for clean
 	}
 
-	// Build severity configuration
-	severityOrder := []string{"critical", "high", "medium", "low"}
-	actionMap := map[string]string{
-		"critical": actions.OnCritical,
-		"high":     actions.OnHigh,
-		"medium":   actions.OnMedium,
-		"low":      actions.OnLow,
-	}
-	// Default blocking behavior: critical and high trigger REQUEST_CHANGES
-	defaultBlockingMap := map[string]bool{
-		"critical": true,
-		"high":     true,
-		"medium":   false,
-		"low":      false,
-	}
-
 	// Check if any finding would trigger REQUEST_CHANGES
-	var wouldBlock bool
-	var highestBlockingSeverity string
-
-	for _, severity := range severityOrder {
-		for _, pf := range inDiffFindings {
-			if strings.ToLower(pf.Finding.Severity) == severity {
-				// Check if this severity triggers REQUEST_CHANGES
-				if wouldTriggerRequestChanges(actionMap[severity], defaultBlockingMap[severity]) {
-					wouldBlock = true
-					if highestBlockingSeverity == "" {
-						highestBlockingSeverity = severity
-					}
-				}
-			}
-		}
+	if HasBlockingFindings(findings, actions) {
+		return EventRequestChanges
 	}
 
-	// If no findings would block, use OnNonBlocking action
-	if !wouldBlock {
-		if actions.OnNonBlocking != "" {
-			if event, valid := NormalizeAction(actions.OnNonBlocking); valid {
-				return event
-			}
+	// No blocking findings - use OnNonBlocking action
+	if actions.OnNonBlocking != "" {
+		if event, valid := NormalizeAction(actions.OnNonBlocking); valid {
+			return event
 		}
-		// Default for non-blocking: APPROVE (findings exist but are informational)
-		return EventApprove
 	}
-
-	// At least one finding would block - return REQUEST_CHANGES
-	// (The highest blocking severity's action is REQUEST_CHANGES by definition)
-	return EventRequestChanges
+	// Default for non-blocking: APPROVE (findings exist but are informational)
+	return EventApprove
 }
 
 // wouldTriggerRequestChanges checks if the given action would result in REQUEST_CHANGES.
@@ -190,27 +164,24 @@ func HasBlockingFindings(findings []PositionedFinding, actions ReviewActions) bo
 		return false
 	}
 
-	severityOrder := []string{"critical", "high", "medium", "low"}
+	// Build action map from configuration
 	actionMap := map[string]string{
 		"critical": actions.OnCritical,
 		"high":     actions.OnHigh,
 		"medium":   actions.OnMedium,
 		"low":      actions.OnLow,
 	}
-	defaultBlockingMap := map[string]bool{
-		"critical": true,
-		"high":     true,
-		"medium":   false,
-		"low":      false,
-	}
 
-	for _, severity := range severityOrder {
-		for _, pf := range inDiffFindings {
-			if strings.ToLower(pf.Finding.Severity) == severity {
-				if wouldTriggerRequestChanges(actionMap[severity], defaultBlockingMap[severity]) {
-					return true
-				}
-			}
+	// Check each finding's severity against blocking configuration
+	for _, pf := range inDiffFindings {
+		severity := strings.ToLower(pf.Finding.Severity)
+		defaultBlocking, known := defaultBlockingSeverities[severity]
+		if !known {
+			// Unknown severities don't block by default
+			continue
+		}
+		if wouldTriggerRequestChanges(actionMap[severity], defaultBlocking) {
+			return true
 		}
 	}
 	return false
