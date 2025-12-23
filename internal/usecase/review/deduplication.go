@@ -161,7 +161,12 @@ func ReconcileFindings(
 
 // copyTrackingState creates a copy of the tracking state.
 // The Findings map entries are copied so modifications don't affect the original.
-// Note: TrackedFinding is a value type, so map entry copies are independent.
+//
+// Note on pointer safety: TrackedFinding contains pointer fields (ResolvedAt, ResolvedIn).
+// Struct copy creates new pointers pointing to the same memory. This is safe because:
+// - MarkSeen only modifies value fields (LastSeen, SeenCount)
+// - UpdateStatus replaces pointers entirely (e.g., tf.ResolvedAt = &timestamp)
+// We never dereference and mutate the pointed-to values, so no aliasing issues occur.
 func copyTrackingState(state TrackingState) TrackingState {
 	newFindings := make(map[domain.FindingFingerprint]domain.TrackedFinding, len(state.Findings))
 	for fp, tf := range state.Findings {
