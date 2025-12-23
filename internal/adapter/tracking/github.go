@@ -53,9 +53,16 @@ type GitHubStore struct {
 // NewGitHubStore creates a new GitHub-based tracking store.
 func NewGitHubStore(token string) *GitHubStore {
 	return &GitHubStore{
-		token:      token,
-		baseURL:    defaultBaseURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		token:   token,
+		baseURL: defaultBaseURL,
+		httpClient: &http.Client{
+			Timeout: defaultTimeout,
+			// Disable redirects to prevent SSRF attacks where a same-host
+			// pagination URL could redirect to an internal endpoint.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		retryConf: llmhttp.RetryConfig{
 			MaxRetries:     defaultMaxRetries,
 			InitialBackoff: defaultInitialBackoff,

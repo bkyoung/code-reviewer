@@ -40,10 +40,12 @@ type FindingFingerprint string
 // Line numbers are intentionally excluded so the fingerprint remains stable
 // when code shifts due to unrelated changes.
 func NewFindingFingerprint(file, category, severity, description string) FindingFingerprint {
-	// Use first 100 chars of description to allow minor wording changes
+	// Use first 100 characters of description to allow minor wording changes.
+	// Use rune slicing to avoid splitting multi-byte UTF-8 characters.
+	descRunes := []rune(description)
 	descPrefix := description
-	if len(descPrefix) > 100 {
-		descPrefix = descPrefix[:100]
+	if len(descRunes) > 100 {
+		descPrefix = string(descRunes[:100])
 	}
 
 	payload := fmt.Sprintf("%s|%s|%s|%s", file, category, severity, descPrefix)
@@ -87,6 +89,14 @@ func NewTrackedFinding(input TrackedFindingInput) (TrackedFinding, error) {
 
 	if input.SeenCount < 1 {
 		return TrackedFinding{}, fmt.Errorf("seen count must be >= 1, got %d", input.SeenCount)
+	}
+
+	if input.FirstSeen.IsZero() {
+		return TrackedFinding{}, fmt.Errorf("first seen timestamp is required")
+	}
+
+	if input.LastSeen.IsZero() {
+		return TrackedFinding{}, fmt.Errorf("last seen timestamp is required")
 	}
 
 	if input.LastSeen.Before(input.FirstSeen) {

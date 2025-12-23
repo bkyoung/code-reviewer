@@ -27,6 +27,10 @@ const trackingMetadataEnd = "-->"
 // legacyMetadataStart is the old marker for backwards compatibility.
 const legacyMetadataStart = "<!-- TRACKING_METADATA"
 
+// maxMetadataSize limits the size of base64-encoded metadata to prevent DoS.
+// GitHub comments are limited to ~65k chars, so 100KB is generous.
+const maxMetadataSize = 100 * 1024
+
 // trackingStateJSON is the JSON-serializable form of TrackingState.
 type trackingStateJSON struct {
 	Version         int                  `json:"version"`
@@ -200,6 +204,11 @@ func extractMetadata(body string) (string, error) {
 	content := strings.TrimSpace(remaining[:endIdx])
 	if content == "" {
 		return "", fmt.Errorf("empty tracking metadata")
+	}
+
+	// Check size limit before decoding to prevent DoS
+	if len(content) > maxMetadataSize {
+		return "", fmt.Errorf("metadata too large: %d bytes (max %d)", len(content), maxMetadataSize)
 	}
 
 	// Decode if base64 encoded
