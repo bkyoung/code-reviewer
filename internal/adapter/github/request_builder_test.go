@@ -480,6 +480,26 @@ func TestHasBlockingFindings(t *testing.T) {
 			actions:  github.ReviewActions{},
 			expected: true,
 		},
+		{
+			name: "invalid action string falls back to default blocking",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnHigh: "req_changes", // typo - should fall back to default (blocking)
+			},
+			expected: true, // high blocks by default, typo shouldn't disable it
+		},
+		{
+			name: "invalid action string on non-blocking severity stays non-blocking",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "minor"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnLow: "invalid_action", // typo - should fall back to default (non-blocking)
+			},
+			expected: false, // low doesn't block by default
+		},
 	}
 
 	for _, tt := range tests {

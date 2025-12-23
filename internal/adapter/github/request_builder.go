@@ -113,10 +113,12 @@ func DetermineReviewEvent(findings []PositionedFinding) ReviewEvent {
 
 // DetermineReviewEventWithActions determines the appropriate ReviewEvent based on
 // finding severities and the provided action configuration.
+//
 // Returns:
 //   - OnClean action if no findings in diff (default: APPROVE)
 //   - OnNonBlocking action if findings exist but none trigger REQUEST_CHANGES (default: APPROVE)
-//   - REQUEST_CHANGES if any finding would trigger it based on severity configuration
+//   - REQUEST_CHANGES if any in-diff finding triggers it based on severity config
+//     (default: critical/high block, medium/low don't; configurable via OnCritical, etc.)
 func DetermineReviewEventWithActions(findings []PositionedFinding, actions ReviewActions) ReviewEvent {
 	inDiffFindings := filterInDiff(findings)
 
@@ -130,8 +132,9 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 		return EventApprove // default for clean
 	}
 
-	// Check if any finding would trigger REQUEST_CHANGES
-	if HasBlockingFindings(findings, actions) {
+	// Check if any in-diff finding would trigger REQUEST_CHANGES
+	// Pass inDiffFindings to avoid redundant filtering in HasBlockingFindings
+	if HasBlockingFindings(inDiffFindings, actions) {
 		return EventRequestChanges
 	}
 
@@ -146,12 +149,19 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 }
 
 // wouldTriggerRequestChanges checks if the given action would result in REQUEST_CHANGES.
+// If action is empty, uses defaultBlocking. If action is invalid (typo/unknown),
+// falls back to defaultBlocking to prevent accidental approval from config errors.
 func wouldTriggerRequestChanges(action string, defaultBlocking bool) bool {
 	if action == "" {
 		return defaultBlocking
 	}
 	event, valid := NormalizeAction(action)
-	return valid && event == EventRequestChanges
+	if !valid {
+		// Invalid action string (typo) - fall back to default behavior
+		// to prevent accidental approval from config errors
+		return defaultBlocking
+	}
+	return event == EventRequestChanges
 }
 
 // HasBlockingFindings checks if any in-diff finding would trigger REQUEST_CHANGES
