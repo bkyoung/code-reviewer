@@ -82,7 +82,8 @@ func TestFinding_Fingerprint_Deterministic(t *testing.T) {
 		t.Error("fingerprint should not be empty")
 	}
 
-	// Verify fingerprint format: should be 32 hex characters (16 bytes)
+	// Verify fingerprint format: should be 32 hex characters (SHA-256 truncated to 16 bytes)
+	// See NewFindingFingerprint in tracking.go: hex.EncodeToString(sum[:16])
 	if len(fp) != 32 {
 		t.Errorf("fingerprint should be 32 hex characters, got %d: %s", len(fp), fp)
 	}
