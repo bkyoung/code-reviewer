@@ -28,8 +28,8 @@ const trackingMetadataEnd = "-->"
 const legacyMetadataStart = "<!-- TRACKING_METADATA"
 
 // maxMetadataSize limits the size of base64-encoded metadata to prevent DoS.
-// GitHub comments are limited to ~65k chars, so 100KB is generous.
-const maxMetadataSize = 100 * 1024
+// GitHub comments are limited to ~65k chars, so 64KB aligns with that limit.
+const maxMetadataSize = 64 * 1024
 
 // trackingStateJSON is the JSON-serializable form of TrackingState.
 type trackingStateJSON struct {

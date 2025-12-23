@@ -539,7 +539,10 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 
 		// Read successful response body
 		var respBody []byte
-		if resp.StatusCode != http.StatusNoContent {
+		if resp.StatusCode == http.StatusNoContent {
+			// Drain body to enable connection reuse even for 204 responses
+			_, _ = io.Copy(io.Discard, limitedBody)
+		} else {
 			var readErr error
 			respBody, readErr = io.ReadAll(limitedBody)
 			if readErr != nil {
