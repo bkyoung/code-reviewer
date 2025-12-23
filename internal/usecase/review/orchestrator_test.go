@@ -924,3 +924,317 @@ func TestFilterBinaryFiles(t *testing.T) {
 		})
 	}
 }
+
+// Mock implementations for GitHub integration testing
+
+type mockGitHubPoster struct {
+	mu       sync.Mutex
+	requests []review.GitHubPostRequest
+	result   *review.GitHubPostResult
+	err      error
+}
+
+func (m *mockGitHubPoster) PostReview(ctx context.Context, req review.GitHubPostRequest) (*review.GitHubPostResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests = append(m.requests, req)
+	return m.result, m.err
+}
+
+type mockTrackingStore struct {
+	mu         sync.Mutex
+	loadState  review.TrackingState
+	loadErr    error
+	savedState *review.TrackingState
+	saveErr    error
+	cleared    bool
+}
+
+func (m *mockTrackingStore) Load(ctx context.Context, target review.ReviewTarget) (review.TrackingState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.loadErr != nil {
+		return review.TrackingState{}, m.loadErr
+	}
+	return m.loadState, nil
+}
+
+func (m *mockTrackingStore) Save(ctx context.Context, state review.TrackingState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.savedState = &state
+	return m.saveErr
+}
+
+func (m *mockTrackingStore) Clear(ctx context.Context, target review.ReviewTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleared = true
+	return nil
+}
+
+// mockMergerWithFindings returns a merger that outputs specific findings
+type mockMergerWithFindings struct {
+	mu       sync.Mutex
+	calls    [][]domain.Review
+	findings []domain.Finding
+}
+
+func (m *mockMergerWithFindings) Merge(ctx context.Context, reviews []domain.Review) domain.Review {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, reviews)
+	return domain.Review{
+		ProviderName: "merged",
+		ModelName:    "consensus",
+		Findings:     m.findings,
+	}
+}
+
+// TestReviewBranch_Reconciliation_FirstReview tests that all findings are posted on first review
+func TestReviewBranch_Reconciliation_FirstReview(t *testing.T) {
+	ctx := context.Background()
+	diff := domain.Diff{
+		FromCommitHash: "base123",
+		ToCommitHash:   "head456",
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "@@ -0,0 +1,5 @@\n+package main\n+func main() {}"},
+		},
+	}
+
+	findings := []domain.Finding{
+		{ID: "f1", File: "main.go", LineStart: 1, LineEnd: 1, Severity: "high", Category: "security", Description: "SQL injection"},
+		{ID: "f2", File: "main.go", LineStart: 3, LineEnd: 3, Severity: "medium", Category: "performance", Description: "Slow query"},
+	}
+
+	expectedReview := domain.Review{
+		ProviderName: "test-provider",
+		ModelName:    "test-model",
+		Summary:      "Test review",
+		Findings:     findings,
+	}
+
+	gitMock := &mockGitEngine{diff: diff}
+	providerMock := &mockProvider{response: expectedReview}
+	writerMock := &mockMarkdownWriter{}
+	jsonWriterMock := &mockJSONWriter{}
+	sarifWriterMock := &mockSARIFWriter{}
+	// Use merger that returns findings
+	mergerMock := &mockMergerWithFindings{findings: findings}
+
+	// Empty tracking state (first review)
+	trackingMock := &mockTrackingStore{
+		loadState: review.NewTrackingState(review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   42,
+			HeadSHA:    "head456",
+		}),
+	}
+
+	githubMock := &mockGitHubPoster{
+		result: &review.GitHubPostResult{
+			ReviewID:        123,
+			CommentsPosted:  2,
+			CommentsSkipped: 0,
+			HTMLURL:         "https://github.com/owner/repo/pull/42#pullrequestreview-123",
+		},
+	}
+
+	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
+		Git: gitMock,
+		Providers: map[string]review.Provider{
+			"test-provider": providerMock,
+		},
+		Merger:        mergerMock,
+		Markdown:      writerMock,
+		JSON:          jsonWriterMock,
+		SARIF:         sarifWriterMock,
+		TrackingStore: trackingMock,
+		GitHubPoster:  githubMock,
+		SeedGenerator: func(baseRef, targetRef string) uint64 { return 12345 },
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
+			return review.ProviderRequest{Prompt: "test prompt", Seed: 12345, MaxSize: 16384}, nil
+		},
+	})
+
+	_, err := orchestrator.ReviewBranch(ctx, review.BranchRequest{
+		BaseRef:      "main",
+		TargetRef:    "feature",
+		OutputDir:    t.TempDir(),
+		Repository:   "test-repo",
+		PostToGitHub: true,
+		GitHubOwner:  "owner",
+		GitHubRepo:   "repo",
+		PRNumber:     42,
+		CommitSHA:    "head456",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Verify GitHub poster was called with all findings (first review = all are new)
+	if len(githubMock.requests) != 1 {
+		t.Fatalf("expected 1 GitHub post request, got %d", len(githubMock.requests))
+	}
+
+	postedFindings := githubMock.requests[0].Review.Findings
+	if len(postedFindings) != 2 {
+		t.Errorf("expected 2 findings posted (first review), got %d", len(postedFindings))
+	}
+
+	// Verify tracking state was saved with findings
+	if trackingMock.savedState == nil {
+		t.Fatal("expected tracking state to be saved")
+	}
+	if len(trackingMock.savedState.Findings) != 2 {
+		t.Errorf("expected 2 tracked findings saved, got %d", len(trackingMock.savedState.Findings))
+	}
+	if len(trackingMock.savedState.ReviewedCommits) != 1 {
+		t.Errorf("expected 1 reviewed commit, got %d", len(trackingMock.savedState.ReviewedCommits))
+	}
+}
+
+// TestReviewBranch_Reconciliation_SubsequentReview tests that only new findings are posted on re-review
+func TestReviewBranch_Reconciliation_SubsequentReview(t *testing.T) {
+	ctx := context.Background()
+	diff := domain.Diff{
+		FromCommitHash: "prev789",
+		ToCommitHash:   "head456",
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "@@ -0,0 +1,5 @@\n+package main\n+func main() {}"},
+		},
+	}
+
+	// Create an existing finding that was already tracked
+	existingFinding := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   1,
+		LineEnd:     1,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection", // Same description = same fingerprint
+		Suggestion:  "",
+		Evidence:    false,
+	})
+
+	// Create a new finding that wasn't tracked before
+	newFinding := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   5,
+		LineEnd:     5,
+		Severity:    "medium",
+		Category:    "performance",
+		Description: "New performance issue",
+		Suggestion:  "",
+		Evidence:    false,
+	})
+
+	// LLM returns both findings
+	llmFindings := []domain.Finding{existingFinding, newFinding}
+
+	expectedReview := domain.Review{
+		ProviderName: "test-provider",
+		ModelName:    "test-model",
+		Summary:      "Test review",
+		Findings:     llmFindings,
+	}
+
+	// Create tracked finding for existing one
+	firstSeen := time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC)
+	trackedExisting, err := domain.NewTrackedFindingFromFinding(existingFinding, firstSeen, "prev789")
+	if err != nil {
+		t.Fatalf("failed to create tracked finding: %v", err)
+	}
+
+	// Pre-populate tracking state with existing finding
+	existingState := review.TrackingState{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   42,
+			HeadSHA:    "head456",
+		},
+		ReviewedCommits: []string{"prev789"},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			trackedExisting.Fingerprint: trackedExisting,
+		},
+		LastUpdated: firstSeen,
+	}
+
+	gitMock := &mockGitEngine{diff: diff}
+	providerMock := &mockProvider{response: expectedReview}
+	writerMock := &mockMarkdownWriter{}
+	jsonWriterMock := &mockJSONWriter{}
+	sarifWriterMock := &mockSARIFWriter{}
+	// Use merger that returns the findings from LLM
+	mergerMock := &mockMergerWithFindings{findings: llmFindings}
+
+	trackingMock := &mockTrackingStore{
+		loadState: existingState,
+	}
+
+	githubMock := &mockGitHubPoster{
+		result: &review.GitHubPostResult{
+			ReviewID:        456,
+			CommentsPosted:  1,
+			CommentsSkipped: 0,
+			HTMLURL:         "https://github.com/owner/repo/pull/42#pullrequestreview-456",
+		},
+	}
+
+	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
+		Git: gitMock,
+		Providers: map[string]review.Provider{
+			"test-provider": providerMock,
+		},
+		Merger:        mergerMock,
+		Markdown:      writerMock,
+		JSON:          jsonWriterMock,
+		SARIF:         sarifWriterMock,
+		TrackingStore: trackingMock,
+		GitHubPoster:  githubMock,
+		SeedGenerator: func(baseRef, targetRef string) uint64 { return 12345 },
+		PromptBuilder: func(ctx review.ProjectContext, d domain.Diff, req review.BranchRequest, providerName string) (review.ProviderRequest, error) {
+			return review.ProviderRequest{Prompt: "test prompt", Seed: 12345, MaxSize: 16384}, nil
+		},
+	})
+
+	_, err = orchestrator.ReviewBranch(ctx, review.BranchRequest{
+		BaseRef:      "main",
+		TargetRef:    "feature",
+		OutputDir:    t.TempDir(),
+		Repository:   "test-repo",
+		PostToGitHub: true,
+		GitHubOwner:  "owner",
+		GitHubRepo:   "repo",
+		PRNumber:     42,
+		CommitSHA:    "head456",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Verify GitHub poster was called with ONLY the new finding
+	if len(githubMock.requests) != 1 {
+		t.Fatalf("expected 1 GitHub post request, got %d", len(githubMock.requests))
+	}
+
+	postedFindings := githubMock.requests[0].Review.Findings
+	if len(postedFindings) != 1 {
+		t.Errorf("expected 1 finding posted (only new), got %d", len(postedFindings))
+	}
+
+	if len(postedFindings) > 0 && postedFindings[0].Description != "New performance issue" {
+		t.Errorf("expected new finding to be posted, got: %s", postedFindings[0].Description)
+	}
+
+	// Verify tracking state was saved with both findings (existing + new)
+	if trackingMock.savedState == nil {
+		t.Fatal("expected tracking state to be saved")
+	}
+	if len(trackingMock.savedState.Findings) != 2 {
+		t.Errorf("expected 2 tracked findings (existing + new), got %d", len(trackingMock.savedState.Findings))
+	}
+	if len(trackingMock.savedState.ReviewedCommits) != 2 {
+		t.Errorf("expected 2 reviewed commits, got %d", len(trackingMock.savedState.ReviewedCommits))
+	}
+}
