@@ -73,7 +73,7 @@
 | Code review initiation | ✅ Complete | Uses GitHub Review API |
 | Review summary | ✅ Complete | Programmatic summary from findings |
 | Stale review dismissal | ✅ Complete | Auto-dismisses on new push |
-| Incremental reviews | ❌ Missing | Key MVP gap |
+| Incremental reviews | ✅ Complete | PR #65 - DiffComputer, TrackingStore integration |
 | Finding deduplication | ❌ Missing | Key MVP gap |
 
 ### Gap Analysis
@@ -84,9 +84,10 @@
 | ~~Code review API~~ | ~~Uses `gh pr comment`~~ | ~~Use `gh api` for reviews~~ | ✅ Done |
 | ~~Request changes~~ | ~~Never blocks~~ | ~~Configurable blocking~~ | ✅ Done |
 | Skip trigger | None | `[skip code-review]` | Low |
-| Incremental reviews | Full PR every time | Only new changes since last review | High |
+| ~~Incremental reviews~~ | ~~Full PR every time~~ | ~~Only new changes since last review~~ | ✅ Done |
 | Finding deduplication | Re-flags same issues | Track + skip duplicates | High |
 | PR size guards | May fail on large PRs | Warn, truncate, or split | Medium |
+| Multi-cycle reviews | Single pass, noisy | Converge on high-confidence findings | High |
 
 ### Architecture Decision: Platform Adaptability
 
@@ -132,9 +133,10 @@ This ensures CLI parity and future multi-platform support without rewriting core
 | 2.2: Review API | Use GitHub review API instead of comments | ✅ Complete |
 | 2.3: Request Changes | Configurable blocking behavior | ✅ Complete |
 | 2.4: Skip Trigger | `[skip code-review]` support | Not Started |
-| 2.5: Incremental Reviews | Only review new changes since last review | 🚧 In Progress |
+| 2.5: Incremental Reviews | Only review new changes since last review | ✅ Complete |
 | 2.6: Finding Deduplication | Track findings, don't re-flag same issues | 🚧 In Progress |
 | 2.7: PR Size Guards | Warn/truncate/split large PRs | Not Started |
+| 2.8: Multi-Cycle Reviews | Confidence-filtered initial reviews | Not Started |
 
 **Epic #53** unifies milestones 2.5 and 2.6 with a platform-agnostic architecture (see above).
 
