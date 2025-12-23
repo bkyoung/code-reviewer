@@ -1,6 +1,7 @@
 package review
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -20,13 +21,19 @@ type ReconciliationResult struct {
 	Updated []domain.TrackedFinding
 
 	// RedetectedResolved contains findings that were previously resolved but
-	// detected again in this review. They remain in resolved status but are
-	// reported so the caller can surface a warning to the user.
+	// detected again in this review. They remain in resolved status but their
+	// LastSeen and SeenCount are updated to track the re-detection.
+	// Reported so the caller can surface a warning to the user.
 	RedetectedResolved []domain.TrackedFinding
 
 	// Resolved contains findings that were automatically resolved because
 	// they were open, in a changed file, and no longer detected.
 	Resolved []domain.TrackedFinding
+
+	// Errors contains any errors encountered during reconciliation.
+	// These are non-fatal - reconciliation continues but callers should
+	// be aware of partial failures (e.g., failed status transitions).
+	Errors []error
 }
 
 // ReconcileFindings compares new findings from a review against the existing
@@ -68,18 +75,26 @@ func ReconcileFindings(
 		changedFileSet[f] = true
 	}
 
-	// Build lookup for current findings by fingerprint
-	currentFingerprintSet := make(map[domain.FindingFingerprint]bool, len(newFindings))
+	// Deduplicate newFindings by fingerprint to prevent inflating SeenCount
+	// when upstream generators emit duplicates
+	deduplicatedFindings := make(map[domain.FindingFingerprint]domain.Finding, len(newFindings))
 	for _, f := range newFindings {
-		currentFingerprintSet[f.Fingerprint()] = true
+		fp := f.Fingerprint()
+		if _, seen := deduplicatedFindings[fp]; !seen {
+			deduplicatedFindings[fp] = f
+		}
+	}
+
+	// Build lookup for current findings by fingerprint
+	currentFingerprintSet := make(map[domain.FindingFingerprint]bool, len(deduplicatedFindings))
+	for fp := range deduplicatedFindings {
+		currentFingerprintSet[fp] = true
 	}
 
 	var result ReconciliationResult
 
-	// Process each new finding
-	for _, finding := range newFindings {
-		fp := finding.Fingerprint()
-
+	// Process each deduplicated finding
+	for fp, finding := range deduplicatedFindings {
 		existing, exists := newState.Findings[fp]
 		if !exists {
 			// Genuinely new finding
@@ -90,7 +105,9 @@ func ReconcileFindings(
 		// Finding exists - check its status
 		switch existing.Status {
 		case domain.FindingStatusResolved:
-			// Re-detected while resolved - report but keep resolved
+			// Re-detected while resolved - update tracking metadata but keep resolved
+			existing.MarkSeen(timestamp)
+			newState.Findings[fp] = existing
 			result.RedetectedResolved = append(result.RedetectedResolved, existing)
 
 		case domain.FindingStatusOpen, domain.FindingStatusAcknowledged, domain.FindingStatusDisputed:
@@ -98,6 +115,15 @@ func ReconcileFindings(
 			existing.MarkSeen(timestamp)
 			newState.Findings[fp] = existing
 			result.Updated = append(result.Updated, existing)
+
+		default:
+			// Unknown status - treat as open for graceful degradation
+			existing.MarkSeen(timestamp)
+			newState.Findings[fp] = existing
+			result.Updated = append(result.Updated, existing)
+			result.Errors = append(result.Errors, fmt.Errorf(
+				"finding %s has unknown status %q, treating as open",
+				fp, existing.Status))
 		}
 	}
 
@@ -120,7 +146,9 @@ func ReconcileFindings(
 
 		// Auto-resolve this finding
 		if err := tracked.UpdateStatus(domain.FindingStatusResolved, "Finding no longer present in review", commitSHA, timestamp); err != nil {
-			// This shouldn't happen with valid status, but if it does, skip
+			// Record error but continue processing other findings
+			result.Errors = append(result.Errors, fmt.Errorf(
+				"failed to auto-resolve finding %s: %w", fp, err))
 			continue
 		}
 		newState.Findings[fp] = tracked

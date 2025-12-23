@@ -200,10 +200,109 @@ func TestReconcileFindings_ResolvedRedetected(t *testing.T) {
 		t.Errorf("status = %s, want resolved", redetected.Status)
 	}
 
-	// State should still have finding as resolved
+	// LastSeen and SeenCount should be updated even for resolved findings
+	if !redetected.LastSeen.Equal(timestamp) {
+		t.Errorf("LastSeen = %v, want %v", redetected.LastSeen, timestamp)
+	}
+	if redetected.SeenCount != 2 {
+		t.Errorf("SeenCount = %d, want 2", redetected.SeenCount)
+	}
+
+	// State should still have finding as resolved with updated metadata
 	fp := trackedFinding.Fingerprint
 	if newState.Findings[fp].Status != domain.FindingStatusResolved {
 		t.Errorf("state finding status = %s, want resolved", newState.Findings[fp].Status)
+	}
+	if newState.Findings[fp].SeenCount != 2 {
+		t.Errorf("state finding SeenCount = %d, want 2", newState.Findings[fp].SeenCount)
+	}
+}
+
+func TestReconcileFindings_DuplicateFindingsInInput(t *testing.T) {
+	// Same fingerprint appears twice in newFindings - should only increment SeenCount once
+	firstSeen := time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC)
+	existingFinding := createTestFinding("file1.go", 10, "high", "security", "SQL injection")
+	trackedFinding := createTrackedFindingFromFinding(t, existingFinding, firstSeen)
+
+	state := TrackingState{
+		Target: ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			trackedFinding.Fingerprint: trackedFinding,
+		},
+	}
+
+	// Same finding twice (different line numbers but same fingerprint since fingerprint excludes line)
+	newFindings := []domain.Finding{
+		createTestFinding("file1.go", 10, "high", "security", "SQL injection"),
+		createTestFinding("file1.go", 15, "high", "security", "SQL injection"), // Same fingerprint
+	}
+
+	timestamp := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	_, result := ReconcileFindings(state, newFindings, []string{"file1.go"}, "def456", timestamp)
+
+	// Should only be counted once
+	if len(result.Updated) != 1 {
+		t.Errorf("expected 1 updated finding, got %d", len(result.Updated))
+	}
+
+	// SeenCount should be 2 (original + 1), not 3 (original + 2)
+	if result.Updated[0].SeenCount != 2 {
+		t.Errorf("SeenCount = %d, want 2 (not inflated by duplicate)", result.Updated[0].SeenCount)
+	}
+}
+
+func TestReconcileFindings_UnknownStatusTreatedAsOpen(t *testing.T) {
+	// Finding with unknown status should be treated as open (graceful degradation)
+	firstSeen := time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC)
+	existingFinding := createTestFinding("file1.go", 10, "high", "security", "Issue")
+
+	// Create a tracked finding with an unknown status by directly constructing it
+	// (bypassing NewTrackedFinding validation)
+	trackedFinding := domain.TrackedFinding{
+		Finding:     existingFinding,
+		Fingerprint: existingFinding.Fingerprint(),
+		Status:      domain.FindingStatus("unknown_status"),
+		FirstSeen:   firstSeen,
+		LastSeen:    firstSeen,
+		SeenCount:   1,
+	}
+
+	state := TrackingState{
+		Target: ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			trackedFinding.Fingerprint: trackedFinding,
+		},
+	}
+
+	newFindings := []domain.Finding{
+		createTestFinding("file1.go", 10, "high", "security", "Issue"),
+	}
+
+	timestamp := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	newState, result := ReconcileFindings(state, newFindings, []string{"file1.go"}, "def456", timestamp)
+
+	// Should be in Updated (treated as open)
+	if len(result.Updated) != 1 {
+		t.Errorf("expected 1 updated finding, got %d", len(result.Updated))
+	}
+
+	// Should have recorded an error
+	if len(result.Errors) != 1 {
+		t.Errorf("expected 1 error for unknown status, got %d", len(result.Errors))
+	}
+
+	// LastSeen and SeenCount should still be updated
+	fp := trackedFinding.Fingerprint
+	if newState.Findings[fp].SeenCount != 2 {
+		t.Errorf("SeenCount = %d, want 2", newState.Findings[fp].SeenCount)
 	}
 }
 
