@@ -202,7 +202,8 @@ func extractMetadata(body string) (string, error) {
 
 	// Decode if base64 encoded
 	if isBase64 {
-		decoded, err := base64.StdEncoding.DecodeString(content)
+		// Use Strict decoding to reject malformed padding
+		decoded, err := base64.StdEncoding.Strict().DecodeString(content)
 		if err != nil {
 			return "", fmt.Errorf("failed to decode base64 metadata: %w", err)
 		}
@@ -259,6 +260,11 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 
 	findings := make(map[domain.FindingFingerprint]domain.TrackedFinding, len(stateJSON.Findings))
 	for _, fJSON := range stateJSON.Findings {
+		// Skip findings with empty fingerprints to prevent map key collisions
+		if fJSON.Fingerprint == "" {
+			continue
+		}
+
 		// Reconstruct the Finding
 		finding := domain.Finding{
 			ID:          fJSON.FindingID,

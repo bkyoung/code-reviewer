@@ -28,6 +28,10 @@ const (
 	// maxPaginationPages limits how many pages we'll fetch when searching for
 	// the tracking comment. This prevents DoS on PRs with thousands of comments.
 	maxPaginationPages = 10 // 10 pages * 100 per page = 1000 comments max
+
+	// maxResponseSize limits how much data we'll read from a response body.
+	// This prevents memory exhaustion from malicious or misconfigured servers.
+	maxResponseSize = 10 * 1024 * 1024 // 10 MB
 )
 
 // pathSegmentRegex validates that owner/repo names only contain safe characters.
@@ -100,15 +104,21 @@ func (s *GitHubStore) Load(ctx context.Context, target review.ReviewTarget) (rev
 		return review.TrackingState{}, fmt.Errorf("failed to parse tracking comment: %w", err)
 	}
 
-	// Selectively update target fields that reflect current state,
-	// while preserving stored metadata like Repository and PRNumber
-	// HeadSHA changes with each new commit, so use current value
-	state.Target.HeadSHA = target.HeadSHA
-	// BaseSHA may change if the base branch is updated
+	// Update target fields to reflect current PR state.
+	// The stored state captures historical information (Repository, PRNumber),
+	// while the incoming target has current commit information.
+	// We always update all three dynamic fields to maintain consistency:
+	// - HeadSHA: always changes with new commits
+	// - BaseSHA: may change if base branch is updated or rebased
+	// - Branch: may change if PR is retargeted
+	// Using empty string as "no change" would leave stale data, so we only
+	// skip update if incoming value is empty AND stored value exists.
+	if target.HeadSHA != "" {
+		state.Target.HeadSHA = target.HeadSHA
+	}
 	if target.BaseSHA != "" {
 		state.Target.BaseSHA = target.BaseSHA
 	}
-	// Branch may change if PR is retargeted
 	if target.Branch != "" {
 		state.Target.Branch = target.Branch
 	}
@@ -204,6 +214,9 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 	if err := validatePathSegment(repo, "repo"); err != nil {
 		return nil, err
 	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("invalid PR number: %d", prNumber)
+	}
 
 	// GitHub treats PRs as issues for comments API
 	// Use sort=created&direction=desc to find most recent tracking comment first
@@ -237,6 +250,12 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 		apiURL = nextURL
 	}
 
+	// If we still have pages to check but hit the limit, return an error
+	// to signal that the search was incomplete
+	if apiURL != "" {
+		return nil, fmt.Errorf("pagination limit reached (%d pages), tracking comment may exist beyond searched range", maxPaginationPages)
+	}
+
 	return nil, nil
 }
 
@@ -265,6 +284,9 @@ func (s *GitHubStore) createComment(ctx context.Context, owner, repo string, prN
 	if err := validatePathSegment(repo, "repo"); err != nil {
 		return err
 	}
+	if prNumber <= 0 {
+		return fmt.Errorf("invalid PR number: %d", prNumber)
+	}
 
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments",
 		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
@@ -290,6 +312,9 @@ func (s *GitHubStore) updateComment(ctx context.Context, owner, repo string, com
 	if err := validatePathSegment(repo, "repo"); err != nil {
 		return err
 	}
+	if commentID <= 0 {
+		return fmt.Errorf("invalid comment ID: %d", commentID)
+	}
 
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/comments/%d",
 		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), commentID)
@@ -314,6 +339,9 @@ func (s *GitHubStore) deleteComment(ctx context.Context, owner, repo string, com
 	}
 	if err := validatePathSegment(repo, "repo"); err != nil {
 		return err
+	}
+	if commentID <= 0 {
+		return fmt.Errorf("invalid comment ID: %d", commentID)
 	}
 
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/comments/%d",
@@ -374,12 +402,19 @@ func (s *GitHubStore) doRequestWithPagination(ctx context.Context, method, apiUR
 		}
 		defer resp.Body.Close()
 
+		// Limit response size to prevent memory exhaustion
+		limitedBody := io.LimitReader(resp.Body, maxResponseSize)
+
 		if resp.StatusCode >= 400 {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return mapHTTPError(resp.StatusCode, bodyBytes)
+			bodyBytes, readErr := io.ReadAll(limitedBody)
+			errMsg := string(bodyBytes)
+			if readErr != nil {
+				errMsg = fmt.Sprintf("(failed to read error response: %v)", readErr)
+			}
+			return mapHTTPError(resp.StatusCode, errMsg, resp.Header)
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(limitedBody)
 		if readErr != nil {
 			return &llmhttp.Error{
 				Type:      llmhttp.ErrTypeUnknown,
@@ -481,16 +516,23 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 		// Always close response body within this attempt
 		defer resp.Body.Close()
 
+		// Limit response size to prevent memory exhaustion
+		limitedBody := io.LimitReader(resp.Body, maxResponseSize)
+
 		if resp.StatusCode >= 400 {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return mapHTTPError(resp.StatusCode, bodyBytes)
+			bodyBytes, readErr := io.ReadAll(limitedBody)
+			errMsg := string(bodyBytes)
+			if readErr != nil {
+				errMsg = fmt.Sprintf("(failed to read error response: %v)", readErr)
+			}
+			return mapHTTPError(resp.StatusCode, errMsg, resp.Header)
 		}
 
 		// Read successful response body
 		var respBody []byte
 		if resp.StatusCode != http.StatusNoContent {
 			var readErr error
-			respBody, readErr = io.ReadAll(resp.Body)
+			respBody, readErr = io.ReadAll(limitedBody)
 			if readErr != nil {
 				return &llmhttp.Error{
 					Type:      llmhttp.ErrTypeUnknown,
@@ -548,21 +590,38 @@ func validatePathSegment(value, name string) error {
 }
 
 // mapHTTPError converts an HTTP error response to an llmhttp.Error.
-func mapHTTPError(statusCode int, body []byte) error {
+// It also inspects headers to detect GitHub rate limiting on 403 responses.
+func mapHTTPError(statusCode int, errMsg string, headers http.Header) error {
 	// Only retry on server errors and rate limits
 	// 4xx client errors (except 429) should not be retried
 	retryable := statusCode >= 500 || statusCode == 429
 
 	errType := llmhttp.ErrTypeUnknown
-	if statusCode == 429 {
+
+	// Check for rate limiting: 429 is explicit, but GitHub also uses 403
+	// with X-RateLimit-Remaining: 0 or specific error messages
+	isRateLimited := statusCode == 429
+	if statusCode == 403 {
+		// Check rate limit headers
+		if headers.Get("X-RateLimit-Remaining") == "0" {
+			isRateLimited = true
+		}
+		// Check for rate limit message in body
+		if strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "API rate limit exceeded") {
+			isRateLimited = true
+		}
+	}
+
+	if isRateLimited {
 		errType = llmhttp.ErrTypeRateLimit
+		retryable = true // Rate limits should be retried with backoff
 	} else if statusCode == 401 || statusCode == 403 {
 		errType = llmhttp.ErrTypeAuthentication
 	}
 
 	return &llmhttp.Error{
 		Type:       errType,
-		Message:    fmt.Sprintf("HTTP %d: %s", statusCode, string(body)),
+		Message:    fmt.Sprintf("HTTP %d: %s", statusCode, errMsg),
 		StatusCode: statusCode,
 		Retryable:  retryable,
 		Provider:   providerName,
