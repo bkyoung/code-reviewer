@@ -219,8 +219,10 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 	}
 
 	// GitHub treats PRs as issues for comments API
-	// Use sort=created&direction=desc to find most recent tracking comment first
-	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&sort=created&direction=desc",
+	// Use sort=updated&direction=desc so the bot's tracking comment (which gets
+	// updated on each run) stays near the top, avoiding pagination limit issues
+	// on PRs with many comments.
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&sort=updated&direction=desc",
 		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
 
 	// Paginate through comments until we find the tracking comment

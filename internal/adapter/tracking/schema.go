@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -214,9 +216,19 @@ func extractMetadata(body string) (string, error) {
 }
 
 // stateToJSON converts a TrackingState to its JSON-serializable form.
+// Findings are sorted by fingerprint to ensure deterministic output.
 func stateToJSON(state review.TrackingState) trackingStateJSON {
+	// Collect and sort fingerprints for deterministic ordering
+	fingerprints := make([]string, 0, len(state.Findings))
+	for fp := range state.Findings {
+		fingerprints = append(fingerprints, string(fp))
+	}
+	sort.Strings(fingerprints)
+
+	// Build findings slice in sorted order
 	findings := make([]trackedFindingJSON, 0, len(state.Findings))
-	for _, f := range state.Findings {
+	for _, fpStr := range fingerprints {
+		f := state.Findings[domain.FindingFingerprint(fpStr)]
 		findings = append(findings, trackedFindingJSON{
 			Fingerprint: string(f.Fingerprint),
 			Status:      string(f.Status),
@@ -262,6 +274,8 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 	for _, fJSON := range stateJSON.Findings {
 		// Skip findings with empty fingerprints to prevent map key collisions
 		if fJSON.Fingerprint == "" {
+			log.Printf("warning: skipping finding with empty fingerprint (file=%s, line=%d) - possible data corruption",
+				fJSON.File, fJSON.LineStart)
 			continue
 		}
 
@@ -283,7 +297,8 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 
 		// Validate status
 		if !status.IsValid() {
-			// Default to open for unknown statuses
+			log.Printf("warning: invalid status %q for finding %s, defaulting to 'open' - possible data corruption",
+				fJSON.Status, fJSON.Fingerprint)
 			status = domain.FindingStatusOpen
 		}
 
