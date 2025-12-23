@@ -93,6 +93,14 @@ func hashFinding(input FindingInput) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Fingerprint returns a stable identifier for this finding.
+// The fingerprint is based on file, category, severity, and description prefix.
+// Line numbers are intentionally excluded so the fingerprint remains stable
+// when code shifts due to unrelated changes.
+func (f Finding) Fingerprint() FindingFingerprint {
+	return FingerprintFromFinding(f)
+}
+
 // MarkdownArtifact encapsulates the Markdown generation inputs.
 type MarkdownArtifact struct {
 	OutputDir    string
