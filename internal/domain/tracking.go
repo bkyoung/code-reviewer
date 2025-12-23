@@ -135,8 +135,8 @@ func NewTrackedFinding(input TrackedFindingInput) (TrackedFinding, error) {
 	}
 
 	// Validate consistency between status and resolution fields
-	if input.Status == FindingStatusResolved && input.ResolvedAt == nil {
-		return TrackedFinding{}, fmt.Errorf("resolved status requires ResolvedAt timestamp")
+	if input.Status == FindingStatusResolved && (input.ResolvedAt == nil || input.ResolvedAt.IsZero()) {
+		return TrackedFinding{}, fmt.Errorf("resolved status requires valid ResolvedAt timestamp")
 	}
 	if input.Status != FindingStatusResolved && (input.ResolvedAt != nil || input.ResolvedIn != nil) {
 		return TrackedFinding{}, fmt.Errorf("ResolvedAt/ResolvedIn should only be set when status is resolved")
@@ -184,7 +184,7 @@ func (tf *TrackedFinding) MarkSeen(seenAt time.Time) {
 //   - Any → open: Clears StatusReason, ResolvedAt, and ResolvedIn (reopening).
 //     The reason, currentCommit, and timestamp parameters are ignored for this transition.
 //   - Any → resolved: Sets ResolvedAt to timestamp, and ResolvedIn if currentCommit is provided
-//   - Any → acknowledged/disputed: Updates status and reason, leaves resolution fields unchanged
+//   - Any → acknowledged/disputed: Updates status and reason, clears ResolvedAt and ResolvedIn
 //
 // The reason parameter provides context for the status change (max 500 chars).
 // The currentCommit parameter is used when transitioning to resolved.
@@ -223,9 +223,11 @@ func (tf *TrackedFinding) UpdateStatus(status FindingStatus, reason string, curr
 		return nil
 	}
 
-	// For other statuses (acknowledged, disputed), just update status and reason
+	// For other statuses (acknowledged, disputed), update status/reason and clear resolution fields
 	tf.Status = status
 	tf.StatusReason = reason
+	tf.ResolvedAt = nil
+	tf.ResolvedIn = nil
 	return nil
 }
 

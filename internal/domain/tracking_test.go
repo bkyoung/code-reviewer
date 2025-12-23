@@ -807,6 +807,59 @@ func TestTrackedFinding_UpdateStatus_TransitionToDisputed(t *testing.T) {
 	}
 }
 
+func TestTrackedFinding_UpdateStatus_ResolvedToAcknowledged_ClearsResolutionFields(t *testing.T) {
+	now := time.Now()
+	finding := NewFinding(FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     10,
+		Severity:    "high",
+		Category:    "security",
+		Description: "Test",
+		Suggestion:  "",
+		Evidence:    false,
+	})
+
+	resolvedAt := now
+	resolvedIn := "fix-commit"
+
+	// Start with a resolved finding
+	tf, _ := NewTrackedFinding(TrackedFindingInput{
+		Finding:      finding,
+		Status:       FindingStatusResolved,
+		FirstSeen:    now.Add(-time.Hour),
+		LastSeen:     now,
+		SeenCount:    2,
+		StatusReason: "Fixed",
+		ReviewCommit: "initial-commit",
+		ResolvedAt:   &resolvedAt,
+		ResolvedIn:   &resolvedIn,
+	})
+
+	// Transition to acknowledged
+	err := tf.UpdateStatus(FindingStatusAcknowledged, "Actually intentional design", "", time.Time{})
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	if tf.Status != FindingStatusAcknowledged {
+		t.Errorf("Status = %v, want %v", tf.Status, FindingStatusAcknowledged)
+	}
+
+	if tf.StatusReason != "Actually intentional design" {
+		t.Errorf("StatusReason = %q, want %q", tf.StatusReason, "Actually intentional design")
+	}
+
+	// Resolution fields should be cleared when transitioning to acknowledged
+	if tf.ResolvedAt != nil {
+		t.Errorf("ResolvedAt should be cleared when transitioning to acknowledged, got %v", tf.ResolvedAt)
+	}
+
+	if tf.ResolvedIn != nil {
+		t.Errorf("ResolvedIn should be cleared when transitioning to acknowledged, got %v", tf.ResolvedIn)
+	}
+}
+
 func TestTrackedFinding_UpdateStatus_ReasonMaxLength(t *testing.T) {
 	now := time.Now()
 	finding := NewFinding(FindingInput{

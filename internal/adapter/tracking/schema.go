@@ -341,6 +341,21 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 			}
 		}
 
+		// If status is resolved but ResolvedAt is missing/invalid, default to open
+		// to maintain domain invariant consistency
+		if status == domain.FindingStatusResolved && resolvedAt == nil {
+			log.Printf("warning: resolved status requires ResolvedAt for finding %s, defaulting to 'open'",
+				fJSON.Fingerprint)
+			status = domain.FindingStatusOpen
+		}
+
+		// Clear resolution fields for non-resolved statuses to maintain invariant
+		resolvedIn := fJSON.ResolvedIn
+		if status != domain.FindingStatusResolved {
+			resolvedAt = nil
+			resolvedIn = nil
+		}
+
 		findings[fingerprint] = domain.TrackedFinding{
 			Finding:      finding,
 			Fingerprint:  fingerprint,
@@ -351,7 +366,7 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 			StatusReason: fJSON.StatusReason,
 			ReviewCommit: fJSON.ReviewCommit,
 			ResolvedAt:   resolvedAt,
-			ResolvedIn:   fJSON.ResolvedIn,
+			ResolvedIn:   resolvedIn,
 		}
 	}
 
