@@ -146,9 +146,10 @@ func ReconcileFindings(
 
 		// Auto-resolve this finding
 		if err := tracked.UpdateStatus(domain.FindingStatusResolved, "Finding no longer present in review", commitSHA, timestamp); err != nil {
-			// Record error but continue processing other findings
+			// Record error with context for debugging, but continue processing other findings
 			result.Errors = append(result.Errors, fmt.Errorf(
-				"failed to auto-resolve finding %s: %w", fp, err))
+				"failed to auto-resolve finding %s (file=%s, line=%d): %w",
+				fp, tracked.Finding.File, tracked.Finding.LineStart, err))
 			continue
 		}
 		newState.Findings[fp] = tracked

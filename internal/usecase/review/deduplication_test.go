@@ -256,12 +256,16 @@ func TestReconcileFindings_DuplicateFindingsInInput(t *testing.T) {
 }
 
 func TestReconcileFindings_UnknownStatusTreatedAsOpen(t *testing.T) {
-	// Finding with unknown status should be treated as open (graceful degradation)
+	// Finding with unknown status should be treated as open (graceful degradation).
+	// This tests defensive programming for cases like:
+	// - Data corruption in persisted state
+	// - Schema migration from older versions with different status values
+	// - Deserialization of externally-provided data
 	firstSeen := time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC)
 	existingFinding := createTestFinding("file1.go", 10, "high", "security", "Issue")
 
-	// Create a tracked finding with an unknown status by directly constructing it
-	// (bypassing NewTrackedFinding validation)
+	// Directly construct TrackedFinding to bypass NewTrackedFinding validation,
+	// simulating corrupted or externally-loaded data with an invalid status.
 	trackedFinding := domain.TrackedFinding{
 		Finding:     existingFinding,
 		Fingerprint: existingFinding.Fingerprint(),
