@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -327,10 +329,11 @@ func (s *GitHubStore) doRequestWithPagination(ctx context.Context, method, apiUR
 
 		resp, callErr := s.httpClient.Do(req)
 		if callErr != nil {
+			errType, retryable := classifyTransportError(callErr)
 			return &llmhttp.Error{
-				Type:      llmhttp.ErrTypeTimeout,
+				Type:      errType,
 				Message:   callErr.Error(),
-				Retryable: true,
+				Retryable: retryable,
 				Provider:  providerName,
 			}
 		}
@@ -432,10 +435,11 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 
 		resp, callErr := s.httpClient.Do(req)
 		if callErr != nil {
+			errType, retryable := classifyTransportError(callErr)
 			return &llmhttp.Error{
-				Type:      llmhttp.ErrTypeTimeout,
+				Type:      errType,
 				Message:   callErr.Error(),
-				Retryable: true,
+				Retryable: retryable,
 				Provider:  providerName,
 			}
 		}
@@ -505,15 +509,48 @@ func validatePathSegment(value, name string) error {
 
 // mapHTTPError converts an HTTP error response to an llmhttp.Error.
 func mapHTTPError(statusCode int, body []byte) error {
+	// Only retry on server errors and rate limits
+	// 4xx client errors (except 429) should not be retried
 	retryable := statusCode >= 500 || statusCode == 429
 
+	errType := llmhttp.ErrTypeUnknown
+	if statusCode == 429 {
+		errType = llmhttp.ErrTypeRateLimit
+	} else if statusCode == 401 || statusCode == 403 {
+		errType = llmhttp.ErrTypeAuthentication
+	}
+
 	return &llmhttp.Error{
-		Type:       llmhttp.ErrTypeUnknown,
+		Type:       errType,
 		Message:    fmt.Sprintf("HTTP %d: %s", statusCode, string(body)),
 		StatusCode: statusCode,
 		Retryable:  retryable,
 		Provider:   providerName,
 	}
+}
+
+// classifyTransportError determines error type and retryability for transport errors.
+func classifyTransportError(err error) (errType llmhttp.ErrorType, retryable bool) {
+	// Check for context cancellation/deadline
+	if errors.Is(err, context.DeadlineExceeded) {
+		return llmhttp.ErrTypeTimeout, true
+	}
+	if errors.Is(err, context.Canceled) {
+		return llmhttp.ErrTypeUnknown, false // Don't retry cancelled requests
+	}
+
+	// Check for network timeout errors
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return llmhttp.ErrTypeTimeout, true
+		}
+		// Other network errors (DNS, connection refused, etc.) are retryable
+		return llmhttp.ErrTypeUnknown, true
+	}
+
+	// Unknown transport errors - don't retry by default
+	return llmhttp.ErrTypeUnknown, false
 }
 
 // Ensure GitHubStore implements TrackingStore.

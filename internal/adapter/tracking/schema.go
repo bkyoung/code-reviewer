@@ -1,6 +1,7 @@
 package tracking
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,11 +15,15 @@ import (
 // This must be unique enough to avoid false matches with user comments.
 const trackingCommentMarker = "<!-- CODE_REVIEWER_TRACKING_V1 -->"
 
-// trackingMetadataStart marks the beginning of the embedded JSON metadata.
-const trackingMetadataStart = "<!-- TRACKING_METADATA"
+// trackingMetadataStart marks the beginning of the embedded base64-encoded JSON metadata.
+// The payload is base64 encoded to avoid issues with HTML comment delimiters (-->) in JSON.
+const trackingMetadataStart = "<!-- TRACKING_METADATA_B64"
 
-// trackingMetadataEnd marks the end of the embedded JSON metadata.
+// trackingMetadataEnd marks the end of the embedded metadata.
 const trackingMetadataEnd = "-->"
+
+// legacyMetadataStart is the old marker for backwards compatibility.
+const legacyMetadataStart = "<!-- TRACKING_METADATA"
 
 // trackingStateJSON is the JSON-serializable form of TrackingState.
 type trackingStateJSON struct {
@@ -141,9 +146,11 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 	}
 
 	// Embedded metadata (hidden from rendered view)
+	// Base64 encode to avoid issues with --> in JSON content
+	encoded := base64.StdEncoding.EncodeToString(jsonBytes)
 	sb.WriteString(trackingMetadataStart)
 	sb.WriteString("\n")
-	sb.Write(jsonBytes)
+	sb.WriteString(encoded)
 	sb.WriteString("\n")
 	sb.WriteString(trackingMetadataEnd)
 
@@ -151,30 +158,54 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 }
 
 // extractMetadata extracts the JSON string from between metadata markers.
+// Supports both new base64-encoded format and legacy raw JSON format.
 func extractMetadata(body string) (string, error) {
-	// Find start marker
+	// Try new base64 format first
 	startIdx := strings.Index(body, trackingMetadataStart)
+	isBase64 := true
+
+	// Fall back to legacy format if new format not found
+	if startIdx == -1 {
+		startIdx = strings.Index(body, legacyMetadataStart)
+		isBase64 = false
+	}
+
 	if startIdx == -1 {
 		return "", fmt.Errorf("tracking metadata start marker not found")
 	}
 
+	// Determine marker length based on format
+	markerLen := len(trackingMetadataStart)
+	if !isBase64 {
+		markerLen = len(legacyMetadataStart)
+	}
+
 	// Skip past the start marker
-	jsonStart := startIdx + len(trackingMetadataStart)
+	contentStart := startIdx + markerLen
 
 	// Find end marker (after start)
-	remaining := body[jsonStart:]
+	remaining := body[contentStart:]
 	endIdx := strings.Index(remaining, trackingMetadataEnd)
 	if endIdx == -1 {
 		return "", fmt.Errorf("tracking metadata end marker not found")
 	}
 
-	// Extract and trim the JSON
-	jsonStr := strings.TrimSpace(remaining[:endIdx])
-	if jsonStr == "" {
+	// Extract and trim the content
+	content := strings.TrimSpace(remaining[:endIdx])
+	if content == "" {
 		return "", fmt.Errorf("empty tracking metadata")
 	}
 
-	return jsonStr, nil
+	// Decode if base64 encoded
+	if isBase64 {
+		decoded, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode base64 metadata: %w", err)
+		}
+		return string(decoded), nil
+	}
+
+	return content, nil
 }
 
 // stateToJSON converts a TrackingState to its JSON-serializable form.
