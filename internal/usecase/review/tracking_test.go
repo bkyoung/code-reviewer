@@ -137,6 +137,40 @@ func TestNewTrackingState(t *testing.T) {
 	if !state.LastUpdated.IsZero() {
 		t.Errorf("LastUpdated should be zero time, got %v", state.LastUpdated)
 	}
+	// Default ReviewStatus should be Completed for backward compatibility
+	if state.ReviewStatus != domain.ReviewStatusCompleted {
+		t.Errorf("ReviewStatus = %s, want %s", state.ReviewStatus, domain.ReviewStatusCompleted)
+	}
+}
+
+func TestNewTrackingStateInProgress(t *testing.T) {
+	target := ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   123,
+		HeadSHA:    "abc123",
+	}
+	timestamp := time.Now()
+
+	state := NewTrackingStateInProgress(target, timestamp)
+
+	if state.Target.Repository != target.Repository {
+		t.Errorf("Repository = %s, want %s", state.Target.Repository, target.Repository)
+	}
+	if state.Target.PRNumber != target.PRNumber {
+		t.Errorf("PRNumber = %d, want %d", state.Target.PRNumber, target.PRNumber)
+	}
+	if len(state.ReviewedCommits) != 0 {
+		t.Errorf("ReviewedCommits should be empty, got %d", len(state.ReviewedCommits))
+	}
+	if len(state.Findings) != 0 {
+		t.Errorf("Findings should be empty, got %d", len(state.Findings))
+	}
+	if !state.LastUpdated.Equal(timestamp) {
+		t.Errorf("LastUpdated = %v, want %v", state.LastUpdated, timestamp)
+	}
+	if state.ReviewStatus != domain.ReviewStatusInProgress {
+		t.Errorf("ReviewStatus = %s, want %s", state.ReviewStatus, domain.ReviewStatusInProgress)
+	}
 }
 
 func TestTrackingState_HasBeenReviewed(t *testing.T) {

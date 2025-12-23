@@ -97,8 +97,8 @@ func TestRenderAndParseTrackingComment_RoundTrip(t *testing.T) {
 	}
 
 	// Verify it contains expected elements
-	if !strings.Contains(body, "## 🤖 Code Review Tracking") {
-		t.Error("comment should contain header")
+	if !strings.Contains(body, "## 🤖 Code Review Completed") {
+		t.Error("comment should contain completed header")
 	}
 	if !strings.Contains(body, "| 🔴 Open | 1 |") {
 		t.Error("comment should show 1 open finding")
@@ -282,6 +282,96 @@ func TestParseTrackingComment_InvalidStatus(t *testing.T) {
 		if f.Status != domain.FindingStatusOpen {
 			t.Errorf("invalid status should default to open, got %s", f.Status)
 		}
+	}
+}
+
+func TestRenderTrackingComment_InProgress(t *testing.T) {
+	now := time.Now()
+	state := review.NewTrackingStateInProgress(review.ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   1,
+		HeadSHA:    "abc123def456",
+	}, now)
+
+	body, err := RenderTrackingComment(state)
+	if err != nil {
+		t.Fatalf("RenderTrackingComment() error = %v", err)
+	}
+
+	if !IsTrackingComment(body) {
+		t.Error("rendered comment should be identifiable")
+	}
+
+	// Should show in-progress header
+	if !strings.Contains(body, "## 🔄 Code Review In Progress") {
+		t.Error("should show in-progress header")
+	}
+
+	// Should show commit being reviewed (short SHA)
+	if !strings.Contains(body, "abc123d") {
+		t.Error("should show short SHA of commit being reviewed")
+	}
+
+	// Should NOT show status table
+	if strings.Contains(body, "| 🔴 Open |") {
+		t.Error("in-progress should not show status table")
+	}
+}
+
+func TestRenderTrackingComment_InProgressRoundTrip(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	originalState := review.NewTrackingStateInProgress(review.ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   42,
+		HeadSHA:    "abc123",
+		BaseSHA:    "def456",
+		Branch:     "feature",
+	}, now)
+
+	// Render
+	body, err := RenderTrackingComment(originalState)
+	if err != nil {
+		t.Fatalf("RenderTrackingComment() error = %v", err)
+	}
+
+	// Parse back
+	parsedState, err := ParseTrackingComment(body)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment() error = %v", err)
+	}
+
+	// Verify round-trip preserves ReviewStatus
+	if parsedState.ReviewStatus != domain.ReviewStatusInProgress {
+		t.Errorf("ReviewStatus = %s, want %s", parsedState.ReviewStatus, domain.ReviewStatusInProgress)
+	}
+	if parsedState.Target.PRNumber != originalState.Target.PRNumber {
+		t.Errorf("PRNumber = %d, want %d", parsedState.Target.PRNumber, originalState.Target.PRNumber)
+	}
+}
+
+func TestParseTrackingComment_BackwardCompatibility(t *testing.T) {
+	// Old comments without review_status field should default to "completed"
+	body := `<!-- CODE_REVIEWER_TRACKING_V1 -->
+<!-- TRACKING_METADATA
+{
+  "version": 1,
+  "repository": "owner/repo",
+  "pr_number": 1,
+  "head_sha": "abc123",
+  "reviewed_commits": [],
+  "findings": [],
+  "last_updated": "2024-01-01T00:00:00Z"
+}
+-->`
+
+	state, err := ParseTrackingComment(body)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment() error = %v", err)
+	}
+
+	// Should default to completed for backward compatibility
+	if state.ReviewStatus != domain.ReviewStatusCompleted {
+		t.Errorf("ReviewStatus = %s, want %s (backward compatibility)", state.ReviewStatus, domain.ReviewStatusCompleted)
 	}
 }
 

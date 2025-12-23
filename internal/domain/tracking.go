@@ -31,6 +31,26 @@ func (s FindingStatus) IsValid() bool {
 	}
 }
 
+// ReviewStatus represents the lifecycle state of a review run.
+type ReviewStatus string
+
+const (
+	// ReviewStatusInProgress indicates the review is currently running.
+	ReviewStatusInProgress ReviewStatus = "in_progress"
+	// ReviewStatusCompleted indicates the review finished successfully.
+	ReviewStatusCompleted ReviewStatus = "completed"
+)
+
+// IsValid returns true if the review status is a recognized value.
+func (s ReviewStatus) IsValid() bool {
+	switch s {
+	case ReviewStatusInProgress, ReviewStatusCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
 // FindingFingerprint uniquely identifies a finding across reviews.
 // It's stable across line number changes if the code intent remains the same.
 type FindingFingerprint string

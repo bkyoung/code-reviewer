@@ -65,15 +65,33 @@ type TrackingState struct {
 
 	// LastUpdated is the timestamp of the last state update.
 	LastUpdated time.Time
+
+	// ReviewStatus indicates the lifecycle state of the current review.
+	// Use ReviewStatusInProgress when the review is running, ReviewStatusCompleted when done.
+	ReviewStatus domain.ReviewStatus
 }
 
 // NewTrackingState creates a new empty tracking state for a target.
+// The default ReviewStatus is Completed for backward compatibility.
 func NewTrackingState(target ReviewTarget) TrackingState {
 	return TrackingState{
 		Target:          target,
 		ReviewedCommits: []string{},
 		Findings:        make(map[domain.FindingFingerprint]domain.TrackedFinding),
 		LastUpdated:     time.Time{},
+		ReviewStatus:    domain.ReviewStatusCompleted,
+	}
+}
+
+// NewTrackingStateInProgress creates a tracking state for a review that is currently running.
+// This is used to post a "review in progress" comment before the LLM analysis begins.
+func NewTrackingStateInProgress(target ReviewTarget, timestamp time.Time) TrackingState {
+	return TrackingState{
+		Target:          target,
+		ReviewedCommits: []string{},
+		Findings:        make(map[domain.FindingFingerprint]domain.TrackedFinding),
+		LastUpdated:     timestamp,
+		ReviewStatus:    domain.ReviewStatusInProgress,
 	}
 }
 
