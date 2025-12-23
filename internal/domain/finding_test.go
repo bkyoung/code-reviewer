@@ -77,9 +77,14 @@ func TestFinding_Fingerprint_Deterministic(t *testing.T) {
 		Evidence:    true,
 	})
 
-	if finding1.Fingerprint() != finding2.Fingerprint() {
+	fp := finding1.Fingerprint()
+	if fp == "" {
+		t.Error("fingerprint should not be empty")
+	}
+
+	if fp != finding2.Fingerprint() {
 		t.Errorf("fingerprints should be deterministic: %s != %s",
-			finding1.Fingerprint(), finding2.Fingerprint())
+			fp, finding2.Fingerprint())
 	}
 }
 
@@ -194,5 +199,80 @@ func TestFinding_Fingerprint_DifferentForDifferentSeverities(t *testing.T) {
 
 	if finding1.Fingerprint() == finding2.Fingerprint() {
 		t.Error("fingerprints should differ for different severities")
+	}
+}
+
+func TestFinding_Fingerprint_DifferentForDifferentDescriptions(t *testing.T) {
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk in user input",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "XSS vulnerability in output encoding", // Different description
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() == finding2.Fingerprint() {
+		t.Error("fingerprints should differ for different descriptions")
+	}
+}
+
+func TestFinding_Fingerprint_ExcludesNonIdentityFields(t *testing.T) {
+	// Fingerprint should only include: file, category, severity, description prefix.
+	// It should NOT include: Suggestion, Evidence, LineStart, LineEnd.
+	base := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	// Different Suggestion - fingerprint should be the same
+	differentSuggestion := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Completely different suggestion text",
+		Evidence:    true,
+	})
+
+	if base.Fingerprint() != differentSuggestion.Fingerprint() {
+		t.Error("fingerprint should not change when only Suggestion differs")
+	}
+
+	// Different Evidence - fingerprint should be the same
+	differentEvidence := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    false, // Different Evidence
+	})
+
+	if base.Fingerprint() != differentEvidence.Fingerprint() {
+		t.Error("fingerprint should not change when only Evidence differs")
 	}
 }
