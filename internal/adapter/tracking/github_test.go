@@ -448,3 +448,51 @@ func TestValidatePathSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestParseNextPageURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		linkHeader string
+		want       string
+	}{
+		{
+			name:       "empty header",
+			linkHeader: "",
+			want:       "",
+		},
+		{
+			name:       "next link only",
+			linkHeader: `<https://api.github.com/repos/owner/repo/issues/1/comments?page=2>; rel="next"`,
+			want:       "https://api.github.com/repos/owner/repo/issues/1/comments?page=2",
+		},
+		{
+			name:       "next and last links",
+			linkHeader: `<https://api.github.com/repos/owner/repo/issues/1/comments?page=2>; rel="next", <https://api.github.com/repos/owner/repo/issues/1/comments?page=5>; rel="last"`,
+			want:       "https://api.github.com/repos/owner/repo/issues/1/comments?page=2",
+		},
+		{
+			name:       "first prev next last",
+			linkHeader: `<https://api.github.com/repos/owner/repo/issues/1/comments?page=1>; rel="first", <https://api.github.com/repos/owner/repo/issues/1/comments?page=2>; rel="prev", <https://api.github.com/repos/owner/repo/issues/1/comments?page=4>; rel="next", <https://api.github.com/repos/owner/repo/issues/1/comments?page=5>; rel="last"`,
+			want:       "https://api.github.com/repos/owner/repo/issues/1/comments?page=4",
+		},
+		{
+			name:       "last page - no next",
+			linkHeader: `<https://api.github.com/repos/owner/repo/issues/1/comments?page=1>; rel="first", <https://api.github.com/repos/owner/repo/issues/1/comments?page=4>; rel="prev"`,
+			want:       "",
+		},
+		{
+			name:       "malformed - no rel",
+			linkHeader: `<https://api.github.com/repos/owner/repo/issues/1/comments?page=2>`,
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseNextPageURL(tt.linkHeader)
+			if got != tt.want {
+				t.Errorf("parseNextPageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

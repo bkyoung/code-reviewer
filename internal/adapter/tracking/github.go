@@ -86,8 +86,18 @@ func (s *GitHubStore) Load(ctx context.Context, target review.ReviewTarget) (rev
 		return review.TrackingState{}, fmt.Errorf("failed to parse tracking comment: %w", err)
 	}
 
-	// Update target with current values (in case they've changed)
-	state.Target = target
+	// Selectively update target fields that reflect current state,
+	// while preserving stored metadata like Repository and PRNumber
+	// HeadSHA changes with each new commit, so use current value
+	state.Target.HeadSHA = target.HeadSHA
+	// BaseSHA may change if the base branch is updated
+	if target.BaseSHA != "" {
+		state.Target.BaseSHA = target.BaseSHA
+	}
+	// Branch may change if PR is retargeted
+	if target.Branch != "" {
+		state.Target.Branch = target.Branch
+	}
 
 	return state, nil
 }
@@ -170,6 +180,7 @@ type issueComment struct {
 
 // findTrackingComment searches for the tracking comment on a PR.
 // Returns nil if no tracking comment exists.
+// Implements pagination to handle PRs with more than 100 comments.
 func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo string, prNumber int) (*issueComment, error) {
 	// Validate inputs
 	if err := validatePathSegment(owner, "owner"); err != nil {
@@ -180,24 +191,30 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 	}
 
 	// GitHub treats PRs as issues for comments API
-	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100",
+	// Use sort=created&direction=desc to find most recent tracking comment first
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&sort=created&direction=desc",
 		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
 
-	respBody, err := s.doRequest(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var comments []issueComment
-	if err := json.Unmarshal(respBody, &comments); err != nil {
-		return nil, fmt.Errorf("failed to parse comments: %w", err)
-	}
-
-	// Find the tracking comment
-	for _, c := range comments {
-		if IsTrackingComment(c.Body) {
-			return &c, nil
+	// Paginate through all comments until we find the tracking comment
+	for apiURL != "" {
+		respBody, nextURL, err := s.doRequestWithPagination(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return nil, err
 		}
+
+		var comments []issueComment
+		if err := json.Unmarshal(respBody, &comments); err != nil {
+			return nil, fmt.Errorf("failed to parse comments: %w", err)
+		}
+
+		// Find the tracking comment (first match is most recent due to desc sort)
+		for i := range comments {
+			if IsTrackingComment(comments[i].Body) {
+				return &comments[i], nil
+			}
+		}
+
+		apiURL = nextURL
 	}
 
 	return nil, nil
@@ -276,11 +293,16 @@ func (s *GitHubStore) setHeaders(req *http.Request) {
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 }
 
-// doRequest executes an HTTP request with retry logic and error handling.
-// It returns the response body for successful requests, or an error.
-// For requests without a body (like DELETE returning 204), respBody may be nil.
-func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body []byte) (respBody []byte, err error) {
-	var resp *http.Response
+// requestResult holds the result of an HTTP request attempt.
+type requestResult struct {
+	body       []byte
+	statusCode int
+	linkHeader string
+}
+
+// doRequestWithPagination executes an HTTP request and returns the next page URL if present.
+func (s *GitHubStore) doRequestWithPagination(ctx context.Context, method, apiURL string, body []byte) (respBody []byte, nextURL string, err error) {
+	var result *requestResult
 
 	err = llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
 		var bodyReader io.Reader
@@ -303,8 +325,7 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 			req.Header.Set("Content-Type", "application/json")
 		}
 
-		var callErr error
-		resp, callErr = s.httpClient.Do(req)
+		resp, callErr := s.httpClient.Do(req)
 		if callErr != nil {
 			return &llmhttp.Error{
 				Type:      llmhttp.ErrTypeTimeout,
@@ -313,13 +334,138 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 				Provider:  providerName,
 			}
 		}
+		defer resp.Body.Close()
 
 		if resp.StatusCode >= 400 {
 			bodyBytes, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
 			return mapHTTPError(resp.StatusCode, bodyBytes)
 		}
 
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeUnknown,
+				Message:   fmt.Sprintf("failed to read response body: %v", readErr),
+				Retryable: false,
+				Provider:  providerName,
+			}
+		}
+
+		result = &requestResult{
+			body:       respBody,
+			statusCode: resp.StatusCode,
+			linkHeader: resp.Header.Get("Link"),
+		}
+		return nil
+	}, s.retryConf)
+
+	if err != nil {
+		return nil, "", err
+	}
+
+	if result == nil {
+		return nil, "", fmt.Errorf("no response after retries")
+	}
+
+	// Parse Link header for next page
+	nextURL = parseNextPageURL(result.linkHeader)
+
+	return result.body, nextURL, nil
+}
+
+// parseNextPageURL extracts the "next" URL from a GitHub Link header.
+// Link header format: <url>; rel="next", <url>; rel="last"
+func parseNextPageURL(linkHeader string) string {
+	if linkHeader == "" {
+		return ""
+	}
+
+	// Split by comma to get individual links
+	links := strings.Split(linkHeader, ",")
+	for _, link := range links {
+		// Each link is: <url>; rel="type"
+		parts := strings.Split(strings.TrimSpace(link), ";")
+		if len(parts) < 2 {
+			continue
+		}
+
+		// Check if this is the "next" link
+		relPart := strings.TrimSpace(parts[1])
+		if relPart == `rel="next"` {
+			// Extract URL from <url>
+			urlPart := strings.TrimSpace(parts[0])
+			if strings.HasPrefix(urlPart, "<") && strings.HasSuffix(urlPart, ">") {
+				return urlPart[1 : len(urlPart)-1]
+			}
+		}
+	}
+
+	return ""
+}
+
+// doRequest executes an HTTP request with retry logic and error handling.
+// It returns the response body for successful requests, or an error.
+// For requests without a body (like DELETE returning 204), respBody may be nil.
+func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body []byte) ([]byte, error) {
+	var result *requestResult
+
+	err := llmhttp.RetryWithBackoff(ctx, func(ctx context.Context) error {
+		var bodyReader io.Reader
+		if body != nil {
+			bodyReader = bytes.NewReader(body)
+		}
+
+		req, reqErr := http.NewRequestWithContext(ctx, method, apiURL, bodyReader)
+		if reqErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeUnknown,
+				Message:   reqErr.Error(),
+				Retryable: false,
+				Provider:  providerName,
+			}
+		}
+
+		s.setHeaders(req)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, callErr := s.httpClient.Do(req)
+		if callErr != nil {
+			return &llmhttp.Error{
+				Type:      llmhttp.ErrTypeTimeout,
+				Message:   callErr.Error(),
+				Retryable: true,
+				Provider:  providerName,
+			}
+		}
+		// Always close response body within this attempt
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return mapHTTPError(resp.StatusCode, bodyBytes)
+		}
+
+		// Read successful response body
+		var respBody []byte
+		if resp.StatusCode != http.StatusNoContent {
+			var readErr error
+			respBody, readErr = io.ReadAll(resp.Body)
+			if readErr != nil {
+				return &llmhttp.Error{
+					Type:      llmhttp.ErrTypeUnknown,
+					Message:   fmt.Sprintf("failed to read response body: %v", readErr),
+					Retryable: false,
+					Provider:  providerName,
+				}
+			}
+		}
+
+		result = &requestResult{
+			body:       respBody,
+			statusCode: resp.StatusCode,
+		}
 		return nil
 	}, s.retryConf)
 
@@ -327,19 +473,11 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 		return nil, err
 	}
 
-	// Read response body if present
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-		// Only read body for non-204 responses
-		if resp.StatusCode != http.StatusNoContent {
-			respBody, err = io.ReadAll(resp.Body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read response body: %w", err)
-			}
-		}
+	if result == nil {
+		return nil, fmt.Errorf("no response after retries")
 	}
 
-	return respBody, nil
+	return result.body, nil
 }
 
 // parseRepository splits "owner/repo" into owner and repo.
