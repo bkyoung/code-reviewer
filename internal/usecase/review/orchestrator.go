@@ -713,13 +713,73 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 
 	// Post review to GitHub if enabled
 	var githubResult *GitHubPostResult
+	var reconciledState *TrackingState // Will hold updated state from reconciliation
 	if req.PostToGitHub && o.deps.GitHubPoster != nil {
+		// Determine which findings to post
+		// If tracking is enabled, apply deduplication to only post NEW findings
+		findingsToPost := mergedReview.Findings
+
+		if o.deps.TrackingStore != nil && req.PRNumber > 0 && req.CommitSHA != "" {
+			// Single timestamp for all operations in this reconciliation cycle
+			reconcileTime := time.Now()
+
+			// ReconciliationResult is discarded (_) because logging happens
+			// inside reconcileAndFilterFindings; callers only need filtered findings
+			newFindings, updatedState, _ := o.reconcileAndFilterFindings(
+				ctx,
+				trackingState,
+				mergedReview.Findings,
+				diff,
+				req.CommitSHA,
+				reconcileTime,
+			)
+			findingsToPost = newFindings
+
+			// Store the reconciled state for later persistence
+			// For first review (trackingState == nil), initialize a new state
+			if trackingState == nil && len(mergedReview.Findings) > 0 {
+				target := ReviewTarget{
+					Repository: fmt.Sprintf("%s/%s", req.GitHubOwner, req.GitHubRepo),
+					PRNumber:   req.PRNumber,
+					Branch:     req.TargetRef,
+					BaseSHA:    req.BaseRef,
+					HeadSHA:    req.CommitSHA,
+				}
+				newState := NewTrackingState(target)
+				// Add all findings as tracked (first review = all are new)
+				for _, f := range mergedReview.Findings {
+					tracked, err := domain.NewTrackedFindingFromFinding(f, reconcileTime, req.CommitSHA)
+					if err != nil {
+						continue // Skip invalid findings
+					}
+					newState.Findings[tracked.Fingerprint] = tracked
+				}
+				reconciledState = &newState
+			} else if updatedState.Target.Repository != "" {
+				// Non-empty Repository indicates reconciliation produced valid state
+				reconciledState = &updatedState
+			}
+
+			// TODO(#60): Detect status updates from PR comment replies and reactions
+			// Before reconciliation, scan for user replies that indicate status changes
+			// (e.g., "acknowledged", "won't fix", "disputed") and update finding statuses
+		}
+
+		// Create review with potentially filtered findings for posting
+		reviewToPost := domain.Review{
+			ProviderName: mergedReview.ProviderName,
+			ModelName:    mergedReview.ModelName,
+			Summary:      mergedReview.Summary,
+			Findings:     findingsToPost, // Only NEW findings get inline comments
+			Cost:         mergedReview.Cost,
+		}
+
 		result, err := o.deps.GitHubPoster.PostReview(ctx, GitHubPostRequest{
 			Owner:               req.GitHubOwner,
 			Repo:                req.GitHubRepo,
 			PRNumber:            req.PRNumber,
 			CommitSHA:           req.CommitSHA,
-			Review:              mergedReview,
+			Review:              reviewToPost,
 			Diff:                diff,
 			ActionOnCritical:    req.ActionOnCritical,
 			ActionOnHigh:        req.ActionOnHigh,
@@ -758,22 +818,28 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	}
 
 	// Save tracking state after successful review
-	if trackingState != nil && o.deps.TrackingStore != nil {
-		if req.CommitSHA == "" {
-			// Warn that tracking will not be updated due to missing CommitSHA
-			if o.deps.Logger != nil {
-				o.deps.Logger.LogWarning(ctx, "skipping tracking state update: CommitSHA is empty", map[string]interface{}{
-					"prNumber": req.PRNumber,
-				})
-			} else {
-				log.Printf("warning: skipping tracking state update: CommitSHA is empty (PR #%d)\n", req.PRNumber)
-			}
-		} else {
-			// Update the tracking state with the new reviewed commit
-			trackingState.ReviewedCommits = append(trackingState.ReviewedCommits, req.CommitSHA)
-			trackingState.LastUpdated = time.Now()
+	// Priority: use reconciled state (from deduplication) if available, else original tracking state
+	if o.deps.TrackingStore != nil && req.PRNumber > 0 && req.CommitSHA != "" {
+		var stateToSave *TrackingState
 
-			if err := o.deps.TrackingStore.Save(ctx, *trackingState); err != nil {
+		if reconciledState != nil {
+			// Use the reconciled state which includes new findings
+			stateToSave = reconciledState
+		} else if trackingState != nil {
+			// Fallback to original tracking state (non-reconciliation path)
+			stateToSave = trackingState
+		}
+
+		if stateToSave != nil {
+			// Add the current commit to reviewed commits
+			stateToSave.ReviewedCommits = append(stateToSave.ReviewedCommits, req.CommitSHA)
+			stateToSave.LastUpdated = time.Now()
+
+			// TODO(#61): Use collapsible sections in tracking comment for better UX
+			// The tracking comment should use <details> tags to collapse the findings
+			// summary and make the PR conversation cleaner
+
+			if err := o.deps.TrackingStore.Save(ctx, *stateToSave); err != nil {
 				// Log warning but don't fail the review
 				if o.deps.Logger != nil {
 					o.deps.Logger.LogWarning(ctx, "failed to save tracking state", map[string]interface{}{
@@ -789,7 +855,8 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 					o.deps.Logger.LogInfo(ctx, "saved tracking state", map[string]interface{}{
 						"prNumber":        req.PRNumber,
 						"commitSHA":       req.CommitSHA,
-						"reviewedCommits": len(trackingState.ReviewedCommits),
+						"reviewedCommits": len(stateToSave.ReviewedCommits),
+						"totalFindings":   len(stateToSave.Findings),
 					})
 				}
 			}
@@ -849,4 +916,83 @@ func FilterBinaryFiles(diff domain.Diff) (textDiff domain.Diff, binaryFiles []do
 	}
 
 	return textDiff, binaryFiles
+}
+
+// reconcileAndFilterFindings applies deduplication logic to findings and returns
+// only genuinely new findings for posting, along with the updated tracking state.
+//
+// This function:
+// 1. Extracts changed file paths from the diff
+// 2. Calls ReconcileFindings to categorize findings (new, updated, resolved)
+// 3. Creates TrackedFindings for genuinely new findings
+// 4. Returns the new findings for inline comments and the updated state for persistence
+//
+// If trackingState is nil (first review), all findings are considered new.
+func (o *Orchestrator) reconcileAndFilterFindings(
+	ctx context.Context,
+	trackingState *TrackingState,
+	allFindings []domain.Finding,
+	diff domain.Diff,
+	commitSHA string,
+	timestamp time.Time,
+) (newFindings []domain.Finding, updatedState TrackingState, result ReconciliationResult) {
+	// Handle first review (no tracking state) - all findings are new
+	if trackingState == nil {
+		return allFindings, TrackingState{}, ReconciliationResult{New: allFindings}
+	}
+
+	// Extract changed file paths from diff for auto-resolve scope
+	changedFiles := make([]string, 0, len(diff.Files))
+	for _, file := range diff.Files {
+		changedFiles = append(changedFiles, file.Path)
+	}
+
+	// Reconcile findings (deduplication + auto-resolve)
+	updatedState, result = ReconcileFindings(
+		*trackingState,
+		allFindings,
+		changedFiles,
+		commitSHA,
+		timestamp,
+	)
+
+	// Create TrackedFindings for genuinely new findings and add to state
+	for _, f := range result.New {
+		tracked, err := domain.NewTrackedFindingFromFinding(f, timestamp, commitSHA)
+		if err != nil {
+			// Log but continue - don't fail entire review for one bad finding
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to create tracked finding", map[string]interface{}{
+					"file":  f.File,
+					"line":  f.LineStart,
+					"error": err.Error(),
+				})
+			} else {
+				log.Printf("warning: failed to create tracked finding: %v\n", err)
+			}
+			continue
+		}
+		updatedState.Findings[tracked.Fingerprint] = tracked
+	}
+
+	// Log reconciliation results
+	if o.deps.Logger != nil {
+		o.deps.Logger.LogInfo(ctx, "reconciled findings", map[string]interface{}{
+			"total":              len(allFindings),
+			"new":                len(result.New),
+			"updated":            len(result.Updated),
+			"resolved":           len(result.Resolved),
+			"redetectedResolved": len(result.RedetectedResolved),
+			"errors":             len(result.Errors),
+		})
+
+		// Warn if resolved findings were re-detected
+		if len(result.RedetectedResolved) > 0 {
+			o.deps.Logger.LogWarning(ctx, "resolved findings re-detected (staying resolved)", map[string]interface{}{
+				"count": len(result.RedetectedResolved),
+			})
+		}
+	}
+
+	return result.New, updatedState, result
 }

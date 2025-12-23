@@ -26,6 +26,7 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/adapter/output/sarif"
 	storeAdapter "github.com/bkyoung/code-reviewer/internal/adapter/store"
 	"github.com/bkyoung/code-reviewer/internal/adapter/store/sqlite"
+	"github.com/bkyoung/code-reviewer/internal/adapter/tracking"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/determinism"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -173,12 +174,16 @@ func run() error {
 		}
 	}
 
-	// Create GitHub poster if token is available
+	// Create GitHub poster and tracking store if token is available
 	var githubPoster review.GitHubPoster
+	var trackingStore review.TrackingStore
 	if githubToken := os.Getenv("GITHUB_TOKEN"); githubToken != "" {
 		githubClient := githubadapter.NewClient(githubToken)
 		reviewPoster := usecasegithub.NewReviewPoster(githubClient)
 		githubPoster = &githubPosterAdapter{poster: reviewPoster}
+
+		// Enable finding deduplication and incremental reviews
+		trackingStore = tracking.NewGitHubStore(githubToken)
 	}
 
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
@@ -196,6 +201,7 @@ func run() error {
 		PlanningAgent: planningAgent,
 		RepoDir:       repoDir,
 		GitHubPoster:  githubPoster,
+		TrackingStore: trackingStore,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
