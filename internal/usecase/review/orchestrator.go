@@ -723,8 +723,10 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			// Single timestamp for all operations in this reconciliation cycle
 			reconcileTime := time.Now()
 
-			// ReconciliationResult is discarded (_) because logging happens
-			// inside reconcileAndFilterFindings; callers only need filtered findings
+			// Detect first review: nil state OR empty Findings map (handles empty-but-non-nil case)
+			isFirstReview := trackingState == nil || len(trackingState.Findings) == 0
+
+			// ReconciliationResult errors are logged inside reconcileAndFilterFindings
 			newFindings, updatedState, _ := o.reconcileAndFilterFindings(
 				ctx,
 				trackingState,
@@ -736,8 +738,8 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			findingsToPost = newFindings
 
 			// Store the reconciled state for later persistence
-			// For first review (trackingState == nil), initialize a new state
-			if trackingState == nil && len(mergedReview.Findings) > 0 {
+			// For first review (no prior findings), initialize a new state with all findings
+			if isFirstReview && len(mergedReview.Findings) > 0 {
 				target := ReviewTarget{
 					Repository: fmt.Sprintf("%s/%s", req.GitHubOwner, req.GitHubRepo),
 					PRNumber:   req.PRNumber,
@@ -747,12 +749,27 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				}
 				newState := NewTrackingState(target)
 				// Add all findings as tracked (first review = all are new)
+				var skippedCount int
 				for _, f := range mergedReview.Findings {
 					tracked, err := domain.NewTrackedFindingFromFinding(f, reconcileTime, req.CommitSHA)
 					if err != nil {
-						continue // Skip invalid findings
+						skippedCount++
+						if o.deps.Logger != nil {
+							o.deps.Logger.LogWarning(ctx, "failed to track finding on first review", map[string]interface{}{
+								"file":  f.File,
+								"line":  f.LineStart,
+								"error": err.Error(),
+							})
+						}
+						continue
 					}
 					newState.Findings[tracked.Fingerprint] = tracked
+				}
+				if skippedCount > 0 && o.deps.Logger != nil {
+					o.deps.Logger.LogWarning(ctx, "some findings could not be tracked", map[string]interface{}{
+						"skipped": skippedCount,
+						"total":   len(mergedReview.Findings),
+					})
 				}
 				reconciledState = &newState
 			} else if updatedState.Target.Repository != "" {
@@ -831,8 +848,17 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		}
 
 		if stateToSave != nil {
-			// Add the current commit to reviewed commits
-			stateToSave.ReviewedCommits = append(stateToSave.ReviewedCommits, req.CommitSHA)
+			// Add the current commit to reviewed commits (deduplicate to prevent growth on re-runs)
+			commitAlreadyReviewed := false
+			for _, c := range stateToSave.ReviewedCommits {
+				if c == req.CommitSHA {
+					commitAlreadyReviewed = true
+					break
+				}
+			}
+			if !commitAlreadyReviewed {
+				stateToSave.ReviewedCommits = append(stateToSave.ReviewedCommits, req.CommitSHA)
+			}
 			stateToSave.LastUpdated = time.Now()
 
 			// TODO(#61): Use collapsible sections in tracking comment for better UX
@@ -859,6 +885,14 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 						"totalFindings":   len(stateToSave.Findings),
 					})
 				}
+			}
+		} else {
+			// No state to save - this can happen if no findings were generated
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogInfo(ctx, "tracking state save skipped: no state to save", map[string]interface{}{
+					"reconciledStateNil": reconciledState == nil,
+					"trackingStateNil":   trackingState == nil,
+				})
 			}
 		}
 	}
@@ -990,6 +1024,13 @@ func (o *Orchestrator) reconcileAndFilterFindings(
 		if len(result.RedetectedResolved) > 0 {
 			o.deps.Logger.LogWarning(ctx, "resolved findings re-detected (staying resolved)", map[string]interface{}{
 				"count": len(result.RedetectedResolved),
+			})
+		}
+
+		// Log individual reconciliation errors for debugging
+		for _, err := range result.Errors {
+			o.deps.Logger.LogWarning(ctx, "reconciliation error", map[string]interface{}{
+				"error": err.Error(),
 			})
 		}
 	}
