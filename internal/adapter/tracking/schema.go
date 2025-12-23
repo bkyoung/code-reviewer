@@ -107,14 +107,17 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 	activeCount := 0
 	resolvedCount := 0
 	acknowledgedCount := 0
+	disputedCount := 0
 	for _, f := range state.Findings {
 		switch f.Status {
 		case domain.FindingStatusOpen:
 			activeCount++
 		case domain.FindingStatusResolved:
 			resolvedCount++
-		case domain.FindingStatusAcknowledged, domain.FindingStatusDisputed:
+		case domain.FindingStatusAcknowledged:
 			acknowledgedCount++
+		case domain.FindingStatusDisputed:
+			disputedCount++
 		}
 	}
 
@@ -123,6 +126,7 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 	sb.WriteString(fmt.Sprintf("| 🔴 Open | %d |\n", activeCount))
 	sb.WriteString(fmt.Sprintf("| ✅ Resolved | %d |\n", resolvedCount))
 	sb.WriteString(fmt.Sprintf("| 💬 Acknowledged | %d |\n", acknowledgedCount))
+	sb.WriteString(fmt.Sprintf("| ⚠️ Disputed | %d |\n", disputedCount))
 	sb.WriteString("\n")
 
 	// Reviewed commits

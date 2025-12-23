@@ -172,6 +172,7 @@ func TestRenderTrackingComment_MultipleStatuses(t *testing.T) {
 	openFinding := createTestTrackedFinding(t, "open.go", domain.FindingStatusOpen, now)
 	resolvedFinding := createTestTrackedFinding(t, "resolved.go", domain.FindingStatusResolved, now)
 	acknowledgedFinding := createTestTrackedFinding(t, "ack.go", domain.FindingStatusAcknowledged, now)
+	disputedFinding := createTestTrackedFinding(t, "disputed.go", domain.FindingStatusDisputed, now)
 
 	state := review.TrackingState{
 		Target: review.ReviewTarget{
@@ -183,6 +184,7 @@ func TestRenderTrackingComment_MultipleStatuses(t *testing.T) {
 			openFinding.Fingerprint:         openFinding,
 			resolvedFinding.Fingerprint:     resolvedFinding,
 			acknowledgedFinding.Fingerprint: acknowledgedFinding,
+			disputedFinding.Fingerprint:     disputedFinding,
 		},
 	}
 
@@ -199,6 +201,9 @@ func TestRenderTrackingComment_MultipleStatuses(t *testing.T) {
 	}
 	if !strings.Contains(body, "| 💬 Acknowledged | 1 |") {
 		t.Error("should show 1 acknowledged finding")
+	}
+	if !strings.Contains(body, "| ⚠️ Disputed | 1 |") {
+		t.Error("should show 1 disputed finding")
 	}
 }
 

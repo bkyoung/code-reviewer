@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,7 +24,18 @@ const (
 	defaultMaxRetries     = 3
 	defaultInitialBackoff = 2 * time.Second
 	providerName          = "github-tracking"
+
+	// maxPaginationPages limits how many pages we'll fetch when searching for
+	// the tracking comment. This prevents DoS on PRs with thousands of comments.
+	maxPaginationPages = 10 // 10 pages * 100 per page = 1000 comments max
 )
+
+// pathSegmentRegex validates that owner/repo names only contain safe characters.
+// GitHub allows alphanumeric, hyphens, underscores, and dots (but not leading dots).
+var pathSegmentRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// pathTraversalPattern detects path traversal attempts.
+var pathTraversalPattern = regexp.MustCompile(`\.\.`)
 
 // GitHubStore implements TrackingStore using GitHub PR comments.
 // State is persisted as a special comment on the PR with embedded JSON metadata.
@@ -182,7 +194,8 @@ type issueComment struct {
 
 // findTrackingComment searches for the tracking comment on a PR.
 // Returns nil if no tracking comment exists.
-// Implements pagination to handle PRs with more than 100 comments.
+// Implements pagination to handle PRs with more than 100 comments,
+// with a page limit to prevent DoS on very active PRs.
 func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo string, prNumber int) (*issueComment, error) {
 	// Validate inputs
 	if err := validatePathSegment(owner, "owner"); err != nil {
@@ -197,8 +210,9 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&sort=created&direction=desc",
 		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
 
-	// Paginate through all comments until we find the tracking comment
-	for apiURL != "" {
+	// Paginate through comments until we find the tracking comment
+	// Limit pages to prevent DoS on PRs with thousands of comments
+	for page := 0; apiURL != "" && page < maxPaginationPages; page++ {
 		respBody, nextURL, err := s.doRequestWithPagination(ctx, "GET", apiURL, nil)
 		if err != nil {
 			return nil, err
@@ -216,10 +230,31 @@ func (s *GitHubStore) findTrackingComment(ctx context.Context, owner, repo strin
 			}
 		}
 
+		// Validate next URL before following (SSRF protection)
+		if nextURL != "" && !s.isValidPaginationURL(nextURL) {
+			return nil, fmt.Errorf("invalid pagination URL: host mismatch")
+		}
 		apiURL = nextURL
 	}
 
 	return nil, nil
+}
+
+// isValidPaginationURL checks that a pagination URL is safe to follow.
+// It must match the configured baseURL's host to prevent SSRF attacks.
+func (s *GitHubStore) isValidPaginationURL(nextURL string) bool {
+	next, err := url.Parse(nextURL)
+	if err != nil {
+		return false
+	}
+
+	base, err := url.Parse(s.baseURL)
+	if err != nil {
+		return false
+	}
+
+	// Require same scheme and host
+	return next.Scheme == base.Scheme && next.Host == base.Host
 }
 
 // createComment creates a new issue comment.
@@ -485,24 +520,29 @@ func (s *GitHubStore) doRequest(ctx context.Context, method, apiURL string, body
 }
 
 // parseRepository splits "owner/repo" into owner and repo.
+// Rejects repositories with more than one slash (e.g., "owner/repo/extra").
 func parseRepository(repository string) (owner, repo string, err error) {
-	parts := strings.SplitN(repository, "/", 2)
+	parts := strings.Split(repository, "/")
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid repository format: %q (expected owner/repo)", repository)
+		return "", "", fmt.Errorf("invalid repository format: %q (expected exactly owner/repo)", repository)
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repository format: %q (owner and repo must not be empty)", repository)
 	}
 	return parts[0], parts[1], nil
 }
 
-// validatePathSegment validates that a path segment doesn't contain injection characters.
+// validatePathSegment validates that a path segment contains only safe characters.
+// Uses whitelist validation to prevent path traversal and injection attacks.
 func validatePathSegment(value, name string) error {
-	if strings.Contains(value, "..") {
-		return fmt.Errorf("invalid %s: must not contain '..'", name)
-	}
-	if strings.Contains(value, "/") {
-		return fmt.Errorf("invalid %s: must not contain '/'", name)
-	}
 	if value == "" {
 		return fmt.Errorf("invalid %s: must not be empty", name)
+	}
+	if pathTraversalPattern.MatchString(value) {
+		return fmt.Errorf("invalid %s: must not contain '..'", name)
+	}
+	if !pathSegmentRegex.MatchString(value) {
+		return fmt.Errorf("invalid %s: must contain only alphanumeric characters, hyphens, underscores, and dots (not leading)", name)
 	}
 	return nil
 }

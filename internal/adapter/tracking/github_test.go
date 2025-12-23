@@ -3,6 +3,7 @@ package tracking
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -396,9 +397,11 @@ func TestParseRepository(t *testing.T) {
 	}{
 		{"owner/repo", "owner", "repo", false},
 		{"my-org/my-repo", "my-org", "my-repo", false},
-		{"owner/repo/extra", "owner", "repo/extra", false}, // Only splits on first /
+		{"owner/repo/extra", "", "", true}, // Now rejects extra slashes
 		{"noslash", "", "", true},
 		{"", "", "", true},
+		{"/repo", "", "", true},  // Empty owner
+		{"owner/", "", "", true}, // Empty repo
 	}
 
 	for _, tt := range tests {
@@ -433,10 +436,17 @@ func TestValidatePathSegment(t *testing.T) {
 	}{
 		{"valid", "test", false},
 		{"valid-with-dash", "test", false},
+		{"valid_underscore", "test", false},
+		{"valid.dot", "test", false},
+		{"valid123", "test", false},
 		{"", "test", true},
 		{"has/slash", "test", true},
 		{"has..dots", "test", true},
 		{"..", "test", true},
+		{".leading-dot", "test", true},
+		{"-leading-dash", "test", true},
+		{"has spaces", "test", true},
+		{"has@symbol", "test", true},
 	}
 
 	for _, tt := range tests {
@@ -492,6 +502,137 @@ func TestParseNextPageURL(t *testing.T) {
 			got := parseNextPageURL(tt.linkHeader)
 			if got != tt.want {
 				t.Errorf("parseNextPageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitHubStore_Load_Pagination(t *testing.T) {
+	// Track which page we're on
+	pageCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pageCount++
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if pageCount == 1 {
+			// First page: no tracking comment, has next link
+			nextURL := "http://" + r.Host + "/repos/owner/repo/issues/123/comments?page=2"
+			w.Header().Set("Link", fmt.Sprintf(`<%s>; rel="next"`, nextURL))
+			json.NewEncoder(w).Encode([]issueComment{
+				{ID: 1, Body: "Regular comment 1"},
+				{ID: 2, Body: "Regular comment 2"},
+			})
+		} else if pageCount == 2 {
+			// Second page: has tracking comment
+			trackingBody, _ := RenderTrackingComment(review.TrackingState{
+				Target: review.ReviewTarget{
+					Repository: "owner/repo",
+					PRNumber:   123,
+					HeadSHA:    "abc123",
+				},
+				Findings: map[domain.FindingFingerprint]domain.TrackedFinding{},
+			})
+			json.NewEncoder(w).Encode([]issueComment{
+				{ID: 3, Body: "Regular comment 3"},
+				{ID: 4, Body: trackingBody},
+			})
+		}
+	}))
+	defer server.Close()
+
+	store := NewGitHubStore("test-token")
+	store.SetBaseURL(server.URL)
+
+	target := review.ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   123,
+		HeadSHA:    "def456",
+	}
+
+	state, err := store.Load(context.Background(), target)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Should have paginated to find the comment
+	if pageCount != 2 {
+		t.Errorf("expected 2 pages to be fetched, got %d", pageCount)
+	}
+
+	// Should have loaded the state
+	if state.Target.Repository != "owner/repo" {
+		t.Errorf("Repository = %s, want owner/repo", state.Target.Repository)
+	}
+}
+
+func TestGitHubStore_Load_PaginationSSRFProtection(t *testing.T) {
+	// Server that returns a Link header pointing to a different host
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Malicious next URL pointing to different host
+		w.Header().Set("Link", `<https://evil.com/steal-data>; rel="next"`)
+		json.NewEncoder(w).Encode([]issueComment{
+			{ID: 1, Body: "No tracking comment here"},
+		})
+	}))
+	defer server.Close()
+
+	store := NewGitHubStore("test-token")
+	store.SetBaseURL(server.URL)
+
+	target := review.ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   123,
+		HeadSHA:    "abc123",
+	}
+
+	_, err := store.Load(context.Background(), target)
+	if err == nil {
+		t.Error("expected error for SSRF attempt, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "host mismatch") {
+		t.Errorf("expected 'host mismatch' error, got: %v", err)
+	}
+}
+
+func TestIsValidPaginationURL(t *testing.T) {
+	store := NewGitHubStore("test-token")
+	store.SetBaseURL("https://api.github.com")
+
+	tests := []struct {
+		name    string
+		nextURL string
+		want    bool
+	}{
+		{
+			name:    "valid same host",
+			nextURL: "https://api.github.com/repos/owner/repo/issues/1/comments?page=2",
+			want:    true,
+		},
+		{
+			name:    "different host",
+			nextURL: "https://evil.com/steal",
+			want:    false,
+		},
+		{
+			name:    "different scheme",
+			nextURL: "http://api.github.com/repos/owner/repo/issues/1/comments?page=2",
+			want:    false,
+		},
+		{
+			name:    "invalid URL",
+			nextURL: "://invalid",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := store.isValidPaginationURL(tt.nextURL)
+			if got != tt.want {
+				t.Errorf("isValidPaginationURL(%q) = %v, want %v", tt.nextURL, got, tt.want)
 			}
 		})
 	}
