@@ -65,7 +65,7 @@ func TestRenderAndParseTrackingComment_RoundTrip(t *testing.T) {
 		Evidence:    true,
 	})
 
-	trackedFinding, err := domain.NewTrackedFindingFromFinding(finding, now)
+	trackedFinding, err := domain.NewTrackedFindingFromFinding(finding, now, "abc123")
 	if err != nil {
 		t.Fatalf("failed to create tracked finding: %v", err)
 	}
