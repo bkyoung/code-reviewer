@@ -309,7 +309,7 @@ func TestTrackedFinding_UpdateStatus_Basic(t *testing.T) {
 
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "abc123")
 
-	if err := tf.UpdateStatus(FindingStatusResolved, "fixed", "commit-sha"); err != nil {
+	if err := tf.UpdateStatus(FindingStatusResolved, "fixed", "commit-sha", now); err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
 
@@ -333,7 +333,7 @@ func TestTrackedFinding_UpdateStatus_InvalidStatus(t *testing.T) {
 
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "abc123")
 
-	if err := tf.UpdateStatus(FindingStatus("invalid"), "", ""); err == nil {
+	if err := tf.UpdateStatus(FindingStatus("invalid"), "", "", time.Time{}); err == nil {
 		t.Error("expected error for invalid status")
 	}
 }
@@ -363,13 +363,20 @@ func TestTrackedFinding_IsActive(t *testing.T) {
 				Evidence:    false,
 			})
 
-			tf, _ := NewTrackedFinding(TrackedFindingInput{
+			input := TrackedFindingInput{
 				Finding:   finding,
 				Status:    tt.status,
 				FirstSeen: now,
 				LastSeen:  now,
 				SeenCount: 1,
-			})
+			}
+
+			// Resolved status requires ResolvedAt
+			if tt.status == FindingStatusResolved {
+				input.ResolvedAt = &now
+			}
+
+			tf, _ := NewTrackedFinding(input)
 
 			if got := tf.IsActive(); got != tt.want {
 				t.Errorf("IsActive() = %v, want %v", got, tt.want)
@@ -403,13 +410,20 @@ func TestTrackedFinding_IsResolved(t *testing.T) {
 				Evidence:    false,
 			})
 
-			tf, _ := NewTrackedFinding(TrackedFindingInput{
+			input := TrackedFindingInput{
 				Finding:   finding,
 				Status:    tt.status,
 				FirstSeen: now,
 				LastSeen:  now,
 				SeenCount: 1,
-			})
+			}
+
+			// Resolved status requires ResolvedAt
+			if tt.status == FindingStatusResolved {
+				input.ResolvedAt = &now
+			}
+
+			tf, _ := NewTrackedFinding(input)
 
 			if got := tf.IsResolved(); got != tt.want {
 				t.Errorf("IsResolved() = %v, want %v", got, tt.want)
@@ -591,7 +605,8 @@ func TestTrackedFinding_UpdateStatus_TransitionToResolved(t *testing.T) {
 
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "initial-commit")
 
-	err := tf.UpdateStatus(FindingStatusResolved, "Fixed the bug", "fix-commit")
+	resolvedTime := now.Add(time.Hour)
+	err := tf.UpdateStatus(FindingStatusResolved, "Fixed the bug", "fix-commit", resolvedTime)
 	if err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
@@ -643,7 +658,7 @@ func TestTrackedFinding_UpdateStatus_TransitionToOpen_ClearsFields(t *testing.T)
 	})
 
 	// Transition back to open (reopen)
-	err := tf.UpdateStatus(FindingStatusOpen, "", "")
+	err := tf.UpdateStatus(FindingStatusOpen, "", "", time.Time{})
 	if err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
@@ -670,6 +685,61 @@ func TestTrackedFinding_UpdateStatus_TransitionToOpen_ClearsFields(t *testing.T)
 	}
 }
 
+func TestTrackedFinding_UpdateStatus_TransitionToOpen_IgnoresParams(t *testing.T) {
+	now := time.Now()
+	finding := NewFinding(FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     10,
+		Severity:    "high",
+		Category:    "security",
+		Description: "Test",
+		Suggestion:  "",
+		Evidence:    false,
+	})
+
+	resolvedAt := now
+	resolvedIn := "fix-commit"
+
+	// Start with a resolved finding
+	tf, _ := NewTrackedFinding(TrackedFindingInput{
+		Finding:      finding,
+		Status:       FindingStatusResolved,
+		FirstSeen:    now.Add(-time.Hour),
+		LastSeen:     now,
+		SeenCount:    2,
+		StatusReason: "Previously fixed",
+		ReviewCommit: "initial-commit",
+		ResolvedAt:   &resolvedAt,
+		ResolvedIn:   &resolvedIn,
+	})
+
+	// Transition to open with non-empty params that should be ignored
+	err := tf.UpdateStatus(FindingStatusOpen, "this reason should be ignored", "ignored-commit", now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	// Status should be open
+	if tf.Status != FindingStatusOpen {
+		t.Errorf("Status = %v, want %v", tf.Status, FindingStatusOpen)
+	}
+
+	// StatusReason should be cleared (not set to "this reason should be ignored")
+	if tf.StatusReason != "" {
+		t.Errorf("StatusReason should be cleared regardless of input, got %q", tf.StatusReason)
+	}
+
+	// Resolution fields should be cleared
+	if tf.ResolvedAt != nil {
+		t.Errorf("ResolvedAt should be cleared, got %v", tf.ResolvedAt)
+	}
+
+	if tf.ResolvedIn != nil {
+		t.Errorf("ResolvedIn should be cleared, got %v", tf.ResolvedIn)
+	}
+}
+
 func TestTrackedFinding_UpdateStatus_TransitionToAcknowledged(t *testing.T) {
 	now := time.Now()
 	finding := NewFinding(FindingInput{
@@ -685,7 +755,7 @@ func TestTrackedFinding_UpdateStatus_TransitionToAcknowledged(t *testing.T) {
 
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "initial-commit")
 
-	err := tf.UpdateStatus(FindingStatusAcknowledged, "Intentional design choice", "")
+	err := tf.UpdateStatus(FindingStatusAcknowledged, "Intentional design choice", "", time.Time{})
 	if err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
@@ -723,7 +793,7 @@ func TestTrackedFinding_UpdateStatus_TransitionToDisputed(t *testing.T) {
 
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "initial-commit")
 
-	err := tf.UpdateStatus(FindingStatusDisputed, "False positive - pattern is safe", "")
+	err := tf.UpdateStatus(FindingStatusDisputed, "False positive - pattern is safe", "", time.Time{})
 	if err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
@@ -758,7 +828,7 @@ func TestTrackedFinding_UpdateStatus_ReasonMaxLength(t *testing.T) {
 		longReason[i] = 'a'
 	}
 
-	err := tf.UpdateStatus(FindingStatusAcknowledged, string(longReason), "")
+	err := tf.UpdateStatus(FindingStatusAcknowledged, string(longReason), "", time.Time{})
 	if err == nil {
 		t.Error("expected error for status reason exceeding 500 characters")
 	}
@@ -785,7 +855,8 @@ func TestTrackedFinding_UpdateStatus_ResolvedWithEmptyCommit(t *testing.T) {
 	tf, _ := NewTrackedFindingFromFinding(finding, now, "initial-commit")
 
 	// Transition to resolved without providing a commit SHA
-	err := tf.UpdateStatus(FindingStatusResolved, "Fixed", "")
+	resolvedTime := now.Add(time.Hour)
+	err := tf.UpdateStatus(FindingStatusResolved, "Fixed", "", resolvedTime)
 	if err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
@@ -830,16 +901,23 @@ func TestTrackedFinding_UpdateStatus_AllTransitionsAllowed(t *testing.T) {
 					Evidence:    false,
 				})
 
-				tf, _ := NewTrackedFinding(TrackedFindingInput{
+				input := TrackedFindingInput{
 					Finding:      finding,
 					Status:       fromStatus,
 					FirstSeen:    now,
 					LastSeen:     now,
 					SeenCount:    1,
 					ReviewCommit: "abc123",
-				})
+				}
 
-				err := tf.UpdateStatus(toStatus, "test reason", "commit-sha")
+				// Resolved status requires ResolvedAt
+				if fromStatus == FindingStatusResolved {
+					input.ResolvedAt = &now
+				}
+
+				tf, _ := NewTrackedFinding(input)
+
+				err := tf.UpdateStatus(toStatus, "test reason", "commit-sha", now)
 				if err != nil {
 					t.Errorf("Transition from %s to %s should be allowed, got error: %v",
 						fromStatus, toStatus, err)

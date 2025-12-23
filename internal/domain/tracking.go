@@ -134,6 +134,14 @@ func NewTrackedFinding(input TrackedFindingInput) (TrackedFinding, error) {
 			MaxStatusReasonLength, len(input.StatusReason))
 	}
 
+	// Validate consistency between status and resolution fields
+	if input.Status == FindingStatusResolved && input.ResolvedAt == nil {
+		return TrackedFinding{}, fmt.Errorf("resolved status requires ResolvedAt timestamp")
+	}
+	if input.Status != FindingStatusResolved && (input.ResolvedAt != nil || input.ResolvedIn != nil) {
+		return TrackedFinding{}, fmt.Errorf("ResolvedAt/ResolvedIn should only be set when status is resolved")
+	}
+
 	fingerprint := FingerprintFromFinding(input.Finding)
 
 	return TrackedFinding{
@@ -174,19 +182,20 @@ func (tf *TrackedFinding) MarkSeen(seenAt time.Time) {
 //
 // Transition behaviors:
 //   - Any → open: Clears StatusReason, ResolvedAt, and ResolvedIn (reopening).
-//     The reason and currentCommit parameters are ignored for this transition.
-//   - Any → resolved: Sets ResolvedAt to now, and ResolvedIn if currentCommit is provided
+//     The reason, currentCommit, and timestamp parameters are ignored for this transition.
+//   - Any → resolved: Sets ResolvedAt to timestamp, and ResolvedIn if currentCommit is provided
 //   - Any → acknowledged/disputed: Updates status and reason, leaves resolution fields unchanged
 //
 // The reason parameter provides context for the status change (max 500 chars).
 // The currentCommit parameter is used when transitioning to resolved.
-func (tf *TrackedFinding) UpdateStatus(status FindingStatus, reason string, currentCommit string) error {
+// The timestamp parameter is used for ResolvedAt when transitioning to resolved.
+func (tf *TrackedFinding) UpdateStatus(status FindingStatus, reason string, currentCommit string, timestamp time.Time) error {
 	if !status.IsValid() {
 		return fmt.Errorf("invalid status: %s", status)
 	}
 
 	// Handle transition to open (reopen) - clear resolution metadata
-	// Note: reason and currentCommit are ignored for this transition
+	// Note: reason, currentCommit, and timestamp are ignored for this transition
 	if status == FindingStatusOpen {
 		tf.Status = status
 		tf.StatusReason = ""
@@ -203,10 +212,9 @@ func (tf *TrackedFinding) UpdateStatus(status FindingStatus, reason string, curr
 
 	// Handle transition to resolved - set resolution metadata
 	if status == FindingStatusResolved {
-		now := time.Now()
 		tf.Status = status
 		tf.StatusReason = reason
-		tf.ResolvedAt = &now
+		tf.ResolvedAt = &timestamp
 		if currentCommit != "" {
 			tf.ResolvedIn = &currentCommit
 		} else {
