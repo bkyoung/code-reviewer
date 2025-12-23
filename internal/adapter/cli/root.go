@@ -30,11 +30,12 @@ type Arguments struct {
 
 // DefaultReviewActions holds default review action configuration from config.
 type DefaultReviewActions struct {
-	OnCritical string
-	OnHigh     string
-	OnMedium   string
-	OnLow      string
-	OnClean    string
+	OnCritical    string
+	OnHigh        string
+	OnMedium      string
+	OnLow         string
+	OnClean       string
+	OnNonBlocking string
 }
 
 // Dependencies captures the collaborators for the CLI.
@@ -130,6 +131,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var actionMedium string
 	var actionLow string
 	var actionClean string
+	var actionNonBlocking string
 
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
@@ -175,6 +177,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedActionMedium := resolveAction(actionMedium, defaultActions.OnMedium)
 			resolvedActionLow := resolveAction(actionLow, defaultActions.OnLow)
 			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
+			resolvedActionNonBlocking := resolveAction(actionNonBlocking, defaultActions.OnNonBlocking)
 
 			// Resolve bot username for auto-dismiss feature
 			// "none" (case-insensitive) explicitly disables auto-dismiss; empty uses default
@@ -187,27 +190,28 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			}
 
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
-				BaseRef:            baseRef,
-				TargetRef:          targetRef,
-				OutputDir:          outputDir,
-				Repository:         repository,
-				IncludeUncommitted: includeUncommitted,
-				CustomInstructions: customInstructions,
-				ContextFiles:       contextFiles,
-				NoArchitecture:     noArchitecture,
-				NoAutoContext:      noAutoContext,
-				Interactive:        interactive,
-				PostToGitHub:       postGitHubReview,
-				GitHubOwner:        githubOwner,
-				GitHubRepo:         githubRepo,
-				PRNumber:           prNumber,
-				CommitSHA:          commitSHA,
-				ActionOnCritical:   resolvedActionCritical,
-				ActionOnHigh:       resolvedActionHigh,
-				ActionOnMedium:     resolvedActionMedium,
-				ActionOnLow:        resolvedActionLow,
-				ActionOnClean:      resolvedActionClean,
-				BotUsername:        resolvedBotUsername,
+				BaseRef:             baseRef,
+				TargetRef:           targetRef,
+				OutputDir:           outputDir,
+				Repository:          repository,
+				IncludeUncommitted:  includeUncommitted,
+				CustomInstructions:  customInstructions,
+				ContextFiles:        contextFiles,
+				NoArchitecture:      noArchitecture,
+				NoAutoContext:       noAutoContext,
+				Interactive:         interactive,
+				PostToGitHub:        postGitHubReview,
+				GitHubOwner:         githubOwner,
+				GitHubRepo:          githubRepo,
+				PRNumber:            prNumber,
+				CommitSHA:           commitSHA,
+				ActionOnCritical:    resolvedActionCritical,
+				ActionOnHigh:        resolvedActionHigh,
+				ActionOnMedium:      resolvedActionMedium,
+				ActionOnLow:         resolvedActionLow,
+				ActionOnClean:       resolvedActionClean,
+				ActionOnNonBlocking: resolvedActionNonBlocking,
+				BotUsername:         resolvedBotUsername,
 			})
 			return err
 		},
@@ -245,6 +249,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	cmd.Flags().StringVar(&actionMedium, "action-medium", "", "Review action for medium severity (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionLow, "action-low", "", "Review action for low severity (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionClean, "action-clean", "", "Review action when no findings (approve, comment, request_changes)")
+	cmd.Flags().StringVar(&actionNonBlocking, "action-non-blocking", "", "Review action when findings exist but none block (approve, comment)")
 
 	return cmd
 }

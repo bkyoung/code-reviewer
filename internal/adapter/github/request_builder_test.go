@@ -129,7 +129,9 @@ func TestDetermineReviewEvent_RequestChangesOnCriticalSeverity(t *testing.T) {
 	assert.Equal(t, github.EventRequestChanges, event)
 }
 
-func TestDetermineReviewEvent_CommentOnMediumSeverity(t *testing.T) {
+func TestDetermineReviewEvent_ApproveOnMediumSeverity(t *testing.T) {
+	// Medium/low findings don't trigger REQUEST_CHANGES by default,
+	// so the review should APPROVE (with comments attached)
 	findings := []github.PositionedFinding{
 		{Finding: makeFinding("a.go", 1, "medium", "code smell"), DiffPosition: diff.IntPtr(1)},
 		{Finding: makeFinding("b.go", 2, "low", "minor issue"), DiffPosition: diff.IntPtr(2)},
@@ -137,7 +139,7 @@ func TestDetermineReviewEvent_CommentOnMediumSeverity(t *testing.T) {
 
 	event := github.DetermineReviewEvent(findings)
 
-	assert.Equal(t, github.EventComment, event)
+	assert.Equal(t, github.EventApprove, event)
 }
 
 func TestDetermineReviewEvent_ApproveOnNoFindings(t *testing.T) {
@@ -155,8 +157,8 @@ func TestDetermineReviewEvent_IgnoresOutOfDiffFindings(t *testing.T) {
 
 	event := github.DetermineReviewEvent(findings)
 
-	// Only in-diff findings count, so only low severity → COMMENT
-	assert.Equal(t, github.EventComment, event)
+	// Only in-diff findings count, so only low severity → APPROVE (non-blocking)
+	assert.Equal(t, github.EventApprove, event)
 }
 
 func TestCountInDiffFindings(t *testing.T) {
@@ -225,13 +227,23 @@ func TestNormalizeAction(t *testing.T) {
 }
 
 func TestDetermineReviewEventWithActions(t *testing.T) {
-	// Custom actions for testing
-	customActions := github.ReviewActions{
-		OnCritical: "comment", // Instead of request_changes
-		OnHigh:     "approve", // Instead of request_changes
-		OnMedium:   "approve", // Instead of comment
-		OnLow:      "approve", // Instead of comment
-		OnClean:    "comment", // Instead of approve
+	// Custom actions for testing - none trigger REQUEST_CHANGES
+	nonBlockingActions := github.ReviewActions{
+		OnCritical:    "comment", // Doesn't block
+		OnHigh:        "comment", // Doesn't block
+		OnMedium:      "comment", // Doesn't block
+		OnLow:         "comment", // Doesn't block
+		OnClean:       "comment", // Custom clean action
+		OnNonBlocking: "comment", // Custom non-blocking action
+	}
+
+	// Actions where critical triggers REQUEST_CHANGES
+	blockingCriticalActions := github.ReviewActions{
+		OnCritical:    "request_changes", // Blocks
+		OnHigh:        "comment",         // Doesn't block
+		OnMedium:      "comment",
+		OnLow:         "comment",
+		OnNonBlocking: "approve", // When no blocking findings
 	}
 
 	tests := []struct {
@@ -243,49 +255,57 @@ func TestDetermineReviewEventWithActions(t *testing.T) {
 		{
 			name:     "clean code with custom action",
 			findings: []github.PositionedFinding{},
-			actions:  customActions,
-			expected: github.EventComment, // customActions.OnClean = comment
+			actions:  nonBlockingActions,
+			expected: github.EventComment, // Uses OnClean
 		},
 		{
-			name: "critical finding with custom action",
+			name: "non-blocking findings use OnNonBlocking",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "critical", "security issue"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  customActions,
-			expected: github.EventComment, // customActions.OnCritical = comment
+			actions:  nonBlockingActions,
+			expected: github.EventComment, // OnCritical=comment doesn't block, uses OnNonBlocking
 		},
 		{
-			name: "high finding with custom action",
+			name: "blocking finding triggers REQUEST_CHANGES",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "critical", "security issue"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  blockingCriticalActions,
+			expected: github.EventRequestChanges, // OnCritical=request_changes blocks
+		},
+		{
+			name: "high finding with non-blocking config",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  customActions,
-			expected: github.EventApprove, // customActions.OnHigh = approve
+			actions:  blockingCriticalActions,
+			expected: github.EventApprove, // OnHigh=comment doesn't block, uses OnNonBlocking
 		},
 		{
-			name: "medium finding with custom action",
+			name: "medium finding with non-blocking config",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "medium", "code smell"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  customActions,
-			expected: github.EventApprove, // customActions.OnMedium = approve
+			actions:  nonBlockingActions,
+			expected: github.EventComment, // No blocking, uses OnNonBlocking=comment
 		},
 		{
-			name: "low finding with custom action",
+			name: "low finding with non-blocking config",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "low", "minor issue"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  customActions,
-			expected: github.EventApprove, // customActions.OnLow = approve
+			actions:  nonBlockingActions,
+			expected: github.EventComment, // No blocking, uses OnNonBlocking=comment
 		},
 		{
-			name: "highest severity wins (critical over high)",
+			name: "any blocking finding triggers REQUEST_CHANGES",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
 				{Finding: makeFinding("b.go", 2, "critical", "security issue"), DiffPosition: diff.IntPtr(2)},
 			},
-			actions:  customActions,
-			expected: github.EventComment, // critical wins, customActions.OnCritical = comment
+			actions:  blockingCriticalActions,
+			expected: github.EventRequestChanges, // critical blocks
 		},
 		{
 			name: "case insensitive action values",
@@ -303,22 +323,41 @@ func TestDetermineReviewEventWithActions(t *testing.T) {
 				{Finding: makeFinding("a.go", 1, "critical", "not in diff"), DiffPosition: nil},
 				{Finding: makeFinding("b.go", 2, "low", "in diff"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  customActions,
-			expected: github.EventApprove, // only low in diff, customActions.OnLow = approve
+			actions:  blockingCriticalActions,
+			expected: github.EventApprove, // critical out of diff, only low in diff → uses OnNonBlocking
 		},
 		{
-			name: "default actions when config is empty",
+			name: "default actions - high severity blocks",
 			findings: []github.PositionedFinding{
 				{Finding: makeFinding("a.go", 1, "high", "bug"), DiffPosition: diff.IntPtr(1)},
 			},
-			actions:  github.ReviewActions{},     // empty config
-			expected: github.EventRequestChanges, // fallback to default
+			actions:  github.ReviewActions{},     // empty config uses defaults
+			expected: github.EventRequestChanges, // default OnHigh=request_changes
+		},
+		{
+			name: "default actions - medium severity approves",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "medium", "code smell"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions:  github.ReviewActions{}, // empty config uses defaults
+			expected: github.EventApprove,    // default OnMedium=comment doesn't block, uses default OnNonBlocking=approve
 		},
 		{
 			name:     "clean code with empty config uses approve fallback",
 			findings: []github.PositionedFinding{},
 			actions:  github.ReviewActions{}, // empty config
-			expected: github.EventApprove,    // fallback to default
+			expected: github.EventApprove,    // default OnClean=approve
+		},
+		{
+			name: "OnNonBlocking default is approve",
+			findings: []github.PositionedFinding{
+				{Finding: makeFinding("a.go", 1, "low", "minor"), DiffPosition: diff.IntPtr(1)},
+			},
+			actions: github.ReviewActions{
+				OnLow: "comment", // doesn't block
+				// OnNonBlocking not set - should default to approve
+			},
+			expected: github.EventApprove,
 		},
 	}
 
