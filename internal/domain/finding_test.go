@@ -82,6 +82,17 @@ func TestFinding_Fingerprint_Deterministic(t *testing.T) {
 		t.Error("fingerprint should not be empty")
 	}
 
+	// Verify fingerprint format: should be 32 hex characters (16 bytes)
+	if len(fp) != 32 {
+		t.Errorf("fingerprint should be 32 hex characters, got %d: %s", len(fp), fp)
+	}
+	for _, c := range fp {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("fingerprint should be lowercase hex, found char: %c in %s", c, fp)
+			break
+		}
+	}
+
 	if fp != finding2.Fingerprint() {
 		t.Errorf("fingerprints should be deterministic: %s != %s",
 			fp, finding2.Fingerprint())
