@@ -19,6 +19,9 @@ type mockGitEngine struct {
 	err                error
 	branch             string
 	branchErr          error
+	incrementalDiff    domain.Diff
+	incrementalDiffErr error
+	commitExistsMap    map[string]bool
 }
 
 func (m *mockGitEngine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef string, includeUncommitted bool) (domain.Diff, error) {
@@ -26,6 +29,17 @@ func (m *mockGitEngine) GetCumulativeDiff(ctx context.Context, baseRef, targetRe
 	m.targetRef = targetRef
 	m.includeUncommitted = includeUncommitted
 	return m.diff, m.err
+}
+
+func (m *mockGitEngine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error) {
+	return m.incrementalDiff, m.incrementalDiffErr
+}
+
+func (m *mockGitEngine) CommitExists(ctx context.Context, commitSHA string) (bool, error) {
+	if m.commitExistsMap == nil {
+		return false, nil
+	}
+	return m.commitExistsMap[commitSHA], nil
 }
 
 func (m *mockGitEngine) CurrentBranch(ctx context.Context) (string, error) {

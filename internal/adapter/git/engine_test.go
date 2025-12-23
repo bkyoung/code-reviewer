@@ -258,3 +258,173 @@ func TestMapGitStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestEngine_CommitExists(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	repo, err := goGit.PlainInit(tmp, false)
+	if err != nil {
+		t.Fatalf("failed to init repo: %v", err)
+	}
+
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get worktree: %v", err)
+	}
+
+	writeFile(t, tmp, "main.go", "package main\n")
+	if _, err := worktree.Add("main.go"); err != nil {
+		t.Fatalf("add error: %v", err)
+	}
+	commitHash, err := worktree.Commit("initial", &goGit.CommitOptions{
+		Author: defaultSignature(),
+	})
+	if err != nil {
+		t.Fatalf("commit error: %v", err)
+	}
+
+	engine := git.NewEngine(tmp)
+
+	t.Run("existing commit returns true", func(t *testing.T) {
+		exists, err := engine.CommitExists(ctx, commitHash.String())
+		if err != nil {
+			t.Fatalf("CommitExists error: %v", err)
+		}
+		if !exists {
+			t.Errorf("CommitExists(%s) = false, want true", commitHash.String())
+		}
+	})
+
+	t.Run("non-existing commit returns false with no error", func(t *testing.T) {
+		fakeHash := "0000000000000000000000000000000000000000"
+		exists, err := engine.CommitExists(ctx, fakeHash)
+		if err != nil {
+			t.Fatalf("CommitExists error: %v", err)
+		}
+		if exists {
+			t.Errorf("CommitExists(%s) = true, want false", fakeHash)
+		}
+	})
+
+	t.Run("invalid hash returns false with no error", func(t *testing.T) {
+		exists, err := engine.CommitExists(ctx, "not-a-hash")
+		if err != nil {
+			t.Fatalf("CommitExists error: %v", err)
+		}
+		if exists {
+			t.Error("CommitExists(invalid) = true, want false")
+		}
+	})
+
+	t.Run("cancelled context returns error", func(t *testing.T) {
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := engine.CommitExists(cancelledCtx, commitHash.String())
+		if err == nil {
+			t.Error("expected error for cancelled context, got nil")
+		}
+	})
+}
+
+func TestEngine_GetIncrementalDiff(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	repo, err := goGit.PlainInit(tmp, false)
+	if err != nil {
+		t.Fatalf("failed to init repo: %v", err)
+	}
+
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get worktree: %v", err)
+	}
+
+	// First commit
+	writeFile(t, tmp, "main.go", "package main\n\nfunc main() {}\n")
+	if _, err := worktree.Add("main.go"); err != nil {
+		t.Fatalf("add error: %v", err)
+	}
+	commit1, err := worktree.Commit("first", &goGit.CommitOptions{
+		Author: defaultSignature(),
+	})
+	if err != nil {
+		t.Fatalf("commit error: %v", err)
+	}
+
+	// Second commit
+	writeFile(t, tmp, "main.go", "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n")
+	if _, err := worktree.Add("main.go"); err != nil {
+		t.Fatalf("add error: %v", err)
+	}
+	commit2, err := worktree.Commit("second", &goGit.CommitOptions{
+		Author: defaultSignature(),
+	})
+	if err != nil {
+		t.Fatalf("commit error: %v", err)
+	}
+
+	// Third commit - adds a new file
+	writeFile(t, tmp, "helper.go", "package main\n\nfunc helper() {}\n")
+	if _, err := worktree.Add("helper.go"); err != nil {
+		t.Fatalf("add error: %v", err)
+	}
+	commit3, err := worktree.Commit("third", &goGit.CommitOptions{
+		Author: defaultSignature(),
+	})
+	if err != nil {
+		t.Fatalf("commit error: %v", err)
+	}
+
+	engine := git.NewEngine(tmp)
+
+	t.Run("diff between two consecutive commits", func(t *testing.T) {
+		diff, err := engine.GetIncrementalDiff(ctx, commit1.String(), commit2.String())
+		if err != nil {
+			t.Fatalf("GetIncrementalDiff error: %v", err)
+		}
+
+		if diff.FromCommitHash != commit1.String() {
+			t.Errorf("FromCommitHash = %s, want %s", diff.FromCommitHash, commit1.String())
+		}
+		if diff.ToCommitHash != commit2.String() {
+			t.Errorf("ToCommitHash = %s, want %s", diff.ToCommitHash, commit2.String())
+		}
+
+		if len(diff.Files) != 1 {
+			t.Fatalf("expected 1 file diff, got %d", len(diff.Files))
+		}
+		if diff.Files[0].Path != "main.go" {
+			t.Errorf("file path = %s, want main.go", diff.Files[0].Path)
+		}
+		if diff.Files[0].Status != domain.FileStatusModified {
+			t.Errorf("status = %s, want modified", diff.Files[0].Status)
+		}
+	})
+
+	t.Run("diff across multiple commits", func(t *testing.T) {
+		diff, err := engine.GetIncrementalDiff(ctx, commit1.String(), commit3.String())
+		if err != nil {
+			t.Fatalf("GetIncrementalDiff error: %v", err)
+		}
+
+		if len(diff.Files) != 2 {
+			t.Fatalf("expected 2 file diffs, got %d", len(diff.Files))
+		}
+	})
+
+	t.Run("invalid from commit returns error", func(t *testing.T) {
+		_, err := engine.GetIncrementalDiff(ctx, "0000000000000000000000000000000000000000", commit2.String())
+		if err == nil {
+			t.Error("expected error for invalid from commit")
+		}
+	})
+
+	t.Run("invalid to commit returns error", func(t *testing.T) {
+		_, err := engine.GetIncrementalDiff(ctx, commit1.String(), "0000000000000000000000000000000000000000")
+		if err == nil {
+			t.Error("expected error for invalid to commit")
+		}
+	})
+}
