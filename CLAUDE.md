@@ -1,9 +1,9 @@
 # Code Reviewer - Claude Context
 
 **Project:** AI-Powered Code Review Tool
-**Status:** Phase 1 Complete, Phase 2 Planning
+**Status:** Phase 2 In Progress
 **Version:** v0.2.3
-**Last Updated:** 2025-12-21
+**Last Updated:** 2025-12-22
 
 ---
 
@@ -23,20 +23,29 @@
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phase 1: Foundation | ✅ Complete | Multi-provider LLM, local CLI, basic GitHub workflow |
-| **Phase 2: GitHub Native** | 🚧 Planning | First-class reviewer with inline annotations |
+| **Phase 2: GitHub Native** | 🚧 In Progress | First-class reviewer with inline annotations |
 | Phase 3: Production | Planned | Feedback loops, cost visibility, hardening |
 | Phase 4: Enterprise | Planned | Multi-platform, org-wide learning |
 
-### Phase 2 Goal
+### Phase 2 Progress
 
-> **Make the bot a first-class GitHub reviewer that's usable at scale**
+| Milestone | Status |
+|-----------|--------|
+| 2.1 Inline Annotations | ✅ Complete |
+| 2.2 Review API | ✅ Complete |
+| 2.3 Request Changes | ✅ Complete |
+| 2.4 Skip Trigger | Not Started |
+| 2.5 Incremental Reviews | 🚧 Epic #53 |
+| 2.6 Finding Deduplication | 🚧 Epic #53 |
+| 2.7 PR Size Guards | Not Started |
 
-Enable:
-1. Inline annotations on specific source lines
-2. Proper GitHub code reviews (not just comments)
-3. Request changes for high-priority issues
-4. Incremental reviews (only new changes)
-5. Finding deduplication (no duplicate flags)
+### Current Focus: Epic #53
+
+**Finding Deduplication and Status Tracking** - Unified approach for incremental reviews and deduplication with platform-agnostic architecture:
+
+- **Domain:** Fingerprinting, status model (shared across platforms)
+- **Use Case:** Deduplication logic, incremental diffing (shared)
+- **Adapters:** GitHub (PR comment) and SQLite (CLI) - different storage, same logic
 
 ### Key Documents
 

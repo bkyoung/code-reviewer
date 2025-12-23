@@ -67,24 +67,47 @@
 | Multi-provider LLM support | ✅ Complete | OpenAI, Anthropic, Gemini, Ollama |
 | Local CLI review | ✅ Complete | `cr review branch` works |
 | Output formats | ✅ Complete | Markdown, JSON, SARIF |
-| GitHub workflow | ⚠️ Partial | Posts PR comments, uploads SARIF, but no inline annotations |
-| Inline annotations | ❌ Missing | Key MVP gap |
-| Request changes | ❌ Missing | Key MVP gap |
-| Code review initiation | ❌ Missing | Currently posts comments, not reviews |
+| GitHub workflow | ✅ Complete | Posts PR reviews with inline annotations |
+| Inline annotations | ✅ Complete | Diff position mapping implemented |
+| Request changes | ✅ Complete | Configurable per severity level |
+| Code review initiation | ✅ Complete | Uses GitHub Review API |
+| Review summary | ✅ Complete | Programmatic summary from findings |
+| Stale review dismissal | ✅ Complete | Auto-dismisses on new push |
+| Incremental reviews | ❌ Missing | Key MVP gap |
+| Finding deduplication | ❌ Missing | Key MVP gap |
 
 ### Gap Analysis
 
 | Gap | Current | Target | Effort Est. |
 |-----|---------|--------|-------------|
-| Inline annotations | PR comment only | Line-specific annotations | Medium |
-| Code review API | Uses `gh pr comment` | Use `gh api` for reviews | Medium |
-| Request changes | Never blocks | Configurable blocking | Medium |
+| ~~Inline annotations~~ | ~~PR comment only~~ | ~~Line-specific annotations~~ | ✅ Done |
+| ~~Code review API~~ | ~~Uses `gh pr comment`~~ | ~~Use `gh api` for reviews~~ | ✅ Done |
+| ~~Request changes~~ | ~~Never blocks~~ | ~~Configurable blocking~~ | ✅ Done |
 | Skip trigger | None | `[skip code-review]` | Low |
-| Diff position mapping | Not implemented | Map findings to diff positions | High |
 | Incremental reviews | Full PR every time | Only new changes since last review | High |
-| Finding deduplication | Re-flags same issues | Track + skip duplicates | Medium |
+| Finding deduplication | Re-flags same issues | Track + skip duplicates | High |
 | PR size guards | May fail on large PRs | Warn, truncate, or split | Medium |
-| Comment threading | Orphan comments | Reply to existing threads | Medium |
+
+### Architecture Decision: Platform Adaptability
+
+Epic #53 unifies incremental reviews and finding deduplication with a clean architecture:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        DOMAIN LAYER                         │
+│  Finding, TrackedFinding, FindingStatus, Fingerprint        │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                       USE CASE LAYER                        │
+│  Deduplication logic, incremental diffing, orchestration    │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                       ADAPTER LAYER                         │
+│  GitHub (PR comment)  │  SQLite (CLI)  │  Future platforms  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+This ensures CLI parity and future multi-platform support without rewriting core logic.
 
 ---
 
@@ -99,19 +122,21 @@
 - Security testing validation
 
 ### Phase 2: GitHub Native (v0.3.x)
-**Status:** Next Phase
+**Status:** In Progress
 
 **Goal:** Make the bot a first-class GitHub reviewer that's usable at scale
 
-| Milestone | Features |
-|-----------|----------|
-| 2.1: Inline Annotations | Diff position mapping, line-specific comments |
-| 2.2: Review API | Use GitHub review API instead of comments |
-| 2.3: Request Changes | Configurable blocking behavior |
-| 2.4: Skip Trigger | `[skip code-review]` support |
-| 2.5: Incremental Reviews | Only review new changes since last review |
-| 2.6: Finding Deduplication | Track findings, don't re-flag same issues |
-| 2.7: PR Size Guards | Warn/truncate/split large PRs |
+| Milestone | Features | Status |
+|-----------|----------|--------|
+| 2.1: Inline Annotations | Diff position mapping, line-specific comments | ✅ Complete |
+| 2.2: Review API | Use GitHub review API instead of comments | ✅ Complete |
+| 2.3: Request Changes | Configurable blocking behavior | ✅ Complete |
+| 2.4: Skip Trigger | `[skip code-review]` support | Not Started |
+| 2.5: Incremental Reviews | Only review new changes since last review | 🚧 In Progress |
+| 2.6: Finding Deduplication | Track findings, don't re-flag same issues | 🚧 In Progress |
+| 2.7: PR Size Guards | Warn/truncate/split large PRs | Not Started |
+
+**Epic #53** unifies milestones 2.5 and 2.6 with a platform-agnostic architecture (see above).
 
 **Why these are MVP:** Without incremental reviews and deduplication, every push triggers a full re-review with duplicate findings. The tool becomes unusable noise.
 
