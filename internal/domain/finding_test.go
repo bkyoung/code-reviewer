@@ -33,3 +33,166 @@ func TestFindingDeterministicID(t *testing.T) {
 		t.Fatalf("expected deterministic IDs, got %s and %s", finding.ID, again.ID)
 	}
 }
+
+func TestFinding_Fingerprint_MatchesFingerprintFromFinding(t *testing.T) {
+	finding := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk in query builder",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	methodResult := finding.Fingerprint()
+	functionResult := domain.FingerprintFromFinding(finding)
+
+	if methodResult != functionResult {
+		t.Errorf("Fingerprint() = %s, want %s (from FingerprintFromFinding)", methodResult, functionResult)
+	}
+}
+
+func TestFinding_Fingerprint_Deterministic(t *testing.T) {
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() != finding2.Fingerprint() {
+		t.Errorf("fingerprints should be deterministic: %s != %s",
+			finding1.Fingerprint(), finding2.Fingerprint())
+	}
+}
+
+func TestFinding_Fingerprint_StableAcrossLineChanges(t *testing.T) {
+	// Same issue at different line numbers should have same fingerprint
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   50, // Different line
+		LineEnd:     55, // Different line
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Use parameterized queries",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() != finding2.Fingerprint() {
+		t.Errorf("fingerprints should be stable across line changes: %s != %s",
+			finding1.Fingerprint(), finding2.Fingerprint())
+	}
+}
+
+func TestFinding_Fingerprint_DifferentForDifferentFiles(t *testing.T) {
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "db.go", // Different file
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection risk",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() == finding2.Fingerprint() {
+		t.Error("fingerprints should differ for different files")
+	}
+}
+
+func TestFinding_Fingerprint_DifferentForDifferentCategories(t *testing.T) {
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "Issue description",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "performance", // Different category
+		Description: "Issue description",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() == finding2.Fingerprint() {
+		t.Error("fingerprints should differ for different categories")
+	}
+}
+
+func TestFinding_Fingerprint_DifferentForDifferentSeverities(t *testing.T) {
+	finding1 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "high",
+		Category:    "security",
+		Description: "Issue description",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	finding2 := domain.NewFinding(domain.FindingInput{
+		File:        "main.go",
+		LineStart:   10,
+		LineEnd:     15,
+		Severity:    "low", // Different severity
+		Category:    "security",
+		Description: "Issue description",
+		Suggestion:  "Fix it",
+		Evidence:    true,
+	})
+
+	if finding1.Fingerprint() == finding2.Fingerprint() {
+		t.Error("fingerprints should differ for different severities")
+	}
+}
