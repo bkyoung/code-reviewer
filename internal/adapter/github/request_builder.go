@@ -133,7 +133,6 @@ func DetermineReviewEventWithActions(findings []PositionedFinding, actions Revie
 	}
 
 	// Check if any in-diff finding would trigger REQUEST_CHANGES
-	// Pass inDiffFindings to avoid redundant filtering in HasBlockingFindings
 	if HasBlockingFindings(inDiffFindings, actions) {
 		return EventRequestChanges
 	}
