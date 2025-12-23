@@ -341,8 +341,11 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 			}
 		}
 
-		// If status is resolved but ResolvedAt is missing/invalid, default to open
-		// to maintain domain invariant consistency
+		// Design decision: When loading persisted data, we prefer graceful degradation
+		// over hard failures. If resolved status lacks ResolvedAt (possibly due to
+		// schema migration or data corruption), downgrade to open rather than fail.
+		// This differs from NewTrackedFinding which enforces strict invariants for
+		// new data - appropriate since creation is controllable, loading is not.
 		if status == domain.FindingStatusResolved && resolvedAt == nil {
 			log.Printf("warning: resolved status requires ResolvedAt for finding %s, defaulting to 'open'",
 				fJSON.Fingerprint)

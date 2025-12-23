@@ -621,6 +621,8 @@ func TestTrackedFinding_UpdateStatus_TransitionToResolved(t *testing.T) {
 
 	if tf.ResolvedAt == nil {
 		t.Error("ResolvedAt should be set when transitioning to resolved")
+	} else if !tf.ResolvedAt.Equal(resolvedTime) {
+		t.Errorf("ResolvedAt = %v, want %v", *tf.ResolvedAt, resolvedTime)
 	}
 
 	if tf.ResolvedIn == nil || *tf.ResolvedIn != "fix-commit" {
