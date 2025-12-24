@@ -24,9 +24,11 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/adapter/output/json"
 	"github.com/bkyoung/code-reviewer/internal/adapter/output/markdown"
 	"github.com/bkyoung/code-reviewer/internal/adapter/output/sarif"
+	"github.com/bkyoung/code-reviewer/internal/adapter/repository"
 	storeAdapter "github.com/bkyoung/code-reviewer/internal/adapter/store"
 	"github.com/bkyoung/code-reviewer/internal/adapter/store/sqlite"
 	"github.com/bkyoung/code-reviewer/internal/adapter/tracking"
+	verifyadapter "github.com/bkyoung/code-reviewer/internal/adapter/verify"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/determinism"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -34,6 +36,7 @@ import (
 	usecasegithub "github.com/bkyoung/code-reviewer/internal/usecase/github"
 	"github.com/bkyoung/code-reviewer/internal/usecase/merge"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
+	usecaseverify "github.com/bkyoung/code-reviewer/internal/usecase/verify"
 	"github.com/bkyoung/code-reviewer/internal/version"
 )
 
@@ -192,6 +195,13 @@ func run() error {
 		statusScanner = githubadapter.NewGitHubStatusScanner(githubClient)
 	}
 
+	// Create verification agent if enabled and a suitable provider is available
+	// Uses the first available LLM provider (preferring anthropic > openai > gemini)
+	var verifier review.Verifier
+	if cfg.Verification.Enabled {
+		verifier = createVerifier(cfg, providers, repoDir, obs)
+	}
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
 		Git:           gitEngine,
 		Providers:     providers,
@@ -209,6 +219,7 @@ func run() error {
 		GitHubPoster:  githubPoster,
 		TrackingStore: trackingStore,
 		StatusScanner: statusScanner,
+		Verifier:      verifier,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
@@ -629,4 +640,129 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 		CommentsSkipped: result.CommentsSkipped,
 		HTMLURL:         result.HTMLURL,
 	}, nil
+}
+
+// createVerifier creates an agent-based verifier using an available LLM provider.
+// Returns nil if no suitable provider is available.
+func createVerifier(cfg config.Config, providers map[string]review.Provider, repoDir string, obs observabilityComponents) review.Verifier {
+	// Find an LLM client to use for verification (prefer anthropic > openai > gemini)
+	var llmClient verifyadapter.LLMClient
+	providerOrder := []string{"anthropic", "openai", "gemini"}
+
+	for _, name := range providerOrder {
+		if _, ok := providers[name]; !ok {
+			continue
+		}
+		providerCfg, ok := cfg.Providers[name]
+		if !ok || providerCfg.APIKey == "" {
+			continue
+		}
+
+		// Create the appropriate HTTP client based on provider
+		switch name {
+		case "anthropic":
+			client := anthropic.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			llmClient = &anthropicLLMAdapter{client: client}
+		case "openai":
+			client := openai.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			llmClient = &openaiLLMAdapter{client: client}
+		case "gemini":
+			client := gemini.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			llmClient = &geminiLLMAdapter{client: client}
+		}
+
+		if llmClient != nil {
+			log.Printf("Verification enabled using %s provider", name)
+			break
+		}
+	}
+
+	if llmClient == nil {
+		log.Println("Verification disabled: no suitable LLM provider available")
+		return nil
+	}
+
+	// Create repository adapter for file access
+	repo := repository.NewLocalRepository(repoDir)
+
+	// Create cost tracker with configured ceiling
+	costTracker := usecaseverify.NewCostTracker(cfg.Verification.CostCeiling)
+
+	// Build agent config from verification settings
+	agentConfig := verifyadapter.AgentConfig{
+		MaxIterations: 10,
+		Concurrency:   3,
+		Confidence: config.ConfidenceThresholds{
+			Default:  cfg.Verification.Confidence.Default,
+			Critical: cfg.Verification.Confidence.Critical,
+			High:     cfg.Verification.Confidence.High,
+			Medium:   cfg.Verification.Confidence.Medium,
+			Low:      cfg.Verification.Confidence.Low,
+		},
+		Depth: cfg.Verification.Depth,
+	}
+
+	return verifyadapter.NewAgentVerifier(llmClient, repo, costTracker, agentConfig)
+}
+
+// openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.
+type openaiLLMAdapter struct {
+	client *openai.HTTPClient
+}
+
+func (a *openaiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
+	// Combine system and user prompts (OpenAI handles system prompt in the message)
+	fullPrompt := systemPrompt + "\n\n" + userPrompt
+	resp, err := a.client.Call(ctx, fullPrompt, openai.CallOptions{
+		Temperature: 0.0, // Deterministic for verification
+		MaxTokens:   4096,
+	})
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+	return resp.Text, resp.TokensIn, resp.TokensOut, resp.Cost, nil
+}
+
+// anthropicLLMAdapter adapts anthropic.HTTPClient to verifyadapter.LLMClient.
+type anthropicLLMAdapter struct {
+	client *anthropic.HTTPClient
+}
+
+func (a *anthropicLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
+	resp, err := a.client.Call(ctx, userPrompt, anthropic.CallOptions{
+		System:      systemPrompt,
+		Temperature: 0.0,
+		MaxTokens:   4096,
+	})
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+	return resp.Text, resp.TokensIn, resp.TokensOut, resp.Cost, nil
+}
+
+// geminiLLMAdapter adapts gemini.HTTPClient to verifyadapter.LLMClient.
+type geminiLLMAdapter struct {
+	client *gemini.HTTPClient
+}
+
+func (a *geminiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
+	// Combine system and user prompts for Gemini
+	fullPrompt := systemPrompt + "\n\n" + userPrompt
+	resp, err := a.client.Call(ctx, fullPrompt, gemini.CallOptions{
+		Temperature: 0.0,
+		MaxTokens:   4096,
+	})
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+	return resp.Text, resp.TokensIn, resp.TokensOut, resp.Cost, nil
 }
