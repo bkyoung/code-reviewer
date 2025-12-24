@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/bkyoung/code-reviewer/internal/usecase/verify"
@@ -58,18 +59,74 @@ func (t *ReadFileTool) Description() string {
 
 // Execute reads the file at the given path.
 func (t *ReadFileTool) Execute(ctx context.Context, input string) (string, error) {
-	path := strings.TrimSpace(input)
-	if path == "" {
+	filePath := strings.TrimSpace(input)
+	if filePath == "" {
 		return "", fmt.Errorf("file path required")
 	}
 
-	content, err := t.repo.ReadFile(path)
+	// Validate path to prevent traversal attacks
+	if err := validatePath(filePath); err != nil {
+		return "", err
+	}
+
+	content, err := t.repo.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("reading file %s: %w", path, err)
+		return "", fmt.Errorf("reading file %s: %w", filePath, err)
 	}
 
 	result := string(content)
 	return truncateOutput(result), nil
+}
+
+// validatePath checks that a path is safe (no traversal, no absolute paths).
+func validatePath(filePath string) error {
+	// Block absolute paths
+	if strings.HasPrefix(filePath, "/") {
+		return fmt.Errorf("absolute paths not allowed: %s", filePath)
+	}
+
+	// Clean the path to resolve any . or .. components
+	cleaned := path.Clean(filePath)
+
+	// After cleaning, check for path traversal attempts
+	if strings.HasPrefix(cleaned, "..") {
+		return fmt.Errorf("path traversal not allowed: %s", filePath)
+	}
+
+	// Check for hidden files/directories (starting with .)
+	// This prevents access to .git, .env, etc.
+	parts := strings.Split(cleaned, "/")
+	for _, part := range parts {
+		if strings.HasPrefix(part, ".") && part != "." {
+			return fmt.Errorf("hidden files/directories not allowed: %s", filePath)
+		}
+	}
+
+	return nil
+}
+
+// validateGlobPattern checks that a glob pattern is safe.
+func validateGlobPattern(pattern string) error {
+	// Block absolute paths
+	if strings.HasPrefix(pattern, "/") {
+		return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
+	}
+
+	// Block patterns that start with path traversal
+	if strings.HasPrefix(pattern, "..") {
+		return fmt.Errorf("path traversal not allowed in glob: %s", pattern)
+	}
+
+	// Block patterns explicitly targeting hidden/sensitive directories
+	// Note: We allow patterns like "**/*.go" which might incidentally match hidden dirs,
+	// but block explicit targeting like ".git/*" or ".env"
+	for _, forbidden := range []string{".git", ".env", ".ssh", ".aws", ".config", ".secret"} {
+		if strings.Contains(pattern, forbidden) {
+			return fmt.Errorf("pattern targets forbidden directory: %s", forbidden)
+		}
+	}
+
+	return nil
 }
 
 // GrepTool searches for patterns in the repository.
@@ -144,6 +201,11 @@ func (t *GlobTool) Execute(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("glob pattern required")
 	}
 
+	// Validate pattern to prevent access to sensitive files
+	if err := validateGlobPattern(pattern); err != nil {
+		return "", err
+	}
+
 	files, err := t.repo.Glob(pattern)
 	if err != nil {
 		return "", fmt.Errorf("glob %s: %w", pattern, err)
@@ -185,19 +247,23 @@ func (t *BashTool) Description() string {
 // safeCommands defines which commands are allowed and their safe subcommands.
 // Commands with nil subcommand lists are allowed with any arguments.
 // Commands with non-nil subcommand lists are only allowed with those specific subcommands.
+//
+// SECURITY: We intentionally exclude commands that can execute arbitrary code:
+// - "go test" executes test code and init() functions
+// - "go run" executes arbitrary Go code
+// - "go generate" executes arbitrary commands
+// - "go mod download/tidy" can access the network
 var safeCommands = map[string][]string{
-	// Go commands - only safe read-only and build operations
-	"go": {"build", "test", "vet", "list", "version", "env", "mod"},
+	// Go commands - only read-only static analysis operations
+	// Excluded: test (executes code), run, generate, mod (network access)
+	"go": {"build", "vet", "list", "version", "env"},
 	// Git commands - only read-only operations
 	"git": {"status", "log", "show", "diff", "branch", "rev-parse", "describe", "ls-files"},
 	// Read-only utilities
 	"echo": nil, // Any args OK for echo
-	"cat":  nil, // Any args OK for cat
 	"head": nil, // Any args OK
 	"tail": nil, // Any args OK
 	"wc":   nil, // Any args OK
-	"grep": nil, // Any args OK
-	"find": nil, // Any args OK
 	"ls":   nil, // Any args OK
 }
 
@@ -262,9 +328,10 @@ func (t *BashTool) Execute(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("command required")
 	}
 
-	// Check for dangerous patterns
+	// Check for dangerous patterns (case-insensitive for commands/keywords)
+	inputLower := strings.ToLower(input)
 	for _, pattern := range dangerousPatterns {
-		if strings.Contains(input, pattern) {
+		if strings.Contains(inputLower, strings.ToLower(pattern)) {
 			return "", fmt.Errorf("command contains forbidden pattern: %s", pattern)
 		}
 	}

@@ -184,6 +184,11 @@ func (v *AgentVerifier) Verify(ctx context.Context, candidate domain.CandidateFi
 }
 
 // VerifyBatch verifies multiple candidates, potentially in parallel.
+//
+// Note on cost ceiling enforcement: The cost ceiling check is best-effort under
+// concurrency. Multiple goroutines may pass the check before any of them add their
+// costs. This is acceptable as the ceiling is a soft limit to prevent runaway costs,
+// not a hard budget guarantee. For strict budget enforcement, use Concurrency=1.
 func (v *AgentVerifier) VerifyBatch(ctx context.Context, candidates []domain.CandidateFinding) ([]domain.VerificationResult, error) {
 	if len(candidates) == 0 {
 		return []domain.VerificationResult{}, nil

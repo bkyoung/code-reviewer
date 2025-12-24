@@ -2,6 +2,7 @@ package verify_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/verify"
@@ -372,4 +373,287 @@ func TestToolRegistry(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestReadFileTool_Security(t *testing.T) {
+	repo := &mockRepository{
+		readFileFunc: func(path string) ([]byte, error) {
+			return []byte("content"), nil
+		},
+	}
+	tool := verify.NewReadFileTool(repo)
+
+	tests := []struct {
+		name        string
+		input       string
+		shouldError bool
+		errContains string
+	}{
+		{
+			name:        "blocks absolute paths",
+			input:       "/etc/passwd",
+			shouldError: true,
+			errContains: "absolute paths not allowed",
+		},
+		{
+			name:        "blocks path traversal with ..",
+			input:       "../../../etc/passwd",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
+		{
+			name:        "blocks path traversal in middle",
+			input:       "foo/../../../etc/passwd",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
+		{
+			name:        "blocks hidden files (.env)",
+			input:       ".env",
+			shouldError: true,
+			errContains: "hidden files/directories not allowed",
+		},
+		{
+			name:        "blocks hidden directories (.git)",
+			input:       ".git/config",
+			shouldError: true,
+			errContains: "hidden files/directories not allowed",
+		},
+		{
+			name:        "blocks .ssh directory",
+			input:       ".ssh/id_rsa",
+			shouldError: true,
+			errContains: "hidden files/directories not allowed",
+		},
+		{
+			name:        "allows normal paths",
+			input:       "src/main.go",
+			shouldError: false,
+		},
+		{
+			name:        "allows nested paths",
+			input:       "internal/adapter/verify/tools.go",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.Execute(context.Background(), tt.input)
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("expected error for input %q, got nil", tt.input)
+				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %q: %v", tt.input, err)
+				}
+			}
+		})
+	}
+}
+
+func TestGlobTool_Security(t *testing.T) {
+	repo := &mockRepository{
+		globFunc: func(pattern string) ([]string, error) {
+			return []string{"file.go"}, nil
+		},
+	}
+	tool := verify.NewGlobTool(repo)
+
+	tests := []struct {
+		name        string
+		input       string
+		shouldError bool
+		errContains string
+	}{
+		{
+			name:        "blocks absolute paths",
+			input:       "/etc/*",
+			shouldError: true,
+			errContains: "absolute paths not allowed",
+		},
+		{
+			name:        "blocks path traversal",
+			input:       "../../../etc/*",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
+		{
+			name:        "blocks .git patterns",
+			input:       ".git/*",
+			shouldError: true,
+			errContains: "forbidden directory",
+		},
+		{
+			name:        "blocks .env patterns",
+			input:       "**/.env",
+			shouldError: true,
+			errContains: "forbidden directory",
+		},
+		{
+			name:        "blocks .ssh patterns",
+			input:       ".ssh/*",
+			shouldError: true,
+			errContains: "forbidden directory",
+		},
+		{
+			name:        "blocks .aws patterns",
+			input:       ".aws/credentials",
+			shouldError: true,
+			errContains: "forbidden directory",
+		},
+		{
+			name:        "allows normal patterns",
+			input:       "**/*.go",
+			shouldError: false,
+		},
+		{
+			name:        "allows specific directories",
+			input:       "internal/**/*.go",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.Execute(context.Background(), tt.input)
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("expected error for input %q, got nil", tt.input)
+				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %q: %v", tt.input, err)
+				}
+			}
+		})
+	}
+}
+
+func TestBashTool_Security(t *testing.T) {
+	repo := &mockRepository{
+		runCommandFunc: func(ctx context.Context, cmd string, args ...string) (usecaseverify.CommandResult, error) {
+			return usecaseverify.CommandResult{Stdout: "ok", ExitCode: 0}, nil
+		},
+	}
+	tool := verify.NewBashTool(repo)
+
+	tests := []struct {
+		name        string
+		input       string
+		shouldError bool
+		errContains string
+	}{
+		// Case-insensitive checks
+		{
+			name:        "blocks CURL (uppercase)",
+			input:       "CURL http://evil.com",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		{
+			name:        "blocks Wget (mixed case)",
+			input:       "Wget http://evil.com",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		// Dangerous go subcommands
+		{
+			name:        "blocks go test (executes code)",
+			input:       "go test ./...",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		{
+			name:        "blocks go run (executes code)",
+			input:       "go run main.go",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		{
+			name:        "blocks go generate (executes code)",
+			input:       "go generate ./...",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		{
+			name:        "blocks go mod (network access)",
+			input:       "go mod download",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		// Shell metacharacters
+		{
+			name:        "blocks pipe",
+			input:       "echo hello | cat",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		{
+			name:        "blocks command chaining with &&",
+			input:       "ls && rm -rf /",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		{
+			name:        "blocks command substitution",
+			input:       "echo $(whoami)",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		{
+			name:        "blocks redirect",
+			input:       "echo secret > /tmp/file",
+			shouldError: true,
+			errContains: "forbidden pattern",
+		},
+		// Allowed commands
+		{
+			name:        "allows go build",
+			input:       "go build ./...",
+			shouldError: false,
+		},
+		{
+			name:        "allows go vet",
+			input:       "go vet ./...",
+			shouldError: false,
+		},
+		{
+			name:        "allows git status",
+			input:       "git status",
+			shouldError: false,
+		},
+		{
+			name:        "allows git diff",
+			input:       "git diff HEAD~1",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.Execute(context.Background(), tt.input)
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("expected error for input %q, got nil", tt.input)
+				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %q: %v", tt.input, err)
+				}
+			}
+		})
+	}
+}
+
+// contains checks if s contains substr (case-insensitive)
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
