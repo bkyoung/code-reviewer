@@ -375,6 +375,105 @@ func TestParseTrackingComment_BackwardCompatibility(t *testing.T) {
 	}
 }
 
+func TestParseTrackingComment_InvalidReviewStatus(t *testing.T) {
+	// Comments with invalid non-empty review_status should default to "completed"
+	// and log a warning (logging not verified in this test)
+	body := `<!-- CODE_REVIEWER_TRACKING_V1 -->
+<!-- TRACKING_METADATA
+{
+  "version": 1,
+  "repository": "owner/repo",
+  "pr_number": 1,
+  "head_sha": "abc123",
+  "reviewed_commits": [],
+  "findings": [],
+  "last_updated": "2024-01-01T00:00:00Z",
+  "review_status": "invalid_status"
+}
+-->`
+
+	state, err := ParseTrackingComment(body)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment() error = %v", err)
+	}
+
+	// Invalid status should default to completed
+	if state.ReviewStatus != domain.ReviewStatusCompleted {
+		t.Errorf("ReviewStatus = %s, want %s for invalid status", state.ReviewStatus, domain.ReviewStatusCompleted)
+	}
+}
+
+func TestRenderTrackingComment_InProgressToCompleted(t *testing.T) {
+	// Test the core workflow: in-progress state transitions to completed with findings
+	now := time.Now().Truncate(time.Second)
+
+	// Create in-progress state
+	inProgressState := review.NewTrackingStateInProgress(review.ReviewTarget{
+		Repository: "owner/repo",
+		PRNumber:   42,
+		HeadSHA:    "abc123",
+	}, now)
+
+	// Render in-progress
+	body, err := RenderTrackingComment(inProgressState)
+	if err != nil {
+		t.Fatalf("RenderTrackingComment(in-progress) error = %v", err)
+	}
+
+	if !strings.Contains(body, "## 🔄 Code Review In Progress") {
+		t.Error("in-progress state should show in-progress header")
+	}
+
+	// Parse it back
+	parsedState, err := ParseTrackingComment(body)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment() error = %v", err)
+	}
+
+	// Verify it's still in-progress
+	if parsedState.ReviewStatus != domain.ReviewStatusInProgress {
+		t.Errorf("parsed ReviewStatus = %s, want %s", parsedState.ReviewStatus, domain.ReviewStatusInProgress)
+	}
+
+	// Now transition to completed with a finding
+	finding := createTestTrackedFinding(t, "test.go", domain.FindingStatusOpen, now)
+	parsedState.Findings = map[domain.FindingFingerprint]domain.TrackedFinding{
+		finding.Fingerprint: finding,
+	}
+	parsedState.ReviewStatus = domain.ReviewStatusCompleted
+	parsedState.ReviewedCommits = []string{"abc123"}
+
+	// Render the completed state
+	completedBody, err := RenderTrackingComment(parsedState)
+	if err != nil {
+		t.Fatalf("RenderTrackingComment(completed) error = %v", err)
+	}
+
+	// Verify completed state rendering
+	if !strings.Contains(completedBody, "## 🤖 Code Review Completed") {
+		t.Error("completed state should show completed header")
+	}
+	if !strings.Contains(completedBody, "| 🔴 Open | 1 |") {
+		t.Error("completed state should show 1 open finding")
+	}
+	if !strings.Contains(completedBody, "abc123") {
+		t.Error("completed state should show reviewed commit")
+	}
+
+	// Parse completed and verify round-trip
+	finalState, err := ParseTrackingComment(completedBody)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment(completed) error = %v", err)
+	}
+
+	if finalState.ReviewStatus != domain.ReviewStatusCompleted {
+		t.Errorf("final ReviewStatus = %s, want %s", finalState.ReviewStatus, domain.ReviewStatusCompleted)
+	}
+	if len(finalState.Findings) != 1 {
+		t.Errorf("final Findings count = %d, want 1", len(finalState.Findings))
+	}
+}
+
 func createTestTrackedFinding(t *testing.T, file string, status domain.FindingStatus, timestamp time.Time) domain.TrackedFinding {
 	t.Helper()
 

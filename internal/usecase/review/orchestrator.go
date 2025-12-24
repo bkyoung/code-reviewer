@@ -335,9 +335,10 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		// This ensures the tracking comment appears first in the PR timeline,
 		// before any inline comments from the review.
 		inProgressState := NewTrackingStateInProgress(target, time.Now())
-		// Preserve reviewed commits from previous state if available
+		// Preserve state from previous tracking to prevent data loss if review crashes
 		if trackingState != nil {
 			inProgressState.ReviewedCommits = trackingState.ReviewedCommits
+			inProgressState.Findings = trackingState.Findings
 		}
 
 		if err := o.deps.TrackingStore.Save(ctx, inProgressState); err != nil {

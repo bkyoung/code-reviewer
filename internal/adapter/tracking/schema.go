@@ -406,6 +406,11 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 	// Parse ReviewStatus with backward compatibility: empty/missing defaults to completed
 	reviewStatus := domain.ReviewStatus(stateJSON.ReviewStatus)
 	if !reviewStatus.IsValid() {
+		if stateJSON.ReviewStatus != "" {
+			// Non-empty but invalid status suggests data corruption or version incompatibility
+			log.Printf("warning: invalid review_status %q, defaulting to 'completed' - possible data corruption",
+				stateJSON.ReviewStatus)
+		}
 		// Backward compatibility: existing comments without review_status are completed reviews
 		reviewStatus = domain.ReviewStatusCompleted
 	}
