@@ -394,11 +394,20 @@ func TestDashboardRenderer_RenderDashboard_IncludesInstructions(t *testing.T) {
 func TestDashboardRenderer_RenderDashboard_NoInstructionsForInProgress(t *testing.T) {
 	renderer := NewDashboardRenderer()
 
+	// Include findings to ensure instructions are suppressed due to in-progress
+	// status, not just because there are no findings
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
 			Repository: "owner/repo",
 			PRNumber:   1,
 			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding:     domain.Finding{Severity: "high", File: "main.go", LineStart: 10},
+			},
 		},
 		ReviewStatus: domain.ReviewStatusInProgress,
 		LastUpdated:  time.Now(),
@@ -409,7 +418,7 @@ func TestDashboardRenderer_RenderDashboard_NoInstructionsForInProgress(t *testin
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Instructions should NOT appear in in-progress reviews
+	// Instructions should NOT appear in in-progress reviews, even with findings
 	if strings.Contains(body, "How to Update Finding Status") {
 		t.Error("instructions should not appear in in-progress reviews")
 	}
