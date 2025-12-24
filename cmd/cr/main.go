@@ -642,47 +642,58 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 	}, nil
 }
 
-// createVerifier creates an agent-based verifier using an available LLM provider.
+// createVerifier creates a batch verifier using an available LLM provider.
+// Prefers Gemini for verification due to large context window and lower cost.
 // Returns nil if no suitable provider is available.
 func createVerifier(cfg config.Config, providers map[string]review.Provider, repoDir string, obs observabilityComponents) review.Verifier {
-	// Find an LLM client to use for verification (prefer anthropic > openai > gemini)
+	// Find an LLM client to use for verification
+	// Prefer Gemini for batch verification (large context, lower cost, higher rate limits)
 	var llmClient verifyadapter.LLMClient
-	providerOrder := []string{"anthropic", "openai", "gemini"}
+	var providerName string
 
-	for _, name := range providerOrder {
-		if _, ok := providers[name]; !ok {
-			continue
+	// Try Gemini first for verification (best for batch due to 4M context)
+	if providerCfg, ok := cfg.Providers["gemini"]; ok && providerCfg.APIKey != "" {
+		// Use gemini-2.0-flash for verification if available, otherwise use configured model
+		model := providerCfg.Model
+		if model == "" {
+			model = "gemini-2.0-flash-exp"
 		}
-		providerCfg, ok := cfg.Providers[name]
-		if !ok || providerCfg.APIKey == "" {
-			continue
+		client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
 		}
+		llmClient = &geminiLLMAdapter{client: client}
+		providerName = "gemini"
+	}
 
-		// Create the appropriate HTTP client based on provider
-		switch name {
-		case "anthropic":
-			client := anthropic.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
-			if obs.logger != nil {
-				client.SetLogger(obs.logger)
+	// Fall back to other providers if Gemini not available
+	if llmClient == nil {
+		fallbackOrder := []string{"anthropic", "openai"}
+		for _, name := range fallbackOrder {
+			providerCfg, ok := cfg.Providers[name]
+			if !ok || providerCfg.APIKey == "" {
+				continue
 			}
-			llmClient = &anthropicLLMAdapter{client: client}
-		case "openai":
-			client := openai.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
-			if obs.logger != nil {
-				client.SetLogger(obs.logger)
-			}
-			llmClient = &openaiLLMAdapter{client: client}
-		case "gemini":
-			client := gemini.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
-			if obs.logger != nil {
-				client.SetLogger(obs.logger)
-			}
-			llmClient = &geminiLLMAdapter{client: client}
-		}
 
-		if llmClient != nil {
-			log.Printf("Verification enabled using %s provider", name)
-			break
+			switch name {
+			case "anthropic":
+				client := anthropic.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
+				if obs.logger != nil {
+					client.SetLogger(obs.logger)
+				}
+				llmClient = &anthropicLLMAdapter{client: client}
+			case "openai":
+				client := openai.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
+				if obs.logger != nil {
+					client.SetLogger(obs.logger)
+				}
+				llmClient = &openaiLLMAdapter{client: client}
+			}
+
+			if llmClient != nil {
+				providerName = name
+				break
+			}
 		}
 	}
 
@@ -691,16 +702,16 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 		return nil
 	}
 
+	log.Printf("Verification enabled using %s provider (batch mode)", providerName)
+
 	// Create repository adapter for file access
 	repo := repository.NewLocalRepository(repoDir)
 
 	// Create cost tracker with configured ceiling
 	costTracker := usecaseverify.NewCostTracker(cfg.Verification.CostCeiling)
 
-	// Build agent config from verification settings
-	agentConfig := verifyadapter.AgentConfig{
-		MaxIterations: 10,
-		Concurrency:   3,
+	// Build batch config from verification settings
+	batchConfig := verifyadapter.BatchConfig{
 		Confidence: config.ConfidenceThresholds{
 			Default:  cfg.Verification.Confidence.Default,
 			Critical: cfg.Verification.Confidence.Critical,
@@ -708,10 +719,9 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 			Medium:   cfg.Verification.Confidence.Medium,
 			Low:      cfg.Verification.Confidence.Low,
 		},
-		Depth: cfg.Verification.Depth,
 	}
 
-	return verifyadapter.NewAgentVerifier(llmClient, repo, costTracker, agentConfig)
+	return verifyadapter.NewBatchVerifier(llmClient, repo, costTracker, batchConfig)
 }
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.
@@ -759,7 +769,7 @@ func (a *geminiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt st
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 	resp, err := a.client.Call(ctx, fullPrompt, gemini.CallOptions{
 		Temperature: 0.0,
-		MaxTokens:   4096,
+		MaxTokens:   8192, // Larger for batch verification responses
 	})
 	if err != nil {
 		return "", 0, 0, 0, err
