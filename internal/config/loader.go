@@ -246,6 +246,16 @@ func setDefaults(v *viper.Viper) {
 
 	// Bot username for auto-dismissing stale reviews (Phase 2)
 	v.SetDefault("review.botUsername", "github-actions[bot]")
+
+	// Verification defaults (Epic #92 - agent verification)
+	v.SetDefault("verification.enabled", false)
+	v.SetDefault("verification.depth", "medium")
+	v.SetDefault("verification.costCeiling", 0.50)
+	v.SetDefault("verification.confidence.default", 75)
+	v.SetDefault("verification.confidence.critical", 60)
+	v.SetDefault("verification.confidence.high", 70)
+	v.SetDefault("verification.confidence.medium", 75)
+	v.SetDefault("verification.confidence.low", 85)
 }
 
 func defaultStorePath() string {

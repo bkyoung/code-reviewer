@@ -36,6 +36,16 @@ type Review struct {
 	Summary      string    `json:"summary"`
 	Findings     []Finding `json:"findings"`
 	Cost         float64   `json:"cost"` // Cost in USD
+
+	// Agent verification fields (Epic #92 - agent-based verification)
+	// When agent verification is enabled:
+	//   - DiscoveryFindings: raw candidates from LLM discovery (may include duplicates)
+	//   - VerifiedFindings: findings confirmed by agent verification
+	//   - ReportableFindings: verified findings meeting confidence thresholds
+	// When disabled, only Findings is populated (legacy behavior).
+	DiscoveryFindings  []CandidateFinding `json:"discoveryFindings,omitempty"`
+	VerifiedFindings   []VerifiedFinding  `json:"verifiedFindings,omitempty"`
+	ReportableFindings []VerifiedFinding  `json:"reportableFindings,omitempty"`
 }
 
 // Finding represents a single issue detected by an LLM.
