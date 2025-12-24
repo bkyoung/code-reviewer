@@ -331,3 +331,114 @@ func TestTruncateDescription(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardRenderer_RenderDashboard_IncludesInstructions(t *testing.T) {
+	renderer := NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding:     domain.Finding{Severity: "high", File: "main.go", LineStart: 10},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"critical": true, "high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for instructions section
+	if !strings.Contains(body, "How to Update Finding Status") {
+		t.Error("expected 'How to Update Finding Status' section header")
+	}
+
+	// Check for collapsible section
+	if !strings.Contains(body, "<details>") {
+		t.Error("expected instructions to be in a collapsible section")
+	}
+
+	// Check for acknowledge keywords
+	if !strings.Contains(body, "acknowledged") {
+		t.Error("expected 'acknowledged' keyword in instructions")
+	}
+	if !strings.Contains(body, "won't fix") {
+		t.Error("expected \"won't fix\" keyword in instructions")
+	}
+
+	// Check for dispute keywords
+	if !strings.Contains(body, "disputed") {
+		t.Error("expected 'disputed' keyword in instructions")
+	}
+	if !strings.Contains(body, "false positive") {
+		t.Error("expected 'false positive' keyword in instructions")
+	}
+
+	// Check for auto-resolution explanation
+	if !strings.Contains(body, "auto-resolved") {
+		t.Error("expected auto-resolution explanation in instructions")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_NoInstructionsForInProgress(t *testing.T) {
+	renderer := NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		ReviewStatus: domain.ReviewStatusInProgress,
+		LastUpdated:  time.Now(),
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Instructions should NOT appear in in-progress reviews
+	if strings.Contains(body, "How to Update Finding Status") {
+		t.Error("instructions should not appear in in-progress reviews")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_NoInstructionsForNoFindings(t *testing.T) {
+	renderer := NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		ReviewedCommits:     []string{"abc123"},
+		Findings:            map[domain.FindingFingerprint]domain.TrackedFinding{},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"critical": true, "high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Instructions should NOT appear when there are no findings
+	if strings.Contains(body, "How to Update Finding Status") {
+		t.Error("instructions should not appear when there are no findings")
+	}
+}

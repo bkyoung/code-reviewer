@@ -103,6 +103,9 @@ func (r *DashboardRenderer) renderCompleted(sb *strings.Builder, data review.Das
 	// Findings by severity (collapsible)
 	r.renderFindingsBySeverity(sb, data)
 
+	// Instructions for updating finding status
+	r.renderInstructions(sb, data)
+
 	// Edge cases appendix (out-of-diff, binary, renames)
 	r.renderAppendix(sb, data)
 
@@ -386,6 +389,31 @@ func (r *DashboardRenderer) renderLastUpdated(sb *strings.Builder, timestamp tim
 		return
 	}
 	sb.WriteString(fmt.Sprintf("*Last updated: %s*\n\n", timestamp.Format(time.RFC3339)))
+}
+
+// renderInstructions shows how to update finding status via replies.
+// Only rendered when there are findings to interact with.
+func (r *DashboardRenderer) renderInstructions(sb *strings.Builder, data review.DashboardData) {
+	// Don't show instructions if there are no findings
+	if len(data.Findings) == 0 {
+		return
+	}
+
+	sb.WriteString("<details>\n")
+	sb.WriteString("<summary>💡 How to Update Finding Status</summary>\n\n")
+
+	sb.WriteString("**Reply to an inline comment** with one of these keywords:\n\n")
+
+	sb.WriteString("| Action | Keywords |\n")
+	sb.WriteString("|--------|----------|\n")
+	sb.WriteString("| Acknowledge (won't fix, intentional) | `acknowledged`, `won't fix`, `intentional` |\n")
+	sb.WriteString("| Dispute (false positive) | `disputed`, `false positive` |\n")
+	sb.WriteString("\n")
+
+	sb.WriteString("**Auto-resolution:** Findings are auto-resolved when the code is fixed and ")
+	sb.WriteString("the issue is no longer detected in subsequent reviews.\n\n")
+
+	sb.WriteString("</details>\n\n")
 }
 
 // embedMetadata embeds the tracking state as base64-encoded JSON.
