@@ -21,6 +21,10 @@ const trackingCommentMarker = "<!-- CODE_REVIEWER_TRACKING_V1 -->"
 // The payload is base64 encoded to avoid issues with HTML comment delimiters (-->) in JSON.
 const trackingMetadataStart = "<!-- TRACKING_METADATA_B64"
 
+// dashboardMetadataStart marks the beginning of the embedded base64-encoded JSON metadata
+// in unified dashboard comments. This is used by the DashboardRenderer.
+const dashboardMetadataStart = "<!-- DASHBOARD_METADATA_B64"
+
 // trackingMetadataEnd marks the end of the embedded metadata.
 const trackingMetadataEnd = "-->"
 
@@ -197,26 +201,31 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 }
 
 // extractMetadata extracts the JSON string from between metadata markers.
-// Supports both new base64-encoded format and legacy raw JSON format.
+// Supports multiple formats for compatibility:
+//   - trackingMetadataStart: base64-encoded tracking comment format
+//   - dashboardMetadataStart: base64-encoded unified dashboard format
+//   - legacyMetadataStart: raw JSON legacy format
 func extractMetadata(body string) (string, error) {
-	// Try new base64 format first
+	// Try tracking metadata format first (base64)
 	startIdx := strings.Index(body, trackingMetadataStart)
+	markerLen := len(trackingMetadataStart)
 	isBase64 := true
 
-	// Fall back to legacy format if new format not found
+	// Try dashboard metadata format (base64)
+	if startIdx == -1 {
+		startIdx = strings.Index(body, dashboardMetadataStart)
+		markerLen = len(dashboardMetadataStart)
+	}
+
+	// Fall back to legacy format if neither base64 format found
 	if startIdx == -1 {
 		startIdx = strings.Index(body, legacyMetadataStart)
+		markerLen = len(legacyMetadataStart)
 		isBase64 = false
 	}
 
 	if startIdx == -1 {
 		return "", fmt.Errorf("tracking metadata start marker not found")
-	}
-
-	// Determine marker length based on format
-	markerLen := len(trackingMetadataStart)
-	if !isBase64 {
-		markerLen = len(legacyMetadataStart)
 	}
 
 	// Skip past the start marker

@@ -508,3 +508,78 @@ func createTestTrackedFinding(t *testing.T, file string, status domain.FindingSt
 
 	return tf
 }
+
+func TestParseTrackingComment_DashboardMetadataFormat(t *testing.T) {
+	// Test that ParseTrackingComment can parse dashboard-formatted comments
+	// (using DASHBOARD_METADATA_B64 marker instead of TRACKING_METADATA_B64)
+	now := time.Now().Truncate(time.Second)
+
+	originalState := review.TrackingState{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   42,
+			Branch:     "feature",
+			BaseSHA:    "base123",
+			HeadSHA:    "head456",
+		},
+		ReviewedCommits: []string{"commit1", "commit2", "commit3"},
+		Findings:        make(map[domain.FindingFingerprint]domain.TrackedFinding),
+		LastUpdated:     now,
+		ReviewStatus:    domain.ReviewStatusCompleted,
+	}
+
+	// Create a dashboard-formatted comment body
+	// This simulates what DashboardRenderer produces
+	body := `<!-- CODE_REVIEWER_DASHBOARD_V1 -->
+
+## ✅ Code Review Complete
+
+| Status | Count |
+|--------|-------|
+| 🔴 Open | 0 |
+| ✅ Resolved | 0 |
+
+<!-- DASHBOARD_METADATA_B64
+eyJ2ZXJzaW9uIjoxLCJyZXBvc2l0b3J5Ijoib3duZXIvcmVwbyIsInByX251bWJlciI6NDIsImJyYW5jaCI6ImZlYXR1cmUiLCJiYXNlX3NoYSI6ImJhc2UxMjMiLCJoZWFkX3NoYSI6ImhlYWQ0NTYiLCJyZXZpZXdlZF9jb21taXRzIjpbImNvbW1pdDEiLCJjb21taXQyIiwiY29tbWl0MyJdLCJmaW5kaW5ncyI6W10sImxhc3RfdXBkYXRlZCI6IjIwMjQtMDEtMDFUMTI6MDA6MDBaIiwicmV2aWV3X3N0YXR1cyI6ImNvbXBsZXRlZCJ9
+-->`
+
+	// Parse the dashboard comment
+	parsedState, err := ParseTrackingComment(body)
+	if err != nil {
+		t.Fatalf("ParseTrackingComment failed: %v", err)
+	}
+
+	// Verify key fields are preserved
+	if parsedState.Target.Repository != originalState.Target.Repository {
+		t.Errorf("Repository mismatch: got %q, want %q",
+			parsedState.Target.Repository, originalState.Target.Repository)
+	}
+
+	if parsedState.Target.PRNumber != originalState.Target.PRNumber {
+		t.Errorf("PRNumber mismatch: got %d, want %d",
+			parsedState.Target.PRNumber, originalState.Target.PRNumber)
+	}
+
+	if len(parsedState.ReviewedCommits) != 3 {
+		t.Errorf("ReviewedCommits count mismatch: got %d, want 3",
+			len(parsedState.ReviewedCommits))
+	}
+
+	// Verify all commits are preserved
+	expectedCommits := []string{"commit1", "commit2", "commit3"}
+	for i, expected := range expectedCommits {
+		if i >= len(parsedState.ReviewedCommits) {
+			t.Errorf("Missing commit at index %d", i)
+			continue
+		}
+		if parsedState.ReviewedCommits[i] != expected {
+			t.Errorf("Commit mismatch at index %d: got %q, want %q",
+				i, parsedState.ReviewedCommits[i], expected)
+		}
+	}
+
+	if parsedState.ReviewStatus != domain.ReviewStatusCompleted {
+		t.Errorf("ReviewStatus mismatch: got %q, want %q",
+			parsedState.ReviewStatus, domain.ReviewStatusCompleted)
+	}
+}
