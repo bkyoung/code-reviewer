@@ -153,6 +153,7 @@ func (r *LocalRepository) RunCommand(ctx context.Context, cmd string, args ...st
 
 // resolvePath resolves a path and validates it's within the repository root.
 // It follows symlinks to prevent bypassing the root directory check.
+// Returns the real (symlink-resolved) path to prevent TOCTOU attacks.
 func (r *LocalRepository) resolvePath(path string) (string, error) {
 	var resolved string
 
@@ -165,31 +166,38 @@ func (r *LocalRepository) resolvePath(path string) (string, error) {
 	// Clean the path to resolve any .. components
 	resolved = filepath.Clean(resolved)
 
+	// Get the real root path (following symlinks)
+	realRoot, err := filepath.EvalSymlinks(r.root)
+	if err != nil {
+		// If root doesn't exist, use cleaned path
+		realRoot = filepath.Clean(r.root)
+	}
+
 	// Resolve symlinks to get the real path
 	// This prevents symlink-based path traversal attacks
 	realPath, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
-		// If the file doesn't exist yet, we can't resolve symlinks
-		// Fall back to just checking the cleaned path
 		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("resolving symlinks: %w", err)
 		}
-		realPath = resolved
+		// File doesn't exist - validate the cleaned path instead
+		// Use filepath.Rel to properly check path hierarchy
+		rel, relErr := filepath.Rel(realRoot, resolved)
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return "", fmt.Errorf("path traversal detected")
+		}
+		return resolved, nil
 	}
 
-	// Get the real root path (also following symlinks)
-	realRoot, err := filepath.EvalSymlinks(r.root)
-	if err != nil {
-		// If root doesn't exist or has permission issues, use cleaned path
-		realRoot = filepath.Clean(r.root)
-	}
-
-	// Ensure the resolved path is within root
-	if !strings.HasPrefix(realPath, realRoot) && !strings.HasPrefix(realPath, filepath.Clean(r.root)) {
+	// Use filepath.Rel to check if realPath is under realRoot
+	// This correctly handles cases like /data vs /data-secret
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path traversal detected")
 	}
 
-	return resolved, nil
+	// Return the real path to prevent TOCTOU attacks
+	return realPath, nil
 }
 
 // globRecursive handles ** patterns for recursive directory matching.

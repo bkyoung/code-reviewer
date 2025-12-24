@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/repository"
@@ -173,7 +174,13 @@ func TestGitRepository_RunCommand(t *testing.T) {
 	repo := repository.NewGitRepository(tmp)
 
 	t.Run("inherits RunCommand from LocalRepository", func(t *testing.T) {
-		result, err := repo.RunCommand(context.Background(), "echo", "test")
+		var result verify.CommandResult
+		var err error
+		if runtime.GOOS == "windows" {
+			result, err = repo.RunCommand(context.Background(), "cmd", "/c", "echo", "test")
+		} else {
+			result, err = repo.RunCommand(context.Background(), "echo", "test")
+		}
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}

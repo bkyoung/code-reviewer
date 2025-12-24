@@ -258,7 +258,12 @@ func TestLocalRepository_RunCommand(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := repo.RunCommand(ctx, "sleep", "10")
+		var err error
+		if runtime.GOOS == "windows" {
+			_, err = repo.RunCommand(ctx, "cmd", "/c", "ping", "-n", "10", "127.0.0.1")
+		} else {
+			_, err = repo.RunCommand(ctx, "sleep", "10")
+		}
 		if err == nil {
 			t.Error("expected error for cancelled context")
 		}
