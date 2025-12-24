@@ -21,8 +21,18 @@ func TestIsTrackingComment(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "marker in middle",
+			name: "valid dashboard comment",
+			body: "<!-- CODE_REVIEWER_DASHBOARD_V1 -->\n\n## Dashboard\n...",
+			want: true,
+		},
+		{
+			name: "tracking marker in middle",
 			body: "Some text\n<!-- CODE_REVIEWER_TRACKING_V1 -->\nMore text",
+			want: true,
+		},
+		{
+			name: "dashboard marker in middle",
+			body: "Some text\n<!-- CODE_REVIEWER_DASHBOARD_V1 -->\nMore text",
 			want: true,
 		},
 		{
@@ -31,8 +41,13 @@ func TestIsTrackingComment(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "partial marker",
+			name: "partial tracking marker",
 			body: "<!-- CODE_REVIEWER_TRACKING",
+			want: false,
+		},
+		{
+			name: "partial dashboard marker",
+			body: "<!-- CODE_REVIEWER_DASHBOARD",
 			want: false,
 		},
 		{

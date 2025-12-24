@@ -13,9 +13,13 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
-// trackingCommentMarker is the HTML comment that identifies tracking comments.
+// trackingCommentMarker is the HTML comment that identifies legacy tracking comments.
 // This must be unique enough to avoid false matches with user comments.
 const trackingCommentMarker = "<!-- CODE_REVIEWER_TRACKING_V1 -->"
+
+// dashboardCommentMarker is the HTML comment that identifies unified dashboard comments.
+// Dashboard comments supersede tracking comments but use the same metadata format.
+const dashboardCommentMarker = "<!-- CODE_REVIEWER_DASHBOARD_V1 -->"
 
 // trackingMetadataStart marks the beginning of the embedded base64-encoded JSON metadata.
 // The payload is base64 encoded to avoid issues with HTML comment delimiters (-->) in JSON.
@@ -78,9 +82,12 @@ type trackedFindingJSON struct {
 	Evidence    bool   `json:"evidence"`
 }
 
-// IsTrackingComment returns true if the comment body contains the tracking marker.
+// IsTrackingComment returns true if the comment body contains either the legacy
+// tracking marker or the unified dashboard marker. Both comment types use the
+// same embedded metadata format and can be parsed by ParseTrackingComment.
 func IsTrackingComment(body string) bool {
-	return strings.Contains(body, trackingCommentMarker)
+	return strings.Contains(body, trackingCommentMarker) ||
+		strings.Contains(body, dashboardCommentMarker)
 }
 
 // ParseTrackingComment extracts TrackingState from a comment body.
