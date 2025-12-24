@@ -973,6 +973,21 @@ func (m *mockTrackingStore) Clear(ctx context.Context, target review.ReviewTarge
 	return nil
 }
 
+func (m *mockTrackingStore) SaveDashboard(ctx context.Context, data review.DashboardData) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Convert DashboardData to TrackingState for existing test assertions
+	state := review.TrackingState{
+		Target:          data.Target,
+		ReviewedCommits: data.ReviewedCommits,
+		Findings:        data.Findings,
+		LastUpdated:     data.LastUpdated,
+		ReviewStatus:    data.ReviewStatus,
+	}
+	m.savedState = &state
+	return "https://github.com/test/repo/pull/1#issuecomment-123", m.saveErr
+}
+
 // mockMergerWithFindings returns a merger that outputs specific findings
 type mockMergerWithFindings struct {
 	mu       sync.Mutex

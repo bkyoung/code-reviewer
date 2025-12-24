@@ -41,13 +41,20 @@ var pathSegmentRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 // pathTraversalPattern detects path traversal attempts.
 var pathTraversalPattern = regexp.MustCompile(`\.\.`)
 
+// DashboardRenderer defines the interface for rendering unified dashboard comments.
+// This is provided by the github adapter package.
+type DashboardRenderer interface {
+	RenderDashboard(data review.DashboardData) (string, error)
+}
+
 // GitHubStore implements TrackingStore using GitHub PR comments.
 // State is persisted as a special comment on the PR with embedded JSON metadata.
 type GitHubStore struct {
-	token      string
-	baseURL    string
-	httpClient *http.Client
-	retryConf  llmhttp.RetryConfig
+	token             string
+	baseURL           string
+	httpClient        *http.Client
+	retryConf         llmhttp.RetryConfig
+	dashboardRenderer DashboardRenderer // Optional: enables unified dashboard mode
 }
 
 // NewGitHubStore creates a new GitHub-based tracking store.
@@ -75,6 +82,12 @@ func NewGitHubStore(token string) *GitHubStore {
 // SetBaseURL sets a custom base URL (for testing or GitHub Enterprise).
 func (s *GitHubStore) SetBaseURL(baseURL string) {
 	s.baseURL = strings.TrimRight(baseURL, "/")
+}
+
+// SetDashboardRenderer configures the store to use unified dashboard comments.
+// When set, SaveDashboard will use this renderer for rich presentation.
+func (s *GitHubStore) SetDashboardRenderer(renderer DashboardRenderer) {
+	s.dashboardRenderer = renderer
 }
 
 // Load retrieves the tracking state from the PR's tracking comment.
@@ -171,6 +184,72 @@ func (s *GitHubStore) Save(ctx context.Context, state review.TrackingState) erro
 	return s.createComment(ctx, owner, repo, state.Target.PRNumber, body)
 }
 
+// SaveDashboard persists a unified dashboard comment with full review content.
+// If no DashboardRenderer is configured, it falls back to Save with basic rendering.
+// Returns the URL of the dashboard comment for linking from the review body.
+func (s *GitHubStore) SaveDashboard(ctx context.Context, data review.DashboardData) (string, error) {
+	if err := data.Target.Validate(); err != nil {
+		return "", fmt.Errorf("invalid target: %w", err)
+	}
+
+	if data.Target.PRNumber == 0 {
+		return "", fmt.Errorf("GitHub tracking requires a PR number")
+	}
+
+	// Parse owner/repo
+	owner, repo, err := parseRepository(data.Target.Repository)
+	if err != nil {
+		return "", err
+	}
+
+	// Render the comment body
+	var body string
+	if s.dashboardRenderer != nil {
+		// Use the dashboard renderer for rich presentation
+		body, err = s.dashboardRenderer.RenderDashboard(data)
+		if err != nil {
+			return "", fmt.Errorf("failed to render dashboard: %w", err)
+		}
+	} else {
+		// Fallback to basic tracking comment rendering
+		state := review.TrackingState{
+			Target:          data.Target,
+			ReviewedCommits: data.ReviewedCommits,
+			Findings:        data.Findings,
+			LastUpdated:     data.LastUpdated,
+			ReviewStatus:    data.ReviewStatus,
+		}
+		body, err = RenderTrackingComment(state)
+		if err != nil {
+			return "", fmt.Errorf("failed to render tracking comment: %w", err)
+		}
+	}
+
+	// Find existing comment (check for both dashboard and legacy tracking markers)
+	existing, err := s.findTrackingOrDashboardComment(ctx, owner, repo, data.Target.PRNumber)
+	if err != nil {
+		return "", fmt.Errorf("failed to find existing comment: %w", err)
+	}
+
+	var commentURL string
+	if existing != nil {
+		// Update existing comment
+		if err := s.updateComment(ctx, owner, repo, existing.ID, body); err != nil {
+			return "", err
+		}
+		commentURL = existing.HTMLURL
+	} else {
+		// Create new comment
+		response, err := s.createCommentWithResponse(ctx, owner, repo, data.Target.PRNumber, body)
+		if err != nil {
+			return "", err
+		}
+		commentURL = response.HTMLURL
+	}
+
+	return commentURL, nil
+}
+
 // Clear removes the tracking comment from the PR.
 func (s *GitHubStore) Clear(ctx context.Context, target review.ReviewTarget) error {
 	if err := target.Validate(); err != nil {
@@ -205,8 +284,9 @@ func (s *GitHubStore) Clear(ctx context.Context, target review.ReviewTarget) err
 
 // issueComment represents a GitHub issue comment.
 type issueComment struct {
-	ID   int64  `json:"id"`
-	Body string `json:"body"`
+	ID      int64  `json:"id"`
+	Body    string `json:"body"`
+	HTMLURL string `json:"html_url"` // URL to view the comment on GitHub
 }
 
 // findTrackingComment searches for the tracking comment on a PR.
@@ -283,6 +363,103 @@ func (s *GitHubStore) isValidPaginationURL(nextURL string) bool {
 
 	// Require same scheme and host
 	return next.Scheme == base.Scheme && next.Host == base.Host
+}
+
+// findTrackingOrDashboardComment searches for either a dashboard or tracking comment on a PR.
+// This enables backward compatibility: dashboards can update legacy tracking comments.
+// Returns nil if no matching comment exists.
+func (s *GitHubStore) findTrackingOrDashboardComment(ctx context.Context, owner, repo string, prNumber int) (*issueComment, error) {
+	// Validate inputs
+	if err := validatePathSegment(owner, "owner"); err != nil {
+		return nil, err
+	}
+	if err := validatePathSegment(repo, "repo"); err != nil {
+		return nil, err
+	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("invalid PR number: %d", prNumber)
+	}
+
+	// GitHub treats PRs as issues for comments API
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&sort=updated&direction=desc",
+		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
+
+	// Paginate through comments until we find a matching comment
+	for page := 0; apiURL != "" && page < maxPaginationPages; page++ {
+		respBody, nextURL, err := s.doRequestWithPagination(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var comments []issueComment
+		if err := json.Unmarshal(respBody, &comments); err != nil {
+			return nil, fmt.Errorf("failed to parse comments: %w", err)
+		}
+
+		// Check for both dashboard and legacy tracking markers
+		for i := range comments {
+			if isDashboardOrTrackingComment(comments[i].Body) {
+				return &comments[i], nil
+			}
+		}
+
+		// Validate next URL before following (SSRF protection)
+		if nextURL != "" && !s.isValidPaginationURL(nextURL) {
+			return nil, fmt.Errorf("invalid pagination URL: host mismatch")
+		}
+		apiURL = nextURL
+	}
+
+	// If we still have pages to check but hit the limit, return an error
+	if apiURL != "" {
+		return nil, fmt.Errorf("pagination limit reached (%d pages), comment may exist beyond searched range", maxPaginationPages)
+	}
+
+	return nil, nil
+}
+
+// isDashboardOrTrackingComment checks if a comment body contains either marker.
+func isDashboardOrTrackingComment(body string) bool {
+	// Check for both new dashboard marker and legacy tracking marker
+	return strings.Contains(body, "<!-- CODE_REVIEWER_DASHBOARD_V1 -->") ||
+		strings.Contains(body, trackingCommentMarker)
+}
+
+// createCommentWithResponse creates a new issue comment and returns the full response.
+func (s *GitHubStore) createCommentWithResponse(ctx context.Context, owner, repo string, prNumber int, body string) (*issueComment, error) {
+	if err := validatePathSegment(owner, "owner"); err != nil {
+		return nil, err
+	}
+	if err := validatePathSegment(repo, "repo"); err != nil {
+		return nil, err
+	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("invalid PR number: %d", prNumber)
+	}
+
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments",
+		s.baseURL, url.PathEscape(owner), url.PathEscape(repo), prNumber)
+
+	reqBody := struct {
+		Body string `json:"body"`
+	}{Body: body}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	respBody, err := s.doRequest(ctx, "POST", apiURL, jsonData)
+	if err != nil {
+		return nil, err
+	}
+
+	var response issueComment
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &response, nil
 }
 
 // createComment creates a new issue comment.
