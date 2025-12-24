@@ -174,9 +174,10 @@ func run() error {
 		}
 	}
 
-	// Create GitHub poster and tracking store if token is available
+	// Create GitHub poster, tracking store, and status scanner if token is available
 	var githubPoster review.GitHubPoster
 	var trackingStore review.TrackingStore
+	var statusScanner review.StatusScanner
 	if githubToken := os.Getenv("GITHUB_TOKEN"); githubToken != "" {
 		githubClient := githubadapter.NewClient(githubToken)
 		reviewPoster := usecasegithub.NewReviewPoster(githubClient)
@@ -186,6 +187,9 @@ func run() error {
 		githubStore := tracking.NewGitHubStore(githubToken)
 		githubStore.SetDashboardRenderer(githubadapter.NewDashboardRenderer())
 		trackingStore = githubStore
+
+		// Enable status detection from PR comment replies (#60)
+		statusScanner = githubadapter.NewGitHubStatusScanner(githubClient)
 	}
 
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
@@ -204,6 +208,7 @@ func run() error {
 		RepoDir:       repoDir,
 		GitHubPoster:  githubPoster,
 		TrackingStore: trackingStore,
+		StatusScanner: statusScanner,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{

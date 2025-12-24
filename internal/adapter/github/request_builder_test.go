@@ -390,6 +390,95 @@ func TestDetermineReviewEventWithActions(t *testing.T) {
 	}
 }
 
+func TestFormatFindingCommentWithFingerprint(t *testing.T) {
+	finding := domain.Finding{
+		ID:          "test-id",
+		File:        "main.go",
+		LineStart:   42,
+		LineEnd:     42,
+		Severity:    "high",
+		Category:    "security",
+		Description: "SQL injection vulnerability",
+		Suggestion:  "Use parameterized queries",
+	}
+
+	fingerprint := domain.FingerprintFromFinding(finding)
+	comment := github.FormatFindingCommentWithFingerprint(finding, fingerprint)
+
+	// Should contain all the normal content
+	assert.Contains(t, comment, "**Severity:** high")
+	assert.Contains(t, comment, "**Category:** security")
+	assert.Contains(t, comment, "SQL injection vulnerability")
+	assert.Contains(t, comment, "Use parameterized queries")
+
+	// Should contain the fingerprint in an HTML comment
+	assert.Contains(t, comment, "<!-- CR_FINGERPRINT:")
+	assert.Contains(t, comment, string(fingerprint))
+	assert.Contains(t, comment, "-->")
+}
+
+func TestExtractFingerprintFromComment(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentBody string
+		wantFP      domain.FindingFingerprint
+		wantFound   bool
+	}{
+		{
+			name:        "valid fingerprint",
+			commentBody: "**Severity:** high\n\n<!-- CR_FINGERPRINT:abc123def456 -->\n",
+			wantFP:      "abc123def456",
+			wantFound:   true,
+		},
+		{
+			name:        "fingerprint at end",
+			commentBody: "Some content\n<!-- CR_FINGERPRINT:xyz789 -->",
+			wantFP:      "xyz789",
+			wantFound:   true,
+		},
+		{
+			name:        "fingerprint in middle",
+			commentBody: "Before\n<!-- CR_FINGERPRINT:middle123 -->\nAfter",
+			wantFP:      "middle123",
+			wantFound:   true,
+		},
+		{
+			name:        "no fingerprint",
+			commentBody: "Regular comment without fingerprint",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "partial marker only",
+			commentBody: "<!-- CR_FINGERPRINT:",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "empty fingerprint",
+			commentBody: "<!-- CR_FINGERPRINT: -->",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "legacy comment without fingerprint",
+			commentBody: "**Severity:** high\n\n📍 Line 42\n\nSQL injection",
+			wantFP:      "",
+			wantFound:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fp, found := github.ExtractFingerprintFromComment(tt.commentBody)
+			assert.Equal(t, tt.wantFound, found, "found mismatch")
+			if found {
+				assert.Equal(t, tt.wantFP, fp, "fingerprint mismatch")
+			}
+		})
+	}
+}
+
 func TestHasBlockingFindings(t *testing.T) {
 	tests := []struct {
 		name     string
