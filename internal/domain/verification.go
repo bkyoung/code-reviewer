@@ -29,39 +29,39 @@ func (c Classification) IsValid() bool {
 // CandidateFinding represents an unverified finding from the discovery phase.
 // Multiple LLMs may report the same issue, captured by Sources and AgreementScore.
 type CandidateFinding struct {
-	Finding        Finding  // The underlying finding from an LLM
-	Sources        []string // Which LLM providers reported this (e.g., ["openai", "anthropic"])
-	AgreementScore float64  // 0-1, proportion of LLMs that agreed on this finding
+	Finding        Finding  `json:"finding"`        // The underlying finding from an LLM
+	Sources        []string `json:"sources"`        // Which LLM providers reported this (e.g., ["openai", "anthropic"])
+	AgreementScore float64  `json:"agreementScore"` // 0-1, proportion of LLMs that agreed on this finding
 }
 
 // VerifiedFinding represents a finding after agent verification.
 // The verification agent has read the full codebase and confirmed or rejected
 // the candidate finding, providing classification and confidence scoring.
 type VerifiedFinding struct {
-	Finding         Finding              // The original finding
-	Verified        bool                 // Whether verification confirmed the issue exists
-	Classification  Classification       // Category: blocking_bug, security, performance, style
-	Confidence      int                  // 0-100, agent's confidence in the verification
-	Evidence        string               // Agent's explanation and supporting evidence
-	BlocksOperation bool                 // Whether this finding should block merge/operation
-	VerificationLog []VerificationAction // Record of agent actions during verification
+	Finding         Finding              `json:"finding"`         // The original finding
+	Verified        bool                 `json:"verified"`        // Whether verification confirmed the issue exists
+	Classification  Classification       `json:"classification"`  // Category: blocking_bug, security, performance, style
+	Confidence      int                  `json:"confidence"`      // 0-100, agent's confidence in the verification
+	Evidence        string               `json:"evidence"`        // Agent's explanation and supporting evidence
+	BlocksOperation bool                 `json:"blocksOperation"` // Whether this finding should block merge/operation
+	VerificationLog []VerificationAction `json:"verificationLog"` // Record of agent actions during verification
 }
 
 // VerificationAction records a single tool invocation by the verification agent.
 // This provides an audit trail of how the agent verified (or rejected) a finding.
 type VerificationAction struct {
-	Tool   string // Tool name: "read", "grep", "glob", "bash"
-	Input  string // Tool input: file path, search pattern, command
-	Output string // Tool output summary (may be truncated for large outputs)
+	Tool   string `json:"tool"`   // Tool name: "read", "grep", "glob", "bash"
+	Input  string `json:"input"`  // Tool input: file path, search pattern, command
+	Output string `json:"output"` // Tool output summary (truncation applied at creation time)
 }
 
 // VerificationResult encapsulates the outcome of verifying a candidate finding.
 // This is the return type from the Verifier interface.
 type VerificationResult struct {
-	Verified        bool                 // Whether the finding was confirmed
-	Classification  Classification       // The determined classification
-	Confidence      int                  // 0-100 confidence score
-	Evidence        string               // Explanation of the verification decision
-	BlocksOperation bool                 // Whether this blocks the operation
-	Actions         []VerificationAction // Agent actions taken during verification
+	Verified        bool                 `json:"verified"`        // Whether the finding was confirmed
+	Classification  Classification       `json:"classification"`  // The determined classification
+	Confidence      int                  `json:"confidence"`      // 0-100 confidence score
+	Evidence        string               `json:"evidence"`        // Explanation of the verification decision
+	BlocksOperation bool                 `json:"blocksOperation"` // Whether this blocks the operation
+	Actions         []VerificationAction `json:"actions"`         // Agent actions taken during verification
 }
