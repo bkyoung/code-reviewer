@@ -762,10 +762,28 @@ func TestTruncateDescription_EdgeCases(t *testing.T) {
 			expected: "日...",
 		},
 		{
+			name:     "UTF-8 maxLen 2 with long input",
+			desc:     "日本語テスト",
+			maxLen:   2,
+			expected: "日本", // maxLen <= 3 branch: no ellipsis
+		},
+		{
+			name:     "UTF-8 maxLen 3 with long input",
+			desc:     "日本語テスト",
+			maxLen:   3,
+			expected: "日本語", // maxLen <= 3 branch: no ellipsis
+		},
+		{
 			name:     "invalid UTF-8 normalized",
 			desc:     string([]byte{0xff, 0xfe, 0x41, 0x42}), // Invalid UTF-8 + "AB"
 			maxLen:   10,
 			expected: "\ufffd\ufffdAB", // Replacement chars + "AB"
+		},
+		{
+			name:     "invalid UTF-8 with truncation",
+			desc:     string([]byte{0xff, 0xfe, 0x41, 0x42, 0x43, 0x44, 0x45}), // Invalid + "ABCDE"
+			maxLen:   4,
+			expected: "\ufffd...", // runes[:1] + "..."
 		},
 		{
 			name:     "empty string",
