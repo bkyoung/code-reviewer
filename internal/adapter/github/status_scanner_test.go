@@ -14,7 +14,7 @@ import (
 )
 
 func TestGitHubStatusScanner_ScanForStatusUpdates(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("abc123def456")
+	fingerprint := domain.FindingFingerprint("abc123def456abc123def456abc12345")
 
 	// Setup mock server that returns comments with replies
 	comments := []github.PullRequestComment{
@@ -78,8 +78,8 @@ func TestGitHubStatusScanner_NoComments(t *testing.T) {
 }
 
 func TestGitHubStatusScanner_MultipleFindings(t *testing.T) {
-	fp1 := domain.FindingFingerprint("fp1")
-	fp2 := domain.FindingFingerprint("fp2")
+	fp1 := domain.FindingFingerprint("11111111111111111111111111111111")
+	fp2 := domain.FindingFingerprint("22222222222222222222222222222222")
 
 	comments := []github.PullRequestComment{
 		{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp1) + " -->", User: github.User{Login: "bot"}},

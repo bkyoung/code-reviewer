@@ -418,6 +418,9 @@ func TestFormatFindingCommentWithFingerprint(t *testing.T) {
 }
 
 func TestExtractFingerprintFromComment(t *testing.T) {
+	// Valid 32-character hex fingerprint for testing
+	validFP := domain.FindingFingerprint("abc123def456abc123def456abc12345")
+
 	tests := []struct {
 		name        string
 		commentBody string
@@ -426,20 +429,20 @@ func TestExtractFingerprintFromComment(t *testing.T) {
 	}{
 		{
 			name:        "valid fingerprint",
-			commentBody: "**Severity:** high\n\n<!-- CR_FINGERPRINT:abc123def456 -->\n",
-			wantFP:      "abc123def456",
+			commentBody: "**Severity:** high\n\n<!-- CR_FINGERPRINT:" + string(validFP) + " -->\n",
+			wantFP:      validFP,
 			wantFound:   true,
 		},
 		{
 			name:        "fingerprint at end",
-			commentBody: "Some content\n<!-- CR_FINGERPRINT:xyz789 -->",
-			wantFP:      "xyz789",
+			commentBody: "Some content\n<!-- CR_FINGERPRINT:0123456789abcdef0123456789abcdef -->",
+			wantFP:      "0123456789abcdef0123456789abcdef",
 			wantFound:   true,
 		},
 		{
 			name:        "fingerprint in middle",
-			commentBody: "Before\n<!-- CR_FINGERPRINT:middle123 -->\nAfter",
-			wantFP:      "middle123",
+			commentBody: "Before\n<!-- CR_FINGERPRINT:fedcba9876543210fedcba9876543210 -->\nAfter",
+			wantFP:      "fedcba9876543210fedcba9876543210",
 			wantFound:   true,
 		},
 		{
@@ -463,6 +466,37 @@ func TestExtractFingerprintFromComment(t *testing.T) {
 		{
 			name:        "legacy comment without fingerprint",
 			commentBody: "**Severity:** high\n\n📍 Line 42\n\nSQL injection",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		// Fingerprint format validation tests
+		{
+			name:        "too short fingerprint rejected",
+			commentBody: "<!-- CR_FINGERPRINT:abc123 -->",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "too long fingerprint rejected",
+			commentBody: "<!-- CR_FINGERPRINT:abc123def456abc123def456abc12345extra -->",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "invalid characters rejected - uppercase",
+			commentBody: "<!-- CR_FINGERPRINT:ABC123DEF456ABC123DEF456ABC12345 -->",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "invalid characters rejected - special chars",
+			commentBody: "<!-- CR_FINGERPRINT:abc123def456abc123def456abc1234! -->",
+			wantFP:      "",
+			wantFound:   false,
+		},
+		{
+			name:        "invalid characters rejected - injection attempt",
+			commentBody: "<!-- CR_FINGERPRINT:<script>alert(1)</script>abc -->",
 			wantFP:      "",
 			wantFound:   false,
 		},

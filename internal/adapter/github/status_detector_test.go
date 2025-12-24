@@ -11,7 +11,7 @@ import (
 )
 
 func TestDetectStatusUpdates_SingleAcknowledge(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("abc123")
+	fingerprint := domain.FindingFingerprint("abc123abc123abc123abc123abc12345")
 
 	comments := []github.CommentWithReplies{
 		{
@@ -40,7 +40,7 @@ func TestDetectStatusUpdates_SingleAcknowledge(t *testing.T) {
 }
 
 func TestDetectStatusUpdates_SingleDispute(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("def456")
+	fingerprint := domain.FindingFingerprint("def456def456def456def456def45678")
 
 	comments := []github.CommentWithReplies{
 		{
@@ -68,7 +68,7 @@ func TestDetectStatusUpdates_SingleDispute(t *testing.T) {
 }
 
 func TestDetectStatusUpdates_MultipleReplies_UsesLatest(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("xyz789")
+	fingerprint := domain.FindingFingerprint("11111111111111111111111111111111")
 
 	comments := []github.CommentWithReplies{
 		{
@@ -124,7 +124,7 @@ func TestDetectStatusUpdates_NoFingerprint(t *testing.T) {
 }
 
 func TestDetectStatusUpdates_NoKeywordInReplies(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("abc123")
+	fingerprint := domain.FindingFingerprint("22222222222222222222222222222222")
 
 	comments := []github.CommentWithReplies{
 		{
@@ -154,9 +154,9 @@ func TestDetectStatusUpdates_NoKeywordInReplies(t *testing.T) {
 }
 
 func TestDetectStatusUpdates_MultipleFindings(t *testing.T) {
-	fp1 := domain.FindingFingerprint("finding1")
-	fp2 := domain.FindingFingerprint("finding2")
-	fp3 := domain.FindingFingerprint("finding3")
+	fp1 := domain.FindingFingerprint("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	fp2 := domain.FindingFingerprint("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	fp3 := domain.FindingFingerprint("cccccccccccccccccccccccccccccccc")
 
 	comments := []github.CommentWithReplies{
 		{
@@ -282,7 +282,7 @@ func TestApplyStatusUpdates_Empty(t *testing.T) {
 }
 
 func TestStatusUpdate_UpdatedAtParsing(t *testing.T) {
-	fingerprint := domain.FindingFingerprint("abc123")
+	fingerprint := domain.FindingFingerprint("33333333333333333333333333333333")
 
 	comments := []github.CommentWithReplies{
 		{

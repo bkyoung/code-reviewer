@@ -130,9 +130,15 @@ func FormatFindingCommentWithFingerprint(f domain.Finding, fingerprint domain.Fi
 	return sb.String()
 }
 
+// fingerprintLength is the expected length of a fingerprint (32 hex chars from 16 bytes of SHA256).
+const fingerprintLength = 32
+
 // ExtractFingerprintFromComment extracts the finding fingerprint from a GitHub comment body.
-// Returns the fingerprint and true if found, or empty and false if not present.
+// Returns the fingerprint and true if found and valid, or empty and false if not present or invalid.
 // This is used to link reply comments back to their original findings.
+//
+// The function validates that the extracted fingerprint matches the expected format
+// (32-character hexadecimal string) to prevent injection of arbitrary strings.
 func ExtractFingerprintFromComment(body string) (domain.FindingFingerprint, bool) {
 	startIdx := strings.Index(body, fingerprintMarkerStart)
 	if startIdx == -1 {
@@ -155,7 +161,26 @@ func ExtractFingerprintFromComment(body string) (domain.FindingFingerprint, bool
 		return "", false
 	}
 
+	// Validate fingerprint format: must be exactly 32 hexadecimal characters
+	if !isValidFingerprint(fp) {
+		return "", false
+	}
+
 	return domain.FindingFingerprint(fp), true
+}
+
+// isValidFingerprint checks if a string is a valid fingerprint format.
+// A valid fingerprint is exactly 32 lowercase hexadecimal characters.
+func isValidFingerprint(fp string) bool {
+	if len(fp) != fingerprintLength {
+		return false
+	}
+	for _, c := range fp {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // DetermineReviewEvent determines the appropriate ReviewEvent based on finding severities.

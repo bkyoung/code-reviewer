@@ -62,30 +62,40 @@ func ParseStatusKeyword(text string) (status FindingStatus, reason string, found
 // A keyword is considered at a word boundary if:
 // - It appears at the start/end of the text, OR
 // - It's surrounded by non-alphanumeric characters
+//
+// The function scans all occurrences of the keyword, returning true if any
+// occurrence satisfies the word boundary conditions. This handles cases like
+// "hack acknowledged" where "ack" appears embedded in "hack" but also as part
+// of the valid keyword "acknowledged".
 func containsKeyword(textLower, keyword string) bool {
-	idx := strings.Index(textLower, keyword)
-	if idx == -1 {
-		return false
-	}
+	searchStart := 0
+	for {
+		// Find next occurrence of keyword starting from searchStart
+		idx := strings.Index(textLower[searchStart:], keyword)
+		if idx == -1 {
+			return false
+		}
 
-	// Check character before keyword (if any)
-	if idx > 0 {
-		prevChar := textLower[idx-1]
-		if isAlphanumeric(prevChar) {
+		// Adjust index to be relative to original string
+		idx += searchStart
+
+		// Check character before keyword (if any)
+		validBefore := idx == 0 || !isAlphanumeric(textLower[idx-1])
+
+		// Check character after keyword (if any)
+		endIdx := idx + len(keyword)
+		validAfter := endIdx >= len(textLower) || !isAlphanumeric(textLower[endIdx])
+
+		if validBefore && validAfter {
+			return true
+		}
+
+		// Move past this occurrence and continue searching
+		searchStart = idx + 1
+		if searchStart >= len(textLower) {
 			return false
 		}
 	}
-
-	// Check character after keyword (if any)
-	endIdx := idx + len(keyword)
-	if endIdx < len(textLower) {
-		nextChar := textLower[endIdx]
-		if isAlphanumeric(nextChar) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // isAlphanumeric returns true if the byte is a letter or digit.

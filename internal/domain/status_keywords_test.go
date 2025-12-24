@@ -140,6 +140,35 @@ func TestParseStatusKeyword(t *testing.T) {
 			wantReason: "",
 			wantFound:  false,
 		},
+		// Multiple occurrence handling - keyword appears multiple times
+		{
+			name:       "keyword embedded then standalone - hack ack",
+			text:       "hack ack",
+			wantStatus: FindingStatusAcknowledged,
+			wantReason: "hack ack",
+			wantFound:  true,
+		},
+		{
+			name:       "keyword embedded then valid keyword - hack acknowledged",
+			text:       "hack acknowledged",
+			wantStatus: FindingStatusAcknowledged,
+			wantReason: "hack acknowledged",
+			wantFound:  true,
+		},
+		{
+			name:       "multiple embedded occurrences then valid - backpack ack",
+			text:       "backpack ack",
+			wantStatus: FindingStatusAcknowledged,
+			wantReason: "backpack ack",
+			wantFound:  true,
+		},
+		{
+			name:       "all occurrences embedded - no match",
+			text:       "backpack hackathon crackle",
+			wantStatus: "",
+			wantReason: "",
+			wantFound:  false,
+		},
 	}
 
 	for _, tt := range tests {
