@@ -1,16 +1,17 @@
-package github
+package github_test
 
 import (
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/github"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
 func TestDashboardRenderer_RenderDashboard_InProgress(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
@@ -49,7 +50,7 @@ func TestDashboardRenderer_RenderDashboard_InProgress(t *testing.T) {
 }
 
 func TestDashboardRenderer_RenderDashboard_Completed(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	now := time.Now()
 	data := review.DashboardData{
@@ -139,12 +140,17 @@ func TestDashboardRenderer_RenderDashboard_Completed(t *testing.T) {
 		t.Error("expected main.go in files requiring attention")
 	}
 
-	// Check for collapsible findings by severity
+	// Check for collapsible findings by severity (new format uses <strong>Critical</strong>)
 	if !strings.Contains(body, "<details open>") {
 		t.Error("expected critical findings section to be open by default")
 	}
-	if !strings.Contains(body, "Critical Issues") {
-		t.Error("expected Critical Issues section")
+	if !strings.Contains(body, "<strong>Critical</strong>") {
+		t.Error("expected Critical severity section")
+	}
+
+	// Check for Findings Requiring Attention header
+	if !strings.Contains(body, "### Findings Requiring Attention") {
+		t.Error("expected 'Findings Requiring Attention' section header")
 	}
 
 	// Check for review metadata
@@ -170,7 +176,7 @@ func TestDashboardRenderer_RenderDashboard_Completed(t *testing.T) {
 }
 
 func TestDashboardRenderer_RenderDashboard_NoFindings(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
@@ -200,7 +206,7 @@ func TestDashboardRenderer_RenderDashboard_NoFindings(t *testing.T) {
 }
 
 func TestDashboardRenderer_RenderDashboard_ApprovedWithSuggestions(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
@@ -257,7 +263,7 @@ func TestIsDashboardComment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsDashboardComment(tt.body)
+			result := github.IsDashboardComment(tt.body)
 			if result != tt.expected {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
@@ -285,7 +291,7 @@ func TestBuildReviewPointer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildReviewPointer(tt.url)
+			result := github.BuildReviewPointer(tt.url)
 			if result != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
@@ -306,9 +312,9 @@ func TestFormatCost(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := formatCost(tt.cost)
+		result := github.FormatCost(tt.cost)
 		if result != tt.expected {
-			t.Errorf("formatCost(%v) = %q, expected %q", tt.cost, result, tt.expected)
+			t.Errorf("github.FormatCost(%v) = %q, expected %q", tt.cost, result, tt.expected)
 		}
 	}
 }
@@ -325,15 +331,15 @@ func TestTruncateDescription(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := truncateDescription(tt.desc, tt.maxLen)
+		result := github.TruncateDescription(tt.desc, tt.maxLen)
 		if result != tt.expected {
-			t.Errorf("truncateDescription(%q, %d) = %q, expected %q", tt.desc, tt.maxLen, result, tt.expected)
+			t.Errorf("github.TruncateDescription(%q, %d) = %q, expected %q", tt.desc, tt.maxLen, result, tt.expected)
 		}
 	}
 }
 
 func TestDashboardRenderer_RenderDashboard_IncludesInstructions(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
@@ -392,7 +398,7 @@ func TestDashboardRenderer_RenderDashboard_IncludesInstructions(t *testing.T) {
 }
 
 func TestDashboardRenderer_RenderDashboard_NoInstructionsForInProgress(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	// Include findings to ensure instructions are suppressed due to in-progress
 	// status, not just because there are no findings
@@ -425,7 +431,7 @@ func TestDashboardRenderer_RenderDashboard_NoInstructionsForInProgress(t *testin
 }
 
 func TestDashboardRenderer_RenderDashboard_NoInstructionsForNoFindings(t *testing.T) {
-	renderer := NewDashboardRenderer()
+	renderer := github.NewDashboardRenderer()
 
 	data := review.DashboardData{
 		Target: review.ReviewTarget{
@@ -449,5 +455,351 @@ func TestDashboardRenderer_RenderDashboard_NoInstructionsForNoFindings(t *testin
 	// Instructions should NOT appear when there are no findings
 	if strings.Contains(body, "How to Update Finding Status") {
 		t.Error("instructions should not appear when there are no findings")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_ResolvedFindings(t *testing.T) {
+	renderer := github.NewDashboardRenderer()
+
+	resolvedCommit := "abc123def"
+	resolvedTime := time.Now()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "xyz789",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusResolved,
+				ResolvedIn:  &resolvedCommit,
+				ResolvedAt:  &resolvedTime,
+				Finding: domain.Finding{
+					File:        "main.go",
+					LineStart:   10,
+					Severity:    "high",
+					Category:    "security",
+					Description: "Fixed SQL injection vulnerability",
+				},
+			},
+			"fp2": {
+				Fingerprint: "fp2",
+				Status:      domain.FindingStatusOpen,
+				Finding: domain.Finding{
+					File:        "api.go",
+					LineStart:   20,
+					Severity:    "low",
+					Category:    "style",
+					Description: "Open style issue",
+				},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"critical": true, "high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for resolved findings section
+	if !strings.Contains(body, "Resolved Findings") {
+		t.Error("expected 'Resolved Findings' section")
+	}
+
+	// Check for specific strikethrough table cell with file name
+	if !strings.Contains(body, "~~`main.go`~~") {
+		t.Error("expected strikethrough with file name in resolved findings")
+	}
+
+	// Check for strikethrough severity
+	if !strings.Contains(body, "~~high~~") {
+		t.Error("expected strikethrough severity in resolved findings")
+	}
+
+	// Check for short commit SHA in resolved info
+	if !strings.Contains(body, "abc123d") {
+		t.Error("expected short commit SHA in resolved findings")
+	}
+
+	// Resolved section should be collapsed by default (not "open")
+	if strings.Contains(body, `<details open>
+<summary>📋 <strong>Resolved`) {
+		t.Error("resolved section should be collapsed, not open")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_ExpandableIndividualFindings(t *testing.T) {
+	renderer := github.NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding: domain.Finding{
+					File:        "main.go",
+					LineStart:   10,
+					LineEnd:     15,
+					Severity:    "critical",
+					Category:    "security",
+					Description: "SQL injection vulnerability detected in user input handler",
+					Suggestion:  "Use parameterized queries instead of string concatenation",
+				},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"critical": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for expandable individual finding (nested details block)
+	// After the summary table, there should be individual finding details
+	if !strings.Contains(body, "<code>main.go:10-15</code>") {
+		t.Error("expected individual finding with file and line range")
+	}
+
+	// Check for suggestion in individual finding
+	if !strings.Contains(body, "**Suggestion:**") {
+		t.Error("expected suggestion in individual finding")
+	}
+	if !strings.Contains(body, "parameterized queries") {
+		t.Error("expected suggestion text in individual finding")
+	}
+
+	// Check for category in individual finding
+	if !strings.Contains(body, "**Category:** security") {
+		t.Error("expected category in individual finding")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_EmptySuggestion(t *testing.T) {
+	renderer := github.NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding: domain.Finding{
+					File:        "main.go",
+					LineStart:   10,
+					Severity:    "high",
+					Category:    "bug",
+					Description: "Potential null pointer dereference",
+					Suggestion:  "", // Empty suggestion
+				},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should not contain suggestion section when suggestion is empty
+	if strings.Contains(body, "**Suggestion:**") {
+		t.Error("should not show suggestion section when suggestion is empty")
+	}
+
+	// Should still contain the finding details
+	if !strings.Contains(body, "main.go") {
+		t.Error("expected file name in finding")
+	}
+	if !strings.Contains(body, "null pointer") {
+		t.Error("expected description in finding")
+	}
+}
+
+func TestDashboardRenderer_RenderDashboard_SectionSeparator(t *testing.T) {
+	renderer := github.NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding:     domain.Finding{Severity: "low", File: "test.go", LineStart: 1},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"critical": true, "high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for horizontal rule separator between findings and metadata
+	if !strings.Contains(body, "---\n") {
+		t.Error("expected horizontal rule separator between findings and metadata sections")
+	}
+}
+
+func TestTruncateDescription_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		desc     string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "normal truncation",
+			desc:     "This is a long description that needs truncation",
+			maxLen:   20,
+			expected: "This is a long de...",
+		},
+		{
+			name:     "no truncation needed",
+			desc:     "Short",
+			maxLen:   20,
+			expected: "Short",
+		},
+		{
+			name:     "maxLen zero",
+			desc:     "Some text",
+			maxLen:   0,
+			expected: "",
+		},
+		{
+			name:     "maxLen negative",
+			desc:     "Some text",
+			maxLen:   -5,
+			expected: "",
+		},
+		{
+			name:     "maxLen 1",
+			desc:     "ABCDEF",
+			maxLen:   1,
+			expected: "A",
+		},
+		{
+			name:     "maxLen 2",
+			desc:     "ABCDEF",
+			maxLen:   2,
+			expected: "AB",
+		},
+		{
+			name:     "maxLen 3",
+			desc:     "ABCDEF",
+			maxLen:   3,
+			expected: "ABC",
+		},
+		{
+			name:     "maxLen 4 with truncation",
+			desc:     "ABCDEF",
+			maxLen:   4,
+			expected: "A...",
+		},
+		{
+			name:     "UTF-8 characters",
+			desc:     "こんにちは世界", // Japanese: "Hello World"
+			maxLen:   5,
+			expected: "こん...",
+		},
+		{
+			name:     "UTF-8 no truncation",
+			desc:     "日本語",
+			maxLen:   10,
+			expected: "日本語",
+		},
+		{
+			name:     "UTF-8 maxLen 1",
+			desc:     "日本語",
+			maxLen:   1,
+			expected: "日",
+		},
+		{
+			name:     "UTF-8 maxLen 2",
+			desc:     "日本語",
+			maxLen:   2,
+			expected: "日本",
+		},
+		{
+			name:     "UTF-8 maxLen 3",
+			desc:     "日本語",
+			maxLen:   3,
+			expected: "日本語", // No truncation needed (exactly 3 runes)
+		},
+		{
+			name:     "UTF-8 maxLen 4 with truncation",
+			desc:     "日本語テスト",
+			maxLen:   4,
+			expected: "日...",
+		},
+		{
+			name:     "UTF-8 maxLen 2 with long input",
+			desc:     "日本語テスト",
+			maxLen:   2,
+			expected: "日本", // maxLen <= 3 branch: no ellipsis
+		},
+		{
+			name:     "UTF-8 maxLen 3 with long input",
+			desc:     "日本語テスト",
+			maxLen:   3,
+			expected: "日本語", // maxLen <= 3 branch: no ellipsis
+		},
+		{
+			name:     "invalid UTF-8 normalized",
+			desc:     string([]byte{0xff, 0xfe, 0x41, 0x42}), // Invalid UTF-8 + "AB"
+			maxLen:   10,
+			expected: "\ufffd\ufffdAB", // Replacement chars + "AB"
+		},
+		{
+			name:     "invalid UTF-8 with truncation",
+			desc:     string([]byte{0xff, 0xfe, 0x41, 0x42, 0x43, 0x44, 0x45}), // Invalid + "ABCDE"
+			maxLen:   4,
+			expected: "\ufffd...", // runes[:1] + "..."
+		},
+		{
+			name:     "empty string",
+			desc:     "",
+			maxLen:   10,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := github.TruncateDescription(tt.desc, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("TruncateDescription(%q, %d) = %q, want %q",
+					tt.desc, tt.maxLen, result, tt.expected)
+			}
+		})
 	}
 }
