@@ -331,38 +331,30 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			trackingState = &state
 		}
 
-		// Post "in-progress" tracking comment BEFORE running the review.
-		// This ensures the tracking comment appears first in the PR timeline,
+		// Post "in-progress" dashboard comment BEFORE running the review.
+		// This ensures the dashboard comment appears first in the PR timeline,
 		// before any inline comments from the review.
-		inProgressState := NewTrackingStateInProgress(target, time.Now())
-		// Preserve state from previous tracking to prevent data loss if review crashes.
-		// Deep copy both slice and map to avoid shared mutation between states.
+		var existingCommits []string
+		var existingFindings map[domain.FindingFingerprint]domain.TrackedFinding
 		if trackingState != nil {
-			if len(trackingState.ReviewedCommits) > 0 {
-				inProgressState.ReviewedCommits = make([]string, len(trackingState.ReviewedCommits))
-				copy(inProgressState.ReviewedCommits, trackingState.ReviewedCommits)
-			}
-			if len(trackingState.Findings) > 0 {
-				inProgressState.Findings = make(map[domain.FindingFingerprint]domain.TrackedFinding, len(trackingState.Findings))
-				for k, v := range trackingState.Findings {
-					inProgressState.Findings[k] = v
-				}
-			}
+			existingCommits = trackingState.ReviewedCommits
+			existingFindings = trackingState.Findings
 		}
+		inProgressData := NewDashboardDataInProgress(target, time.Now(), existingCommits, existingFindings)
 
-		if err := o.deps.TrackingStore.Save(ctx, inProgressState); err != nil {
+		if _, err := o.deps.TrackingStore.SaveDashboard(ctx, inProgressData); err != nil {
 			// Log warning but continue - tracking failures shouldn't break reviews
 			if o.deps.Logger != nil {
-				o.deps.Logger.LogWarning(ctx, "failed to post in-progress tracking comment", map[string]interface{}{
+				o.deps.Logger.LogWarning(ctx, "failed to post in-progress dashboard comment", map[string]interface{}{
 					"error":    err.Error(),
 					"prNumber": req.PRNumber,
 				})
 			} else {
-				log.Printf("warning: failed to post in-progress tracking comment: %v\n", err)
+				log.Printf("warning: failed to post in-progress dashboard comment: %v\n", err)
 			}
 		} else {
 			if o.deps.Logger != nil {
-				o.deps.Logger.LogInfo(ctx, "posted in-progress tracking comment", map[string]interface{}{
+				o.deps.Logger.LogInfo(ctx, "posted in-progress dashboard comment", map[string]interface{}{
 					"prNumber": req.PRNumber,
 				})
 			}
@@ -880,7 +872,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		}
 	}
 
-	// Save tracking state after successful review
+	// Save dashboard after successful review
 	// Priority: use reconciled state (from deduplication) if available, else original tracking state
 	if o.deps.TrackingStore != nil && req.PRNumber > 0 && req.CommitSHA != "" {
 		var stateToSave *TrackingState
@@ -906,27 +898,34 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				stateToSave.ReviewedCommits = append(stateToSave.ReviewedCommits, req.CommitSHA)
 			}
 			stateToSave.LastUpdated = time.Now()
-			// Mark review as completed (updates the "in-progress" comment to show findings)
 			stateToSave.ReviewStatus = domain.ReviewStatusCompleted
 
-			// TODO(#61): Use collapsible sections in tracking comment for better UX
-			// The tracking comment should use <details> tags to collapse the findings
-			// summary and make the PR conversation cleaner
+			// Build attention severities from review action config
+			attentionSeverities := computeAttentionSeverities(req)
 
-			if err := o.deps.TrackingStore.Save(ctx, *stateToSave); err != nil {
+			// Build completed dashboard data
+			dashboardData := NewDashboardDataCompleted(
+				*stateToSave,
+				&mergedReview,
+				nil, // positioned findings not needed for dashboard (inline comments already posted)
+				attentionSeverities,
+				&diff,
+			)
+
+			if _, err := o.deps.TrackingStore.SaveDashboard(ctx, dashboardData); err != nil {
 				// Log warning but don't fail the review
 				if o.deps.Logger != nil {
-					o.deps.Logger.LogWarning(ctx, "failed to save tracking state", map[string]interface{}{
+					o.deps.Logger.LogWarning(ctx, "failed to save dashboard", map[string]interface{}{
 						"error":     err.Error(),
 						"prNumber":  req.PRNumber,
 						"commitSHA": req.CommitSHA,
 					})
 				} else {
-					log.Printf("warning: failed to save tracking state: %v\n", err)
+					log.Printf("warning: failed to save dashboard: %v\n", err)
 				}
 			} else {
 				if o.deps.Logger != nil {
-					o.deps.Logger.LogInfo(ctx, "saved tracking state", map[string]interface{}{
+					o.deps.Logger.LogInfo(ctx, "saved dashboard", map[string]interface{}{
 						"prNumber":        req.PRNumber,
 						"commitSHA":       req.CommitSHA,
 						"reviewedCommits": len(stateToSave.ReviewedCommits),
@@ -935,12 +934,41 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				}
 			}
 		} else {
-			// No state to save - this can happen if no findings were generated
-			if o.deps.Logger != nil {
-				o.deps.Logger.LogInfo(ctx, "tracking state save skipped: no state to save", map[string]interface{}{
-					"reconciledStateNil": reconciledState == nil,
-					"trackingStateNil":   trackingState == nil,
-				})
+			// No state to save - create a new state for first review with no findings
+			target := ReviewTarget{
+				Repository: fmt.Sprintf("%s/%s", req.GitHubOwner, req.GitHubRepo),
+				PRNumber:   req.PRNumber,
+				Branch:     req.TargetRef,
+				BaseSHA:    req.BaseRef,
+				HeadSHA:    req.CommitSHA,
+			}
+			newState := NewTrackingState(target)
+			newState.ReviewedCommits = []string{req.CommitSHA}
+			newState.LastUpdated = time.Now()
+			newState.ReviewStatus = domain.ReviewStatusCompleted
+
+			attentionSeverities := computeAttentionSeverities(req)
+			dashboardData := NewDashboardDataCompleted(
+				newState,
+				&mergedReview,
+				nil,
+				attentionSeverities,
+				&diff,
+			)
+
+			if _, err := o.deps.TrackingStore.SaveDashboard(ctx, dashboardData); err != nil {
+				if o.deps.Logger != nil {
+					o.deps.Logger.LogWarning(ctx, "failed to save dashboard (first review)", map[string]interface{}{
+						"error":    err.Error(),
+						"prNumber": req.PRNumber,
+					})
+				}
+			} else {
+				if o.deps.Logger != nil {
+					o.deps.Logger.LogInfo(ctx, "saved dashboard (first review)", map[string]interface{}{
+						"prNumber": req.PRNumber,
+					})
+				}
 			}
 		}
 	}
@@ -1084,4 +1112,32 @@ func (o *Orchestrator) reconcileAndFilterFindings(
 	}
 
 	return result.New, updatedState, result
+}
+
+// computeAttentionSeverities determines which severity levels should trigger
+// attention based on the review action configuration.
+// Severities configured to REQUEST_CHANGES are considered attention-worthy.
+// Default behavior: critical and high severities require attention.
+func computeAttentionSeverities(req BranchRequest) map[string]bool {
+	result := make(map[string]bool)
+
+	checkAction := func(severity, action string, defaultBlocking bool) {
+		if action == "" {
+			if defaultBlocking {
+				result[severity] = true
+			}
+			return
+		}
+		normalizedAction := strings.ToLower(strings.TrimSpace(action))
+		if normalizedAction == "request_changes" {
+			result[severity] = true
+		}
+	}
+
+	checkAction("critical", req.ActionOnCritical, true)
+	checkAction("high", req.ActionOnHigh, true)
+	checkAction("medium", req.ActionOnMedium, false)
+	checkAction("low", req.ActionOnLow, false)
+
+	return result
 }

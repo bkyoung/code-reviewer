@@ -182,8 +182,10 @@ func run() error {
 		reviewPoster := usecasegithub.NewReviewPoster(githubClient)
 		githubPoster = &githubPosterAdapter{poster: reviewPoster}
 
-		// Enable finding deduplication and incremental reviews
-		trackingStore = tracking.NewGitHubStore(githubToken)
+		// Enable finding deduplication and incremental reviews with unified dashboard
+		githubStore := tracking.NewGitHubStore(githubToken)
+		githubStore.SetDashboardRenderer(githubadapter.NewDashboardRenderer())
+		trackingStore = githubStore
 	}
 
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
