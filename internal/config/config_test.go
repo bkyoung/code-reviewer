@@ -435,16 +435,20 @@ func TestVerificationConfigMerge(t *testing.T) {
 
 	merged := config.Merge(base, overlay)
 
-	// Overlay should replace entire verification config (all-or-nothing pattern)
+	// Field-by-field merge: overlay fields override base, unset fields preserved from base
 	if !merged.Verification.Enabled {
 		t.Error("expected Verification.Enabled to be true from overlay")
 	}
 	if merged.Verification.Depth != "deep" {
 		t.Errorf("expected Verification.Depth 'deep' from overlay, got %s", merged.Verification.Depth)
 	}
-	// When overlay has any verification config, it replaces base entirely
-	if merged.Verification.CostCeiling != 0 {
-		t.Errorf("expected Verification.CostCeiling 0 from overlay (not set), got %f", merged.Verification.CostCeiling)
+	// CostCeiling not set in overlay, should be preserved from base
+	if merged.Verification.CostCeiling != 0.25 {
+		t.Errorf("expected Verification.CostCeiling 0.25 from base, got %f", merged.Verification.CostCeiling)
+	}
+	// Confidence thresholds not set in overlay, should be preserved from base
+	if merged.Verification.Confidence.Default != 70 {
+		t.Errorf("expected Verification.Confidence.Default 70 from base, got %d", merged.Verification.Confidence.Default)
 	}
 }
 

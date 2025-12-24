@@ -95,6 +95,11 @@ func expandEnvVars(cfg Config) Config {
 	cfg.Merge.Model = expandEnvString(cfg.Merge.Model)
 	cfg.Merge.Strategy = expandEnvString(cfg.Merge.Strategy)
 
+	// Expand verification config
+	cfg.Verification.Provider = expandEnvString(cfg.Verification.Provider)
+	cfg.Verification.Model = expandEnvString(cfg.Verification.Model)
+	cfg.Verification.Depth = expandEnvString(cfg.Verification.Depth)
+
 	// Expand git config
 	cfg.Git.RepositoryDir = expandEnvString(cfg.Git.RepositoryDir)
 
@@ -249,6 +254,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Verification defaults (Epic #92 - agent verification)
 	v.SetDefault("verification.enabled", true)
+	v.SetDefault("verification.provider", "gemini")
+	v.SetDefault("verification.model", "gemini-3-flash-preview")
+	v.SetDefault("verification.maxTokens", 64000)
 	v.SetDefault("verification.depth", "medium")
 	v.SetDefault("verification.costCeiling", 0.50)
 	v.SetDefault("verification.confidence.default", 75)
@@ -256,6 +264,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("verification.confidence.high", 70)
 	v.SetDefault("verification.confidence.medium", 75)
 	v.SetDefault("verification.confidence.low", 85)
+
+	// Merge defaults (synthesis provider)
+	// Uses alias without date suffix to always get latest model version
+	v.SetDefault("merge.provider", "anthropic")
+	v.SetDefault("merge.model", "claude-haiku-4-5")
 }
 
 func defaultStorePath() string {

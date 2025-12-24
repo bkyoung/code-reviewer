@@ -116,11 +116,9 @@ func run() error {
 	// TODO: Wire up store adapter when precision prior tracking is needed
 	merger := merge.NewIntelligentMerger(nil)
 
-	// Wire up LLM-based summary synthesis (Phase 3.5)
-	// Use OpenAI gpt-4o-mini for synthesis (cheap, fast, good at summarization)
-	// TODO: Make this configurable via merge.useLLM, merge.provider, merge.model config fields
-	if synthProvider, ok := providers["openai"]; ok {
-		// Wrap the provider to adapt review.Provider to merge.ReviewProvider
+	// Wire up LLM-based summary synthesis using configured merge provider/model
+	synthProvider := createMergeSynthesisProvider(&cfg, obs)
+	if synthProvider != nil {
 		wrapped := &providerWrapper{provider: synthProvider}
 		synthAdapter := merge.NewSynthesisAdapter(wrapped)
 		merger.WithSynthesisProvider(synthAdapter)
@@ -427,6 +425,103 @@ func createPlanningProvider(cfg *config.Config, providers map[string]review.Prov
 	return planningProvider
 }
 
+// createMergeSynthesisProvider creates a provider for merge summary synthesis.
+// Uses merge.provider and merge.model from config (defaults: anthropic/claude-haiku-4-5).
+func createMergeSynthesisProvider(cfg *config.Config, obs observabilityComponents) review.Provider {
+	providerName := cfg.Merge.Provider
+	if providerName == "" {
+		providerName = "anthropic"
+	}
+	model := cfg.Merge.Model
+	if model == "" {
+		model = "claude-haiku-4-5"
+	}
+
+	providerCfg, ok := cfg.Providers[providerName]
+	if !ok {
+		log.Printf("warning: merge synthesis provider %q not configured, using rule-based merge only", providerName)
+		return nil
+	}
+
+	switch providerName {
+	case "openai":
+		if providerCfg.APIKey == "" {
+			log.Printf("warning: merge provider %q missing API key, using rule-based merge only", providerName)
+			return nil
+		}
+		client := openai.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
+		}
+		if obs.metrics != nil {
+			client.SetMetrics(obs.metrics)
+		}
+		if obs.pricing != nil {
+			client.SetPricing(obs.pricing)
+		}
+		log.Printf("Merge synthesis using %s/%s", providerName, model)
+		return openai.NewProvider(model, client)
+
+	case "anthropic":
+		if providerCfg.APIKey == "" {
+			log.Printf("warning: merge provider %q missing API key, using rule-based merge only", providerName)
+			return nil
+		}
+		client := anthropic.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
+		}
+		if obs.metrics != nil {
+			client.SetMetrics(obs.metrics)
+		}
+		if obs.pricing != nil {
+			client.SetPricing(obs.pricing)
+		}
+		log.Printf("Merge synthesis using %s/%s", providerName, model)
+		return anthropic.NewProvider(model, client)
+
+	case "gemini":
+		if providerCfg.APIKey == "" {
+			log.Printf("warning: merge provider %q missing API key, using rule-based merge only", providerName)
+			return nil
+		}
+		client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
+		}
+		if obs.metrics != nil {
+			client.SetMetrics(obs.metrics)
+		}
+		if obs.pricing != nil {
+			client.SetPricing(obs.pricing)
+		}
+		log.Printf("Merge synthesis using %s/%s", providerName, model)
+		return gemini.NewProvider(model, client)
+
+	case "ollama":
+		host := os.Getenv("OLLAMA_HOST")
+		if host == "" {
+			host = "http://localhost:11434"
+		}
+		client := ollama.NewHTTPClient(host, model, providerCfg, cfg.HTTP)
+		if obs.logger != nil {
+			client.SetLogger(obs.logger)
+		}
+		if obs.metrics != nil {
+			client.SetMetrics(obs.metrics)
+		}
+		if obs.pricing != nil {
+			client.SetPricing(obs.pricing)
+		}
+		log.Printf("Merge synthesis using %s/%s", providerName, model)
+		return ollama.NewProvider(model, client)
+
+	default:
+		log.Printf("warning: unsupported merge provider %q, using rule-based merge only", providerName)
+		return nil
+	}
+}
+
 func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig config.HTTPConfig, obs observabilityComponents) map[string]review.Provider {
 	providers := make(map[string]review.Provider)
 
@@ -642,58 +737,76 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 	}, nil
 }
 
-// createVerifier creates a batch verifier using an available LLM provider.
-// Prefers Gemini for verification due to large context window and lower cost.
+// createVerifier creates a batch verifier using the configured LLM provider.
+// Uses verification.provider and verification.model from config, with fallback to other providers.
 // Returns nil if no suitable provider is available.
 func createVerifier(cfg config.Config, providers map[string]review.Provider, repoDir string, obs observabilityComponents) review.Verifier {
-	// Find an LLM client to use for verification
-	// Prefer Gemini for batch verification (large context, lower cost, higher rate limits)
 	var llmClient verifyadapter.LLMClient
 	var providerName string
+	var modelName string
 
-	// Try Gemini first for verification (best for batch due to 4M context)
-	if providerCfg, ok := cfg.Providers["gemini"]; ok && providerCfg.APIKey != "" {
-		// Use gemini-2.0-flash for verification if available, otherwise use configured model
-		model := providerCfg.Model
-		if model == "" {
-			model = "gemini-2.0-flash-exp"
-		}
-		client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
-		if obs.logger != nil {
-			client.SetLogger(obs.logger)
-		}
-		llmClient = &geminiLLMAdapter{client: client}
-		providerName = "gemini"
+	// Get configured provider and model, with defaults
+	configuredProvider := cfg.Verification.Provider
+	if configuredProvider == "" {
+		configuredProvider = "gemini"
+	}
+	configuredModel := cfg.Verification.Model
+	if configuredModel == "" {
+		configuredModel = "gemini-3-flash-preview"
 	}
 
-	// Fall back to other providers if Gemini not available
-	if llmClient == nil {
-		fallbackOrder := []string{"anthropic", "openai"}
-		for _, name := range fallbackOrder {
-			providerCfg, ok := cfg.Providers[name]
-			if !ok || providerCfg.APIKey == "" {
-				continue
-			}
+	// MaxTokens from config, default to 64000
+	maxTokens := cfg.Verification.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 64000
+	}
 
-			switch name {
-			case "anthropic":
-				client := anthropic.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
-				if obs.logger != nil {
-					client.SetLogger(obs.logger)
-				}
-				llmClient = &anthropicLLMAdapter{client: client}
-			case "openai":
-				client := openai.NewHTTPClient(providerCfg.APIKey, providerCfg.Model, providerCfg, cfg.HTTP)
-				if obs.logger != nil {
-					client.SetLogger(obs.logger)
-				}
-				llmClient = &openaiLLMAdapter{client: client}
-			}
+	// Try the configured provider first
+	providerOrder := []string{configuredProvider}
+	// Add fallbacks (excluding the configured provider to avoid duplicates)
+	for _, fallback := range []string{"gemini", "anthropic", "openai"} {
+		if fallback != configuredProvider {
+			providerOrder = append(providerOrder, fallback)
+		}
+	}
 
-			if llmClient != nil {
-				providerName = name
-				break
+	for _, name := range providerOrder {
+		providerCfg, ok := cfg.Providers[name]
+		if !ok || providerCfg.APIKey == "" {
+			continue
+		}
+
+		// Use configured model only for the configured provider, otherwise use provider's model
+		model := providerCfg.Model
+		if name == configuredProvider {
+			model = configuredModel
+		}
+
+		switch name {
+		case "gemini":
+			client := gemini.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
 			}
+			llmClient = &geminiLLMAdapter{client: client, maxTokens: maxTokens}
+		case "anthropic":
+			client := anthropic.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			llmClient = &anthropicLLMAdapter{client: client, maxTokens: maxTokens}
+		case "openai":
+			client := openai.NewHTTPClient(providerCfg.APIKey, model, providerCfg, cfg.HTTP)
+			if obs.logger != nil {
+				client.SetLogger(obs.logger)
+			}
+			llmClient = &openaiLLMAdapter{client: client, maxTokens: maxTokens}
+		}
+
+		if llmClient != nil {
+			providerName = name
+			modelName = model
+			break
 		}
 	}
 
@@ -702,7 +815,7 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 		return nil
 	}
 
-	log.Printf("Verification enabled using %s provider (batch mode)", providerName)
+	log.Printf("Verification enabled using %s/%s (batch mode, maxTokens=%d)", providerName, modelName, maxTokens)
 
 	// Create repository adapter for file access
 	repo := repository.NewLocalRepository(repoDir)
@@ -726,7 +839,8 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.
 type openaiLLMAdapter struct {
-	client *openai.HTTPClient
+	client    *openai.HTTPClient
+	maxTokens int
 }
 
 func (a *openaiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
@@ -734,7 +848,7 @@ func (a *openaiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt st
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 	resp, err := a.client.Call(ctx, fullPrompt, openai.CallOptions{
 		Temperature: 0.0, // Deterministic for verification
-		MaxTokens:   4096,
+		MaxTokens:   a.maxTokens,
 	})
 	if err != nil {
 		return "", 0, 0, 0, err
@@ -744,14 +858,15 @@ func (a *openaiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt st
 
 // anthropicLLMAdapter adapts anthropic.HTTPClient to verifyadapter.LLMClient.
 type anthropicLLMAdapter struct {
-	client *anthropic.HTTPClient
+	client    *anthropic.HTTPClient
+	maxTokens int
 }
 
 func (a *anthropicLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
 	resp, err := a.client.Call(ctx, userPrompt, anthropic.CallOptions{
 		System:      systemPrompt,
 		Temperature: 0.0,
-		MaxTokens:   4096,
+		MaxTokens:   a.maxTokens,
 	})
 	if err != nil {
 		return "", 0, 0, 0, err
@@ -761,15 +876,16 @@ func (a *anthropicLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt
 
 // geminiLLMAdapter adapts gemini.HTTPClient to verifyadapter.LLMClient.
 type geminiLLMAdapter struct {
-	client *gemini.HTTPClient
+	client    *gemini.HTTPClient
+	maxTokens int
 }
 
 func (a *geminiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
 	// Pass system prompt as Gemini's system instruction for proper handling
 	resp, err := a.client.Call(ctx, userPrompt, gemini.CallOptions{
 		Temperature:       0.0,
-		MaxTokens:         65536, // Large enough for batch verification with many findings
-		SystemInstruction: systemPrompt,
+		MaxTokens:         a.maxTokens,
+		SystemInstruction: &systemPrompt,
 	})
 	if err != nil {
 		return "", 0, 0, 0, err
