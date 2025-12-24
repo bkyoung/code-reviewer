@@ -200,24 +200,28 @@ func run() error {
 		verifier = createVerifier(cfg, providers, repoDir, obs)
 	}
 
+	// Build per-provider max tokens map from config
+	providerMaxTokens := buildProviderMaxTokens(cfg.Providers)
+
 	orchestrator := review.NewOrchestrator(review.OrchestratorDeps{
-		Git:           gitEngine,
-		Providers:     providers,
-		Merger:        merger,
-		Markdown:      markdownWriter,
-		JSON:          jsonWriter,
-		SARIF:         sarifWriter,
-		Redactor:      redactor,
-		SeedGenerator: determinism.GenerateSeed,
-		PromptBuilder: promptBuilder.Build,
-		Store:         reviewStore,
-		Logger:        reviewLogger,
-		PlanningAgent: planningAgent,
-		RepoDir:       repoDir,
-		GitHubPoster:  githubPoster,
-		TrackingStore: trackingStore,
-		StatusScanner: statusScanner,
-		Verifier:      verifier,
+		Git:               gitEngine,
+		Providers:         providers,
+		Merger:            merger,
+		Markdown:          markdownWriter,
+		JSON:              jsonWriter,
+		SARIF:             sarifWriter,
+		Redactor:          redactor,
+		SeedGenerator:     determinism.GenerateSeed,
+		PromptBuilder:     promptBuilder.Build,
+		Store:             reviewStore,
+		Logger:            reviewLogger,
+		PlanningAgent:     planningAgent,
+		RepoDir:           repoDir,
+		GitHubPoster:      githubPoster,
+		TrackingStore:     trackingStore,
+		StatusScanner:     statusScanner,
+		Verifier:          verifier,
+		ProviderMaxTokens: providerMaxTokens,
 	})
 
 	root := cli.NewRootCommand(cli.Dependencies{
@@ -781,6 +785,10 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 		if name == configuredProvider {
 			model = configuredModel
 		}
+		// Ensure we have a model - use defaults if empty
+		if model == "" {
+			model = defaultVerificationModel(name)
+		}
 
 		switch name {
 		case "gemini":
@@ -835,6 +843,32 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 	}
 
 	return verifyadapter.NewBatchVerifier(llmClient, repo, costTracker, batchConfig)
+}
+
+// defaultVerificationModel returns a default model for verification when provider's model is empty.
+func defaultVerificationModel(provider string) string {
+	switch provider {
+	case "gemini":
+		return "gemini-3-flash-preview"
+	case "anthropic":
+		return "claude-haiku-4-5"
+	case "openai":
+		return "gpt-4o-mini"
+	default:
+		return ""
+	}
+}
+
+// buildProviderMaxTokens extracts per-provider MaxOutputTokens overrides from config.
+// Returns a map of provider name -> max output tokens for providers that have overrides.
+func buildProviderMaxTokens(providers map[string]config.ProviderConfig) map[string]int {
+	result := make(map[string]int)
+	for name, cfg := range providers {
+		if cfg.MaxOutputTokens != nil && *cfg.MaxOutputTokens > 0 {
+			result[name] = *cfg.MaxOutputTokens
+		}
+	}
+	return result
 }
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.

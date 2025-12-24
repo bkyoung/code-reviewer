@@ -23,6 +23,11 @@ type ProviderConfig struct {
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"apiKey"`
 
+	// MaxOutputTokens overrides the default max output tokens for this provider.
+	// Use this for models with different output limits (e.g., older models with 8K,
+	// or newer models with 128K+). Default: 64000 (works for Claude 4.5, GPT-5.2, Gemini 3).
+	MaxOutputTokens *int `yaml:"maxOutputTokens,omitempty"`
+
 	// HTTP overrides (optional, use global HTTP config if not set)
 	Timeout        *string `yaml:"timeout,omitempty"`
 	MaxRetries     *int    `yaml:"maxRetries,omitempty"`
@@ -373,8 +378,9 @@ func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
 func chooseVerification(base, overlay VerificationConfig) VerificationConfig {
 	result := base
 
-	// Enabled: overlay wins if true
-	if overlay.Enabled {
+	// If overlay has any verification config set, use its Enabled value
+	// This allows overlay to disable verification (Enabled=false) when other fields are set
+	if hasAnyVerificationConfig(overlay) {
 		result.Enabled = overlay.Enabled
 	}
 
@@ -409,6 +415,18 @@ func chooseVerification(base, overlay VerificationConfig) VerificationConfig {
 	}
 
 	return result
+}
+
+// hasAnyVerificationConfig returns true if any verification field is set in the config.
+// This is used to determine if the Enabled field should be respected from the overlay.
+func hasAnyVerificationConfig(vc VerificationConfig) bool {
+	return vc.Enabled ||
+		vc.Provider != "" ||
+		vc.Model != "" ||
+		vc.MaxTokens != 0 ||
+		vc.Depth != "" ||
+		vc.CostCeiling != 0 ||
+		hasConfidenceThresholds(vc.Confidence)
 }
 
 func hasConfidenceThresholds(ct ConfidenceThresholds) bool {

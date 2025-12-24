@@ -222,6 +222,11 @@ type OrchestratorDeps struct {
 
 	// Verification support (Epic #92)
 	Verifier Verifier // Optional: verifies candidate findings before reporting
+
+	// ProviderMaxTokens allows per-provider max output token overrides.
+	// Key is provider name, value is max output tokens.
+	// If not set for a provider, the default from PromptBuilder is used.
+	ProviderMaxTokens map[string]int
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -584,6 +589,11 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			}
 			if providerReq.Seed == 0 {
 				providerReq.Seed = seed
+			}
+
+			// Apply per-provider MaxSize override if configured
+			if maxTokens, ok := o.deps.ProviderMaxTokens[name]; ok && maxTokens > 0 {
+				providerReq.MaxSize = maxTokens
 			}
 
 			// Apply redaction if redactor is available

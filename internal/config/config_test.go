@@ -482,3 +482,29 @@ func TestVerificationConfigMergePreservesBase(t *testing.T) {
 		t.Errorf("expected Verification.Confidence.Default 70 from base, got %d", merged.Verification.Confidence.Default)
 	}
 }
+
+func TestVerificationConfigMergeCanDisable(t *testing.T) {
+	base := config.Config{
+		Verification: config.VerificationConfig{
+			Enabled:     true,
+			Depth:       "medium",
+			CostCeiling: 0.50,
+		},
+	}
+	overlay := config.Config{
+		Verification: config.VerificationConfig{
+			Enabled: false,      // Explicitly disable
+			Depth:   "disabled", // Set another field to signal intentional config
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	// Overlay should be able to disable verification when other fields are set
+	if merged.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be false (disabled by overlay)")
+	}
+	if merged.Verification.Depth != "disabled" {
+		t.Errorf("expected Verification.Depth 'disabled' from overlay, got %s", merged.Verification.Depth)
+	}
+}

@@ -9,21 +9,20 @@ import (
 
 // defaultMaxTokens sets the maximum output tokens for LLM responses.
 //
-// This is set to 8192 as a safe default that works across all providers:
-// - Claude Sonnet: max 8k output tokens
-// - GPT-4-turbo: max 4k-16k depending on variant
-// - Gemini: supports up to 32k
+// Set to 64000 as a safe default that works across all current providers:
+// - Claude 4.5 models: 64K max output tokens
+// - GPT-5.2: 128K max output tokens
+// - Gemini 3 models: 64K max output tokens
 //
-// Note for extended thinking models (Gemini 2.5 Pro, OpenAI o1/o3/o4):
-// These models use tokens for internal reasoning before generating output.
-// If you encounter MAX_TOKENS errors with these models, you may need to:
-//  1. Use a provider that supports higher limits (Gemini supports 32k)
-//  2. Configure a custom max tokens value per provider in your config
-//  3. Reduce the size of diffs being reviewed
+// Note for thinking models (Gemini 2.5+/3 Pro, OpenAI o-series):
+// These models use output tokens for internal reasoning BEFORE generating
+// visible output. The max_output_tokens limit applies to BOTH thinking and
+// output combined. With low limits (e.g., 8K), the model may exhaust the
+// budget on reasoning alone, returning empty responses with MAX_TOKENS.
 //
-// The 8k limit provides a good balance: enough for substantial code reviews
-// while preventing HTTP 400 errors from providers with lower limits.
-const defaultMaxTokens = 8192
+// The 64K default provides headroom for thinking models while staying within
+// all current provider limits.
+const defaultMaxTokens = 64000
 
 // DefaultPromptBuilder renders a structured prompt for the provider.
 // This is a simple implementation that doesn't use project context.
