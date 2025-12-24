@@ -335,10 +335,16 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		// This ensures the tracking comment appears first in the PR timeline,
 		// before any inline comments from the review.
 		inProgressState := NewTrackingStateInProgress(target, time.Now())
-		// Preserve state from previous tracking to prevent data loss if review crashes
+		// Preserve state from previous tracking to prevent data loss if review crashes.
+		// Deep copy Findings map to avoid shared mutation between states.
 		if trackingState != nil {
 			inProgressState.ReviewedCommits = trackingState.ReviewedCommits
-			inProgressState.Findings = trackingState.Findings
+			if trackingState.Findings != nil {
+				inProgressState.Findings = make(map[domain.FindingFingerprint]domain.TrackedFinding, len(trackingState.Findings))
+				for k, v := range trackingState.Findings {
+					inProgressState.Findings[k] = v
+				}
+			}
 		}
 
 		if err := o.deps.TrackingStore.Save(ctx, inProgressState); err != nil {
