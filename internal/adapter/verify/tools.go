@@ -90,8 +90,12 @@ func validatePath(filePath string) error {
 	}
 
 	// Block Windows drive letters (C:, D:, etc.)
+	// Must be letter followed by colon
 	if len(normalized) >= 2 && normalized[1] == ':' {
-		return fmt.Errorf("absolute paths not allowed: %s", filePath)
+		first := normalized[0]
+		if (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') {
+			return fmt.Errorf("absolute paths not allowed: %s", filePath)
+		}
 	}
 
 	// Block UNC paths (\\server\share or //server/share)
@@ -152,9 +156,12 @@ func validateGlobPattern(pattern string) error {
 		return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
 	}
 
-	// Block Windows drive letters
+	// Block Windows drive letters (must be letter followed by colon)
 	if len(normalized) >= 2 && normalized[1] == ':' {
-		return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
+		first := normalized[0]
+		if (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') {
+			return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
+		}
 	}
 
 	// Block UNC paths
@@ -173,9 +180,13 @@ func validateGlobPattern(pattern string) error {
 	forbiddenDirs := []string{".git", ".env", ".ssh", ".aws", ".config", ".secret"}
 	parts := strings.Split(normalizedLower, "/")
 	for _, part := range parts {
+		// Skip glob wildcards and empty parts
+		if part == "" || part == "*" || part == "**" {
+			continue
+		}
 		for _, forbidden := range forbiddenDirs {
-			// Check exact match or if it's the start of the segment
-			if part == forbidden || strings.HasPrefix(part, forbidden+"/") {
+			// Check exact match of the segment
+			if part == forbidden {
 				return fmt.Errorf("pattern targets forbidden directory: %s", forbidden)
 			}
 		}
