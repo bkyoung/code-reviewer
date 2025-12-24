@@ -330,6 +330,43 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		} else {
 			trackingState = &state
 		}
+
+		// Post "in-progress" tracking comment BEFORE running the review.
+		// This ensures the tracking comment appears first in the PR timeline,
+		// before any inline comments from the review.
+		inProgressState := NewTrackingStateInProgress(target, time.Now())
+		// Preserve state from previous tracking to prevent data loss if review crashes.
+		// Deep copy both slice and map to avoid shared mutation between states.
+		if trackingState != nil {
+			if len(trackingState.ReviewedCommits) > 0 {
+				inProgressState.ReviewedCommits = make([]string, len(trackingState.ReviewedCommits))
+				copy(inProgressState.ReviewedCommits, trackingState.ReviewedCommits)
+			}
+			if len(trackingState.Findings) > 0 {
+				inProgressState.Findings = make(map[domain.FindingFingerprint]domain.TrackedFinding, len(trackingState.Findings))
+				for k, v := range trackingState.Findings {
+					inProgressState.Findings[k] = v
+				}
+			}
+		}
+
+		if err := o.deps.TrackingStore.Save(ctx, inProgressState); err != nil {
+			// Log warning but continue - tracking failures shouldn't break reviews
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "failed to post in-progress tracking comment", map[string]interface{}{
+					"error":    err.Error(),
+					"prNumber": req.PRNumber,
+				})
+			} else {
+				log.Printf("warning: failed to post in-progress tracking comment: %v\n", err)
+			}
+		} else {
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogInfo(ctx, "posted in-progress tracking comment", map[string]interface{}{
+					"prNumber": req.PRNumber,
+				})
+			}
+		}
 	}
 
 	// Compute diff (incremental if tracking state available, full otherwise)
@@ -869,6 +906,8 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				stateToSave.ReviewedCommits = append(stateToSave.ReviewedCommits, req.CommitSHA)
 			}
 			stateToSave.LastUpdated = time.Now()
+			// Mark review as completed (updates the "in-progress" comment to show findings)
+			stateToSave.ReviewStatus = domain.ReviewStatusCompleted
 
 			// TODO(#61): Use collapsible sections in tracking comment for better UX
 			// The tracking comment should use <details> tags to collapse the findings

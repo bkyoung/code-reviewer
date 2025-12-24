@@ -28,6 +28,28 @@ func TestFindingStatus_IsValid(t *testing.T) {
 	}
 }
 
+func TestReviewStatus_IsValid(t *testing.T) {
+	tests := []struct {
+		status ReviewStatus
+		want   bool
+	}{
+		{ReviewStatusInProgress, true},
+		{ReviewStatusCompleted, true},
+		{ReviewStatus("invalid"), false},
+		{ReviewStatus(""), false},
+		{ReviewStatus("IN_PROGRESS"), false}, // Case-sensitive
+		{ReviewStatus("COMPLETED"), false},   // Case-sensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			if got := tt.status.IsValid(); got != tt.want {
+				t.Errorf("ReviewStatus(%q).IsValid() = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewFindingFingerprint_Deterministic(t *testing.T) {
 	fp1 := NewFindingFingerprint("main.go", "security", "high", "SQL injection risk")
 	fp2 := NewFindingFingerprint("main.go", "security", "high", "SQL injection risk")

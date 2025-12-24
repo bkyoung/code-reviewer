@@ -42,6 +42,10 @@ type trackingStateJSON struct {
 	ReviewedCommits []string             `json:"reviewed_commits"`
 	Findings        []trackedFindingJSON `json:"findings"`
 	LastUpdated     time.Time            `json:"last_updated"`
+
+	// ReviewStatus indicates the lifecycle state of the review.
+	// Empty string defaults to "completed" for backward compatibility.
+	ReviewStatus string `json:"review_status,omitempty"`
 }
 
 // trackedFindingJSON is the JSON-serializable form of TrackedFinding.
@@ -95,6 +99,9 @@ func ParseTrackingComment(body string) (review.TrackingState, error) {
 }
 
 // RenderTrackingComment creates a comment body with embedded tracking state.
+// The rendering varies based on ReviewStatus:
+//   - InProgress: Shows "Review In Progress" with commit being reviewed
+//   - Completed: Shows full findings summary with status table
 func RenderTrackingComment(state review.TrackingState) (string, error) {
 	// Convert to JSON-serializable form
 	stateJSON := stateToJSON(state)
@@ -112,51 +119,67 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 	sb.WriteString(trackingCommentMarker)
 	sb.WriteString("\n\n")
 
-	// Human-readable header
-	sb.WriteString("## 🤖 Code Review Tracking\n\n")
+	// Render based on review status
+	if state.ReviewStatus == domain.ReviewStatusInProgress {
+		// In-progress mode: simplified display
+		sb.WriteString("## 🔄 Code Review In Progress\n\n")
+		sb.WriteString("The code review is currently running. This comment will be updated with findings when complete.\n\n")
 
-	// Summary statistics
-	activeCount := 0
-	resolvedCount := 0
-	acknowledgedCount := 0
-	disputedCount := 0
-	for _, f := range state.Findings {
-		switch f.Status {
-		case domain.FindingStatusOpen:
-			activeCount++
-		case domain.FindingStatusResolved:
-			resolvedCount++
-		case domain.FindingStatusAcknowledged:
-			acknowledgedCount++
-		case domain.FindingStatusDisputed:
-			disputedCount++
-		}
-	}
-
-	sb.WriteString("| Status | Count |\n")
-	sb.WriteString("|--------|-------|\n")
-	sb.WriteString(fmt.Sprintf("| 🔴 Open | %d |\n", activeCount))
-	sb.WriteString(fmt.Sprintf("| ✅ Resolved | %d |\n", resolvedCount))
-	sb.WriteString(fmt.Sprintf("| 💬 Acknowledged | %d |\n", acknowledgedCount))
-	sb.WriteString(fmt.Sprintf("| ⚠️ Disputed | %d |\n", disputedCount))
-	sb.WriteString("\n")
-
-	// Reviewed commits
-	if len(state.ReviewedCommits) > 0 {
-		sb.WriteString("<details>\n")
-		sb.WriteString("<summary>📋 Reviewed Commits</summary>\n\n")
-		for _, sha := range state.ReviewedCommits {
-			// Show short SHA
-			shortSHA := sha
-			if len(sha) > 7 {
-				shortSHA = sha[:7]
+		// Show commit being reviewed
+		if state.Target.HeadSHA != "" {
+			shortSHA := state.Target.HeadSHA
+			if len(shortSHA) > 7 {
+				shortSHA = shortSHA[:7]
 			}
-			sb.WriteString(fmt.Sprintf("- `%s`\n", shortSHA))
+			sb.WriteString(fmt.Sprintf("**Reviewing commit:** `%s`\n\n", shortSHA))
 		}
-		sb.WriteString("\n</details>\n\n")
+	} else {
+		// Completed mode: full display with findings
+		sb.WriteString("## 🤖 Code Review Completed\n\n")
+
+		// Summary statistics
+		activeCount := 0
+		resolvedCount := 0
+		acknowledgedCount := 0
+		disputedCount := 0
+		for _, f := range state.Findings {
+			switch f.Status {
+			case domain.FindingStatusOpen:
+				activeCount++
+			case domain.FindingStatusResolved:
+				resolvedCount++
+			case domain.FindingStatusAcknowledged:
+				acknowledgedCount++
+			case domain.FindingStatusDisputed:
+				disputedCount++
+			}
+		}
+
+		sb.WriteString("| Status | Count |\n")
+		sb.WriteString("|--------|-------|\n")
+		sb.WriteString(fmt.Sprintf("| 🔴 Open | %d |\n", activeCount))
+		sb.WriteString(fmt.Sprintf("| ✅ Resolved | %d |\n", resolvedCount))
+		sb.WriteString(fmt.Sprintf("| 💬 Acknowledged | %d |\n", acknowledgedCount))
+		sb.WriteString(fmt.Sprintf("| ⚠️ Disputed | %d |\n", disputedCount))
+		sb.WriteString("\n")
+
+		// Reviewed commits
+		if len(state.ReviewedCommits) > 0 {
+			sb.WriteString("<details>\n")
+			sb.WriteString("<summary>📋 Reviewed Commits</summary>\n\n")
+			for _, sha := range state.ReviewedCommits {
+				// Show short SHA
+				shortSHA := sha
+				if len(sha) > 7 {
+					shortSHA = sha[:7]
+				}
+				sb.WriteString(fmt.Sprintf("- `%s`\n", shortSHA))
+			}
+			sb.WriteString("\n</details>\n\n")
+		}
 	}
 
-	// Last updated
+	// Last updated (always show)
 	if !state.LastUpdated.IsZero() {
 		sb.WriteString(fmt.Sprintf("*Last updated: %s*\n\n", state.LastUpdated.Format(time.RFC3339)))
 	}
@@ -284,6 +307,7 @@ func stateToJSON(state review.TrackingState) trackingStateJSON {
 		ReviewedCommits: state.ReviewedCommits,
 		Findings:        findings,
 		LastUpdated:     state.LastUpdated,
+		ReviewStatus:    string(state.ReviewStatus),
 	}
 }
 
@@ -379,10 +403,23 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 		reviewedCommits = []string{}
 	}
 
+	// Parse ReviewStatus with backward compatibility: empty/missing defaults to completed
+	reviewStatus := domain.ReviewStatus(stateJSON.ReviewStatus)
+	if !reviewStatus.IsValid() {
+		if stateJSON.ReviewStatus != "" {
+			// Non-empty but invalid status suggests data corruption or version incompatibility
+			log.Printf("warning: invalid review_status %q, defaulting to 'completed' - possible data corruption",
+				stateJSON.ReviewStatus)
+		}
+		// Backward compatibility: existing comments without review_status are completed reviews
+		reviewStatus = domain.ReviewStatusCompleted
+	}
+
 	return review.TrackingState{
 		Target:          target,
 		ReviewedCommits: reviewedCommits,
 		Findings:        findings,
 		LastUpdated:     stateJSON.LastUpdated,
+		ReviewStatus:    reviewStatus,
 	}, nil
 }
