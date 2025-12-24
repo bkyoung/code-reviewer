@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html"
 	"sort"
 	"strings"
 	"time"
@@ -87,21 +86,28 @@ func (r *DashboardRenderer) renderInProgress(sb *strings.Builder, data review.Da
 }
 
 // renderCompleted renders the full dashboard with findings, costs, and metadata.
+// Section order follows incremental disclosure: summary → open findings → resolved → metadata.
 func (r *DashboardRenderer) renderCompleted(sb *strings.Builder, data review.DashboardData) {
-	// Status header
+	// Status header (most important - immediately visible)
 	r.renderStatusHeader(sb, data)
 
-	// Status counts table
+	// Status counts table (quick overview)
 	r.renderStatusTable(sb, data)
 
-	// Severity badges
+	// Severity badges (one-line summary)
 	r.renderSeverityBadges(sb, data)
 
-	// Files requiring attention (blocking issues)
+	// Files requiring attention (blocking issues - high priority)
 	r.renderFilesRequiringAttention(sb, data)
 
-	// Findings by severity (collapsible)
+	// Findings by severity with expandable details (main content)
 	r.renderFindingsBySeverity(sb, data)
+
+	// Resolved findings (collapsed, secondary importance)
+	r.renderResolvedFindings(sb, data)
+
+	// Horizontal rule to separate findings from meta sections
+	sb.WriteString("---\n\n")
 
 	// Instructions for updating finding status
 	r.renderInstructions(sb, data)
@@ -109,10 +115,10 @@ func (r *DashboardRenderer) renderCompleted(sb *strings.Builder, data review.Das
 	// Edge cases appendix (out-of-diff, binary, renames)
 	r.renderAppendix(sb, data)
 
-	// Review metadata (cost, provider)
+	// Review metadata (cost, provider) - bottom, collapsed
 	r.renderReviewMetadata(sb, data)
 
-	// Reviewed commits (collapsible)
+	// Reviewed commits - bottom, collapsed
 	r.renderReviewedCommits(sb, data)
 
 	// Last updated timestamp
@@ -212,12 +218,13 @@ func (r *DashboardRenderer) renderFilesRequiringAttention(sb *strings.Builder, d
 				badges = append(badges, fmt.Sprintf("%d %s", count, severity))
 			}
 		}
-		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", html.EscapeString(escapeMarkdownInlineCode(file)), strings.Join(badges, ", ")))
+		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", escapeMarkdownInlineCode(file), strings.Join(badges, ", ")))
 	}
 	sb.WriteString("\n")
 }
 
 // renderFindingsBySeverity shows findings grouped by severity in collapsible sections.
+// Each severity section contains a summary table followed by expandable individual finding details.
 func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data review.DashboardData) {
 	// Group open findings by severity
 	bySeverity := make(map[string][]domain.TrackedFinding)
@@ -231,6 +238,8 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 	if len(bySeverity) == 0 {
 		return
 	}
+
+	sb.WriteString("### Findings Requiring Attention\n\n")
 
 	severityOrder := []string{"critical", "high", "medium", "low"}
 	severityEmoji := map[string]string{
@@ -264,9 +273,10 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 		}
 
 		sb.WriteString(fmt.Sprintf("<details%s>\n", openAttr))
-		sb.WriteString(fmt.Sprintf("<summary>%s <strong>%s Issues</strong> (%d)</summary>\n\n", emoji, title, len(findings)))
+		sb.WriteString(fmt.Sprintf("<summary><strong>%s</strong> - %s in <code>%d files</code></summary>\n\n",
+			title, emoji, countUniqueFiles(findings)))
 
-		// Findings table
+		// Summary table
 		sb.WriteString("| File | Line | Category | Description |\n")
 		sb.WriteString("|------|------|----------|-------------|\n")
 		for _, f := range findings {
@@ -274,16 +284,92 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 			if f.Finding.LineEnd > f.Finding.LineStart {
 				line = fmt.Sprintf("%d-%d", f.Finding.LineStart, f.Finding.LineEnd)
 			}
-			desc := truncateDescription(f.Finding.Description, 80)
+			desc := TruncateDescription(f.Finding.Description, 80)
 			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %s |\n",
-				html.EscapeString(escapeMarkdownInlineCode(f.Finding.File)),
+				escapeMarkdownInlineCode(f.Finding.File),
 				line,
-				html.EscapeString(escapeMarkdownTableCell(f.Finding.Category)),
-				html.EscapeString(escapeMarkdownTableCell(desc)),
+				escapeMarkdownTableCell(f.Finding.Category),
+				escapeMarkdownTableCell(desc),
 			))
 		}
-		sb.WriteString("\n</details>\n\n")
+
+		// Individual expandable findings for full details
+		sb.WriteString("\n---\n\n")
+		for _, f := range findings {
+			renderIndividualFinding(sb, f, emoji)
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("</details>\n\n")
 	}
+}
+
+// countUniqueFiles returns the count of unique files in the findings.
+func countUniqueFiles(findings []domain.TrackedFinding) int {
+	files := make(map[string]struct{})
+	for _, f := range findings {
+		files[f.Finding.File] = struct{}{}
+	}
+	return len(files)
+}
+
+// renderResolvedFindings shows resolved findings in a collapsed section with strikethrough.
+func (r *DashboardRenderer) renderResolvedFindings(sb *strings.Builder, data review.DashboardData) {
+	// Collect resolved findings
+	var resolved []domain.TrackedFinding
+	for _, f := range data.Findings {
+		if f.Status == domain.FindingStatusResolved {
+			resolved = append(resolved, f)
+		}
+	}
+
+	if len(resolved) == 0 {
+		return
+	}
+
+	// Sort by severity (highest first), then by file/line
+	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+	sort.Slice(resolved, func(i, j int) bool {
+		si := severityOrder[resolved[i].Finding.Severity]
+		sj := severityOrder[resolved[j].Finding.Severity]
+		if si != sj {
+			return si < sj
+		}
+		if resolved[i].Finding.File != resolved[j].Finding.File {
+			return resolved[i].Finding.File < resolved[j].Finding.File
+		}
+		return resolved[i].Finding.LineStart < resolved[j].Finding.LineStart
+	})
+
+	// Collapsed section
+	sb.WriteString("<details>\n")
+	sb.WriteString(fmt.Sprintf("<summary>📋 <strong>Resolved Findings</strong> (%d)</summary>\n\n", len(resolved)))
+
+	// Table with strikethrough for resolved items
+	sb.WriteString("| Status | Severity | File | Description |\n")
+	sb.WriteString("|--------|----------|------|-------------|\n")
+	for _, f := range resolved {
+		desc := TruncateDescription(f.Finding.Description, 60)
+
+		// Format resolved info
+		resolvedInfo := "Fixed"
+		if f.ResolvedIn != nil {
+			shortSHA := *f.ResolvedIn
+			if len(shortSHA) > 7 {
+				shortSHA = shortSHA[:7]
+			}
+			resolvedInfo = fmt.Sprintf("*in %s*", shortSHA)
+		}
+
+		// Strikethrough for resolved items
+		sb.WriteString(fmt.Sprintf("| ~~%s~~ | ~~%s~~ | ~~`%s`~~ | ~~%s~~ |\n",
+			resolvedInfo,
+			escapeMarkdownTableCell(f.Finding.Severity),
+			escapeMarkdownInlineCode(f.Finding.File),
+			escapeMarkdownTableCell(desc),
+		))
+	}
+	sb.WriteString("\n</details>\n\n")
 }
 
 // renderAppendix shows edge cases (findings outside diff, binary files, renames).
@@ -356,7 +442,7 @@ func (r *DashboardRenderer) renderReviewMetadata(sb *strings.Builder, data revie
 
 	// Cost with appropriate precision
 	if data.Review.Cost > 0 {
-		costStr := formatCost(data.Review.Cost)
+		costStr := FormatCost(data.Review.Cost)
 		sb.WriteString(fmt.Sprintf("- **Cost:** %s\n", costStr))
 	}
 
@@ -547,18 +633,51 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// truncateDescription truncates a description to the specified length.
-func truncateDescription(desc string, maxLen int) string {
+// renderIndividualFinding renders an expandable detail block for a single finding.
+// This provides full finding details when expanded, enabling incremental disclosure.
+func renderIndividualFinding(sb *strings.Builder, f domain.TrackedFinding, emoji string) {
+	file := f.Finding.File
+	line := fmt.Sprintf("%d", f.Finding.LineStart)
+	if f.Finding.LineEnd > f.Finding.LineStart {
+		line = fmt.Sprintf("%d-%d", f.Finding.LineStart, f.Finding.LineEnd)
+	}
+
+	// Summary line: file:line - truncated description
+	summaryDesc := TruncateDescription(f.Finding.Description, 50)
+	sb.WriteString("<details>\n")
+	sb.WriteString(fmt.Sprintf("<summary>%s <code>%s:%s</code> - %s</summary>\n\n",
+		emoji,
+		escapeMarkdownInlineCode(file),
+		line,
+		escapeMarkdownTableCell(summaryDesc),
+	))
+
+	// Full details inside
+	sb.WriteString(fmt.Sprintf("**Category:** %s\n\n", f.Finding.Category))
+	sb.WriteString(fmt.Sprintf("**Lines:** %s\n\n", line))
+	sb.WriteString(f.Finding.Description)
+	sb.WriteString("\n\n")
+
+	if f.Finding.Suggestion != "" {
+		sb.WriteString(fmt.Sprintf("**Suggestion:** %s\n\n", f.Finding.Suggestion))
+	}
+
+	sb.WriteString("</details>\n")
+}
+
+// TruncateDescription truncates a description to the specified length.
+// If the description exceeds maxLen, it's truncated with "..." appended.
+func TruncateDescription(desc string, maxLen int) string {
 	if len(desc) <= maxLen {
 		return desc
 	}
 	return desc[:maxLen-3] + "..."
 }
 
-// formatCost formats a cost value with appropriate precision.
+// FormatCost formats a cost value with appropriate precision.
 // Uses 4 decimal places for small costs (< $0.10) to show accurate API pricing,
 // 3 decimal places for medium costs ($0.10-$0.99), and 2 for larger amounts.
-func formatCost(cost float64) string {
+func FormatCost(cost float64) string {
 	if cost >= 1.0 {
 		return fmt.Sprintf("$%.2f", cost)
 	} else if cost >= 0.1 {
