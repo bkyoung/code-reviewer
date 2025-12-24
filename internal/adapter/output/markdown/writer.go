@@ -55,6 +55,15 @@ func buildContent(artifact domain.MarkdownArtifact) string {
 	builder.WriteString(fmt.Sprintf("- Base: %s\n", artifact.BaseRef))
 	builder.WriteString(fmt.Sprintf("- Target: %s\n", artifact.TargetRef))
 	builder.WriteString(fmt.Sprintf("- Cost: $%.4f\n\n", artifact.Review.Cost))
+
+	// Include verification summary if verification was performed
+	if len(artifact.Review.DiscoveryFindings) > 0 {
+		builder.WriteString("## Verification Summary\n\n")
+		builder.WriteString(fmt.Sprintf("- Discovery findings: %d\n", len(artifact.Review.DiscoveryFindings)))
+		builder.WriteString(fmt.Sprintf("- Verified findings: %d\n", len(artifact.Review.VerifiedFindings)))
+		builder.WriteString(fmt.Sprintf("- Reportable findings: %d\n\n", len(artifact.Review.ReportableFindings)))
+	}
+
 	builder.WriteString("## Summary\n\n")
 	builder.WriteString(artifact.Review.Summary)
 	builder.WriteString("\n\n")
@@ -65,17 +74,38 @@ func buildContent(artifact domain.MarkdownArtifact) string {
 	}
 
 	builder.WriteString("## Findings\n\n")
-	for _, finding := range artifact.Review.Findings {
-		builder.WriteString(fmt.Sprintf("### %s (%s)\n", finding.Description, caser.String(finding.Severity)))
-		builder.WriteString(fmt.Sprintf("- File: %s:%d-%d\n", finding.File, finding.LineStart, finding.LineEnd))
-		builder.WriteString(fmt.Sprintf("- Category: %s\n", finding.Category))
-		builder.WriteString(fmt.Sprintf("- Suggestion: %s\n", finding.Suggestion))
-		if finding.Evidence {
-			builder.WriteString("- Evidence: Provided\n")
-		} else {
-			builder.WriteString("- Evidence: Not provided\n")
+
+	// If we have verified findings, use those for richer output
+	if len(artifact.Review.ReportableFindings) > 0 {
+		for _, vf := range artifact.Review.ReportableFindings {
+			builder.WriteString(fmt.Sprintf("### %s (%s)\n", vf.Finding.Description, caser.String(vf.Finding.Severity)))
+			builder.WriteString(fmt.Sprintf("- File: %s:%d-%d\n", vf.Finding.File, vf.Finding.LineStart, vf.Finding.LineEnd))
+			builder.WriteString(fmt.Sprintf("- Category: %s\n", vf.Finding.Category))
+			builder.WriteString(fmt.Sprintf("- Suggestion: %s\n", vf.Finding.Suggestion))
+			builder.WriteString(fmt.Sprintf("- Classification: %s\n", vf.Classification))
+			builder.WriteString(fmt.Sprintf("- Confidence: %d%%\n", vf.Confidence))
+			if vf.BlocksOperation {
+				builder.WriteString("- Blocks Operation: Yes\n")
+			}
+			if vf.Evidence != "" {
+				builder.WriteString(fmt.Sprintf("- Verification Evidence: %s\n", vf.Evidence))
+			}
+			builder.WriteString("\n")
 		}
-		builder.WriteString("\n")
+	} else {
+		// Fallback to legacy findings format
+		for _, finding := range artifact.Review.Findings {
+			builder.WriteString(fmt.Sprintf("### %s (%s)\n", finding.Description, caser.String(finding.Severity)))
+			builder.WriteString(fmt.Sprintf("- File: %s:%d-%d\n", finding.File, finding.LineStart, finding.LineEnd))
+			builder.WriteString(fmt.Sprintf("- Category: %s\n", finding.Category))
+			builder.WriteString(fmt.Sprintf("- Suggestion: %s\n", finding.Suggestion))
+			if finding.Evidence {
+				builder.WriteString("- Evidence: Provided\n")
+			} else {
+				builder.WriteString("- Evidence: Not provided\n")
+			}
+			builder.WriteString("\n")
+		}
 	}
 
 	return builder.String()

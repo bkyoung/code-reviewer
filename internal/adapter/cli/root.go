@@ -86,7 +86,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 	versionHandler := func(cmd *cobra.Command, args []string) error {
 		if showVersion {
-			fmt.Fprintln(cmd.OutOrStdout(), versionString)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), versionString)
 			return ErrVersionRequested
 		}
 		return nil
@@ -132,6 +132,9 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var actionLow string
 	var actionClean string
 	var actionNonBlocking string
+
+	// Verification flags
+	var noVerify bool
 
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
@@ -212,6 +215,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				ActionOnClean:       resolvedActionClean,
 				ActionOnNonBlocking: resolvedActionNonBlocking,
 				BotUsername:         resolvedBotUsername,
+				SkipVerification:    noVerify,
 			})
 			return err
 		},
@@ -250,6 +254,9 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	cmd.Flags().StringVar(&actionLow, "action-low", "", "Review action for low severity (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionClean, "action-clean", "", "Review action when no findings (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionNonBlocking, "action-non-blocking", "", "Review action when findings exist but none block (approve, comment)")
+
+	// Verification flags
+	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "Skip agent-based verification of findings (faster, but may include more false positives)")
 
 	return cmd
 }

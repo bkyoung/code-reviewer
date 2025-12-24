@@ -112,6 +112,15 @@ type StatusUpdateResult struct {
 	UpdatedAt   time.Time
 }
 
+// Verifier verifies candidate findings before reporting.
+// When enabled, the discovery findings from LLM providers are converted to candidates
+// and verified by an agent before being included in the final review.
+type Verifier interface {
+	// VerifyBatch verifies multiple candidates, potentially in parallel.
+	// Returns results in the same order as the input candidates.
+	VerifyBatch(ctx context.Context, candidates []domain.CandidateFinding) ([]domain.VerificationResult, error)
+}
+
 // GitHubPostRequest contains all data needed to post a review to GitHub.
 type GitHubPostRequest struct {
 	Owner     string
@@ -210,6 +219,9 @@ type OrchestratorDeps struct {
 	TrackingStore TrackingStore // Optional: tracks reviewed commits for incremental reviews
 	DiffComputer  *DiffComputer // Optional: computes incremental vs full diffs (auto-created if nil)
 	StatusScanner StatusScanner // Optional: detects status updates from PR comment replies (#60)
+
+	// Verification support (Epic #92)
+	Verifier Verifier // Optional: verifies candidate findings before reporting
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -254,6 +266,36 @@ type BranchRequest struct {
 	// Set to empty string to disable auto-dismiss (use "none" in config).
 	// Default: "github-actions[bot]"
 	BotUsername string
+
+	// SkipVerification disables agent-based verification of findings.
+	// When true, findings from LLM providers are reported directly without verification.
+	// Use --no-verify flag to enable this from the CLI.
+	SkipVerification bool
+
+	// VerificationConfig holds verification-specific settings.
+	// These are populated from the config file and can be overridden by CLI flags.
+	VerificationConfig VerificationSettings
+}
+
+// VerificationSettings holds configuration for the verification stage.
+type VerificationSettings struct {
+	// CostCeiling is the maximum USD to spend on verification per review.
+	CostCeiling float64
+
+	// ConfidenceCritical is the minimum confidence for critical findings.
+	ConfidenceCritical int
+
+	// ConfidenceHigh is the minimum confidence for high severity findings.
+	ConfidenceHigh int
+
+	// ConfidenceMedium is the minimum confidence for medium severity findings.
+	ConfidenceMedium int
+
+	// ConfidenceLow is the minimum confidence for low severity findings.
+	ConfidenceLow int
+
+	// ConfidenceDefault is the fallback minimum confidence when specific thresholds are not set.
+	ConfidenceDefault int
 }
 
 // Result captures the orchestrator outcome.
@@ -285,7 +327,7 @@ func (o *Orchestrator) validateDependencies() error {
 	if o.deps.Git == nil {
 		return errors.New("git engine is required")
 	}
-	if o.deps.Providers == nil || len(o.deps.Providers) == 0 {
+	if len(o.deps.Providers) == 0 {
 		return errors.New("at least one provider is required")
 	}
 	if o.deps.Merger == nil {
@@ -702,6 +744,45 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 
 	mergedReview := o.deps.Merger.Merge(ctx, reviews)
 	mergedReview.Cost = totalCost // Merged review gets total cost from all providers
+
+	// Verification stage: verify merged findings if enabled
+	if o.deps.Verifier != nil && !req.SkipVerification && len(mergedReview.Findings) > 0 {
+		candidates, verified, reportable, verifyErr := o.verifyFindings(
+			ctx,
+			mergedReview.Findings,
+			mergedReview.ProviderName,
+			req.VerificationConfig,
+		)
+
+		if verifyErr != nil {
+			// Log warning but continue with unverified findings
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogWarning(ctx, "verification failed, using unverified findings", map[string]interface{}{
+					"error":    verifyErr.Error(),
+					"findings": len(mergedReview.Findings),
+				})
+			} else {
+				log.Printf("warning: verification failed, using unverified findings: %v\n", verifyErr)
+			}
+		} else {
+			// Store verification results in the review
+			mergedReview.DiscoveryFindings = candidates
+			mergedReview.VerifiedFindings = verified
+			mergedReview.ReportableFindings = reportable
+
+			// Replace Findings with only the reportable ones for backward compatibility
+			// This ensures GitHub poster and other consumers use filtered findings
+			mergedReview.Findings = convertVerifiedToFindings(reportable)
+
+			if o.deps.Logger != nil {
+				o.deps.Logger.LogInfo(ctx, "verification complete", map[string]interface{}{
+					"candidates": len(candidates),
+					"verified":   len(verified),
+					"reportable": len(reportable),
+				})
+			}
+		}
+	}
 
 	mergedMarkdownPath, err := o.deps.Markdown.Write(ctx, domain.MarkdownArtifact{
 		OutputDir:    req.OutputDir,
