@@ -336,10 +336,13 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 		// before any inline comments from the review.
 		inProgressState := NewTrackingStateInProgress(target, time.Now())
 		// Preserve state from previous tracking to prevent data loss if review crashes.
-		// Deep copy Findings map to avoid shared mutation between states.
+		// Deep copy both slice and map to avoid shared mutation between states.
 		if trackingState != nil {
-			inProgressState.ReviewedCommits = trackingState.ReviewedCommits
-			if trackingState.Findings != nil {
+			if len(trackingState.ReviewedCommits) > 0 {
+				inProgressState.ReviewedCommits = make([]string, len(trackingState.ReviewedCommits))
+				copy(inProgressState.ReviewedCommits, trackingState.ReviewedCommits)
+			}
+			if len(trackingState.Findings) > 0 {
 				inProgressState.Findings = make(map[domain.FindingFingerprint]domain.TrackedFinding, len(trackingState.Findings))
 				for k, v := range trackingState.Findings {
 					inProgressState.Findings[k] = v
