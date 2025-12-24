@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 	"time"
@@ -208,7 +209,7 @@ func (r *DashboardRenderer) renderFilesRequiringAttention(sb *strings.Builder, d
 				badges = append(badges, fmt.Sprintf("%d %s", count, severity))
 			}
 		}
-		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", escapeMarkdownInlineCode(file), strings.Join(badges, ", ")))
+		sb.WriteString(fmt.Sprintf("- `%s` (%s)\n", html.EscapeString(escapeMarkdownInlineCode(file)), strings.Join(badges, ", ")))
 	}
 	sb.WriteString("\n")
 }
@@ -272,10 +273,10 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 			}
 			desc := truncateDescription(f.Finding.Description, 80)
 			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %s |\n",
-				escapeMarkdownInlineCode(f.Finding.File),
+				html.EscapeString(escapeMarkdownInlineCode(f.Finding.File)),
 				line,
-				escapeMarkdownTableCell(f.Finding.Category),
-				escapeMarkdownTableCell(desc),
+				html.EscapeString(escapeMarkdownTableCell(f.Finding.Category)),
+				html.EscapeString(escapeMarkdownTableCell(desc)),
 			))
 		}
 		sb.WriteString("\n</details>\n\n")
