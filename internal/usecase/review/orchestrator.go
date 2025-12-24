@@ -777,6 +777,9 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			// This ensures GitHub poster and other consumers use filtered findings
 			mergedReview.Findings = convertVerifiedToFindings(reportable)
 
+			// Log detailed verification results for each finding
+			logVerificationDetails(ctx, verified, reportable, req.VerificationConfig, o.deps.Logger)
+
 			if o.deps.Logger != nil {
 				o.deps.Logger.LogInfo(ctx, "verification complete", map[string]interface{}{
 					"candidates": len(candidates),
