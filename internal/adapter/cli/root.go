@@ -38,6 +38,18 @@ type DefaultReviewActions struct {
 	OnNonBlocking string
 }
 
+// DefaultVerification holds default verification configuration from config.
+type DefaultVerification struct {
+	Enabled            bool
+	Depth              string
+	CostCeiling        float64
+	ConfidenceDefault  int
+	ConfidenceCritical int
+	ConfidenceHigh     int
+	ConfidenceMedium   int
+	ConfidenceLow      int
+}
+
 // Dependencies captures the collaborators for the CLI.
 type Dependencies struct {
 	BranchReviewer       BranchReviewer
@@ -47,6 +59,7 @@ type Dependencies struct {
 	DefaultInstructions  string // From config review.instructions
 	DefaultReviewActions DefaultReviewActions
 	DefaultBotUsername   string // Bot username for auto-dismissing stale reviews
+	DefaultVerification  DefaultVerification
 	Version              string
 }
 
@@ -79,7 +92,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Use:   "review",
 		Short: "Run a code review",
 	}
-	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions, deps.DefaultBotUsername))
+	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions, deps.DefaultBotUsername, deps.DefaultVerification))
 	root.AddCommand(reviewCmd)
 
 	var showVersion bool
@@ -103,7 +116,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	return root
 }
 
-func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string, defaultActions DefaultReviewActions, defaultBotUsername string) *cobra.Command {
+func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, defaultInstructions string, defaultActions DefaultReviewActions, defaultBotUsername string, defaultVerification DefaultVerification) *cobra.Command {
 	var baseRef string
 	var targetRef string
 	var outputDir string
@@ -134,7 +147,15 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var actionNonBlocking string
 
 	// Verification flags
+	var verify bool
 	var noVerify bool
+	var verificationDepth string
+	var verificationCostCeiling float64
+	var confidenceDefault int
+	var confidenceCritical int
+	var confidenceHigh int
+	var confidenceMedium int
+	var confidenceLow int
 
 	cmd := &cobra.Command{
 		Use:   "branch [target]",
@@ -192,6 +213,17 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				resolvedBotUsername = ""
 			}
 
+			// Resolve verification settings: CLI flags override config defaults
+			// --no-verify takes precedence, then --verify, then config
+			resolvedVerifyEnabled := resolveVerifyEnabled(cmd, verify, noVerify, defaultVerification.Enabled)
+			resolvedDepth := resolveVerificationDepth(cmd, verificationDepth, defaultVerification.Depth)
+			resolvedCostCeiling := resolveFloat64(cmd, "verification-cost-ceiling", verificationCostCeiling, defaultVerification.CostCeiling)
+			resolvedConfDefault := resolveInt(cmd, "confidence-default", confidenceDefault, defaultVerification.ConfidenceDefault)
+			resolvedConfCritical := resolveInt(cmd, "confidence-critical", confidenceCritical, defaultVerification.ConfidenceCritical)
+			resolvedConfHigh := resolveInt(cmd, "confidence-high", confidenceHigh, defaultVerification.ConfidenceHigh)
+			resolvedConfMedium := resolveInt(cmd, "confidence-medium", confidenceMedium, defaultVerification.ConfidenceMedium)
+			resolvedConfLow := resolveInt(cmd, "confidence-low", confidenceLow, defaultVerification.ConfidenceLow)
+
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:             baseRef,
 				TargetRef:           targetRef,
@@ -215,7 +247,16 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 				ActionOnClean:       resolvedActionClean,
 				ActionOnNonBlocking: resolvedActionNonBlocking,
 				BotUsername:         resolvedBotUsername,
-				SkipVerification:    noVerify,
+				SkipVerification:    !resolvedVerifyEnabled,
+				VerificationConfig: review.VerificationSettings{
+					Depth:              resolvedDepth,
+					CostCeiling:        resolvedCostCeiling,
+					ConfidenceDefault:  resolvedConfDefault,
+					ConfidenceCritical: resolvedConfCritical,
+					ConfidenceHigh:     resolvedConfHigh,
+					ConfidenceMedium:   resolvedConfMedium,
+					ConfidenceLow:      resolvedConfLow,
+				},
 			})
 			return err
 		},
@@ -256,7 +297,15 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	cmd.Flags().StringVar(&actionNonBlocking, "action-non-blocking", "", "Review action when findings exist but none block (approve, comment)")
 
 	// Verification flags
+	cmd.Flags().BoolVar(&verify, "verify", false, "Enable agent-based verification of findings (overrides config)")
 	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "Skip agent-based verification of findings (faster, but may include more false positives)")
+	cmd.Flags().StringVar(&verificationDepth, "verification-depth", "", "Verification depth: minimal, medium, or thorough (default from config)")
+	cmd.Flags().Float64Var(&verificationCostCeiling, "verification-cost-ceiling", 0, "Max cost in dollars for verification (0 uses config default)")
+	cmd.Flags().IntVar(&confidenceDefault, "confidence-default", 0, "Default confidence threshold (0 uses config default)")
+	cmd.Flags().IntVar(&confidenceCritical, "confidence-critical", 0, "Confidence threshold for critical findings (0 uses config default)")
+	cmd.Flags().IntVar(&confidenceHigh, "confidence-high", 0, "Confidence threshold for high severity findings (0 uses config default)")
+	cmd.Flags().IntVar(&confidenceMedium, "confidence-medium", 0, "Confidence threshold for medium severity findings (0 uses config default)")
+	cmd.Flags().IntVar(&confidenceLow, "confidence-low", 0, "Confidence threshold for low severity findings (0 uses config default)")
 
 	return cmd
 }
@@ -267,4 +316,55 @@ func resolveAction(override, defaultValue string) string {
 		return override
 	}
 	return defaultValue
+}
+
+// resolveVerifyEnabled determines whether verification is enabled based on CLI flags and config.
+// Priority: --no-verify (disables) > --verify (enables) > config default
+func resolveVerifyEnabled(cmd *cobra.Command, verify, noVerify, configDefault bool) bool {
+	// --no-verify explicitly disables verification
+	if cmd.Flags().Changed("no-verify") && noVerify {
+		return false
+	}
+	// --verify explicitly enables verification
+	if cmd.Flags().Changed("verify") && verify {
+		return true
+	}
+	// Fall back to config default
+	return configDefault
+}
+
+// resolveVerificationDepth validates and resolves the verification depth setting.
+// Returns the CLI value if set and valid, otherwise the config default.
+// Invalid values trigger a warning and fall back to the config default.
+func resolveVerificationDepth(cmd *cobra.Command, cliValue, configDefault string) string {
+	if !cmd.Flags().Changed("verification-depth") || cliValue == "" {
+		return configDefault
+	}
+
+	validDepths := map[string]bool{"minimal": true, "medium": true, "thorough": true}
+	if validDepths[cliValue] {
+		return cliValue
+	}
+
+	// Warn and fall back to config default for invalid values
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: invalid verification depth %q, using config default %q\n", cliValue, configDefault)
+	return configDefault
+}
+
+// resolveFloat64 returns the CLI value if the flag was explicitly set and non-zero,
+// otherwise returns the config default.
+func resolveFloat64(cmd *cobra.Command, flagName string, cliValue, configDefault float64) float64 {
+	if cmd.Flags().Changed(flagName) && cliValue > 0 {
+		return cliValue
+	}
+	return configDefault
+}
+
+// resolveInt returns the CLI value if the flag was explicitly set and non-zero,
+// otherwise returns the config default.
+func resolveInt(cmd *cobra.Command, flagName string, cliValue, configDefault int) int {
+	if cmd.Flags().Changed(flagName) && cliValue > 0 {
+		return cliValue
+	}
+	return configDefault
 }

@@ -343,8 +343,8 @@ func TestVerificationConfigDefaults(t *testing.T) {
 	}
 
 	// Check defaults are applied
-	if cfg.Verification.Enabled {
-		t.Error("expected Verification.Enabled to be false by default")
+	if !cfg.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be true by default")
 	}
 	if cfg.Verification.Depth != "medium" {
 		t.Errorf("expected Verification.Depth 'medium', got %s", cfg.Verification.Depth)

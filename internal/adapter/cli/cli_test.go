@@ -96,3 +96,172 @@ func TestVersionFlagEmitsVersion(t *testing.T) {
 		t.Fatalf("unexpected version output: %q", buf.String())
 	}
 }
+
+func TestVerificationFlags_NoVerifyDisables(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            true, // Config says enabled
+			Depth:              "medium",
+			CostCeiling:        0.50,
+			ConfidenceDefault:  75,
+			ConfidenceCritical: 60,
+			ConfidenceHigh:     70,
+			ConfidenceMedium:   75,
+			ConfidenceLow:      85,
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{"review", "branch", "main", "--no-verify"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	if !stub.request.SkipVerification {
+		t.Error("expected SkipVerification=true when --no-verify is set")
+	}
+}
+
+func TestVerificationFlags_VerifyEnables(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            false, // Config says disabled
+			Depth:              "medium",
+			CostCeiling:        0.50,
+			ConfidenceDefault:  75,
+			ConfidenceCritical: 60,
+			ConfidenceHigh:     70,
+			ConfidenceMedium:   75,
+			ConfidenceLow:      85,
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{"review", "branch", "main", "--verify"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	if stub.request.SkipVerification {
+		t.Error("expected SkipVerification=false when --verify is set")
+	}
+}
+
+func TestVerificationFlags_ConfigDefaultUsed(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            true,
+			Depth:              "thorough",
+			CostCeiling:        1.25,
+			ConfidenceDefault:  80,
+			ConfidenceCritical: 50,
+			ConfidenceHigh:     65,
+			ConfidenceMedium:   70,
+			ConfidenceLow:      90,
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{"review", "branch", "main"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should use config defaults when no CLI flags are set
+	if stub.request.SkipVerification {
+		t.Error("expected SkipVerification=false (config enabled)")
+	}
+	if stub.request.VerificationConfig.Depth != "thorough" {
+		t.Errorf("expected depth 'thorough', got %q", stub.request.VerificationConfig.Depth)
+	}
+	if stub.request.VerificationConfig.CostCeiling != 1.25 {
+		t.Errorf("expected cost ceiling 1.25, got %f", stub.request.VerificationConfig.CostCeiling)
+	}
+	if stub.request.VerificationConfig.ConfidenceDefault != 80 {
+		t.Errorf("expected confidence default 80, got %d", stub.request.VerificationConfig.ConfidenceDefault)
+	}
+}
+
+func TestVerificationFlags_CLIOverridesConfig(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            true,
+			Depth:              "medium",
+			CostCeiling:        0.50,
+			ConfidenceDefault:  75,
+			ConfidenceCritical: 60,
+			ConfidenceHigh:     70,
+			ConfidenceMedium:   75,
+			ConfidenceLow:      85,
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{
+		"review", "branch", "main",
+		"--verification-depth", "thorough",
+		"--verification-cost-ceiling", "2.50",
+		"--confidence-default", "85",
+		"--confidence-critical", "55",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// CLI flags should override config defaults
+	if stub.request.VerificationConfig.Depth != "thorough" {
+		t.Errorf("expected depth 'thorough', got %q", stub.request.VerificationConfig.Depth)
+	}
+	if stub.request.VerificationConfig.CostCeiling != 2.50 {
+		t.Errorf("expected cost ceiling 2.50, got %f", stub.request.VerificationConfig.CostCeiling)
+	}
+	if stub.request.VerificationConfig.ConfidenceDefault != 85 {
+		t.Errorf("expected confidence default 85, got %d", stub.request.VerificationConfig.ConfidenceDefault)
+	}
+	if stub.request.VerificationConfig.ConfidenceCritical != 55 {
+		t.Errorf("expected confidence critical 55, got %d", stub.request.VerificationConfig.ConfidenceCritical)
+	}
+	// Non-overridden values should use config defaults
+	if stub.request.VerificationConfig.ConfidenceHigh != 70 {
+		t.Errorf("expected confidence high 70 (config default), got %d", stub.request.VerificationConfig.ConfidenceHigh)
+	}
+}
+
+func TestVerificationFlags_InvalidDepthWarns(t *testing.T) {
+	stub := &branchStub{}
+	errBuf := &bytes.Buffer{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: errBuf},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled: true,
+			Depth:   "medium",
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{"review", "branch", "main", "--verification-depth", "invalid"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should warn and fall back to config default
+	if !strings.Contains(errBuf.String(), "warning") {
+		t.Error("expected warning for invalid depth")
+	}
+	if stub.request.VerificationConfig.Depth != "medium" {
+		t.Errorf("expected fallback to config depth 'medium', got %q", stub.request.VerificationConfig.Depth)
+	}
+}

@@ -225,7 +225,17 @@ func run() error {
 			OnNonBlocking: cfg.Review.Actions.OnNonBlocking,
 		},
 		DefaultBotUsername: cfg.Review.BotUsername,
-		Version:            version.Value(),
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            cfg.Verification.Enabled,
+			Depth:              cfg.Verification.Depth,
+			CostCeiling:        cfg.Verification.CostCeiling,
+			ConfidenceDefault:  cfg.Verification.Confidence.Default,
+			ConfidenceCritical: cfg.Verification.Confidence.Critical,
+			ConfidenceHigh:     cfg.Verification.Confidence.High,
+			ConfidenceMedium:   cfg.Verification.Confidence.Medium,
+			ConfidenceLow:      cfg.Verification.Confidence.Low,
+		},
+		Version: version.Value(),
 	})
 
 	if err := root.ExecuteContext(ctx); err != nil {

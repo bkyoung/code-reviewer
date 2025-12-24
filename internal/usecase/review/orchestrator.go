@@ -279,6 +279,9 @@ type BranchRequest struct {
 
 // VerificationSettings holds configuration for the verification stage.
 type VerificationSettings struct {
+	// Depth controls verification thoroughness: "minimal", "medium", or "thorough".
+	Depth string
+
 	// CostCeiling is the maximum USD to spend on verification per review.
 	CostCeiling float64
 

@@ -248,7 +248,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("review.botUsername", "github-actions[bot]")
 
 	// Verification defaults (Epic #92 - agent verification)
-	v.SetDefault("verification.enabled", false)
+	v.SetDefault("verification.enabled", true)
 	v.SetDefault("verification.depth", "medium")
 	v.SetDefault("verification.costCeiling", 0.50)
 	v.SetDefault("verification.confidence.default", 75)
