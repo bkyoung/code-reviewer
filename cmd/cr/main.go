@@ -765,11 +765,11 @@ type geminiLLMAdapter struct {
 }
 
 func (a *geminiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
-	// Combine system and user prompts for Gemini
-	fullPrompt := systemPrompt + "\n\n" + userPrompt
-	resp, err := a.client.Call(ctx, fullPrompt, gemini.CallOptions{
-		Temperature: 0.0,
-		MaxTokens:   8192, // Larger for batch verification responses
+	// Pass system prompt as Gemini's system instruction for proper handling
+	resp, err := a.client.Call(ctx, userPrompt, gemini.CallOptions{
+		Temperature:       0.0,
+		MaxTokens:         65536, // Large enough for batch verification with many findings
+		SystemInstruction: systemPrompt,
 	})
 	if err != nil {
 		return "", 0, 0, 0, err
