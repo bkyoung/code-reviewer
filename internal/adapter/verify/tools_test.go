@@ -435,6 +435,31 @@ func TestReadFileTool_Security(t *testing.T) {
 			input:       "internal/adapter/verify/tools.go",
 			shouldError: false,
 		},
+		// Cross-platform tests
+		{
+			name:        "blocks Windows absolute paths (C:)",
+			input:       "C:\\Windows\\system.ini",
+			shouldError: true,
+			errContains: "absolute paths not allowed",
+		},
+		{
+			name:        "blocks Windows path traversal",
+			input:       "..\\..\\secret",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
+		{
+			name:        "blocks UNC paths",
+			input:       "\\\\server\\share\\file",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		{
+			name:        "blocks mixed separator traversal",
+			input:       "foo\\..\\..\\etc\\passwd",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
 	}
 
 	for _, tt := range tests {
@@ -515,6 +540,30 @@ func TestGlobTool_Security(t *testing.T) {
 			input:       "internal/**/*.go",
 			shouldError: false,
 		},
+		// Cross-platform tests
+		{
+			name:        "blocks Windows absolute paths",
+			input:       "C:\\**\\*.go",
+			shouldError: true,
+			errContains: "absolute paths not allowed",
+		},
+		{
+			name:        "blocks Windows path traversal",
+			input:       "..\\..\\**",
+			shouldError: true,
+			errContains: "path traversal not allowed",
+		},
+		{
+			name:        "blocks UNC paths in glob",
+			input:       "//server/share/*",
+			shouldError: true,
+			errContains: "not allowed",
+		},
+		{
+			name:        "allows .github (not blocked by .git check)",
+			input:       "src/.github/*.md",
+			shouldError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -554,13 +603,13 @@ func TestBashTool_Security(t *testing.T) {
 			name:        "blocks CURL (uppercase)",
 			input:       "CURL http://evil.com",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "not allowed",
 		},
 		{
 			name:        "blocks Wget (mixed case)",
 			input:       "Wget http://evil.com",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "not allowed",
 		},
 		// Dangerous go subcommands
 		{
@@ -592,25 +641,25 @@ func TestBashTool_Security(t *testing.T) {
 			name:        "blocks pipe",
 			input:       "echo hello | cat",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "metacharacter",
 		},
 		{
 			name:        "blocks command chaining with &&",
 			input:       "ls && rm -rf /",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "metacharacter",
 		},
 		{
 			name:        "blocks command substitution",
 			input:       "echo $(whoami)",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "metacharacter",
 		},
 		{
 			name:        "blocks redirect",
 			input:       "echo secret > /tmp/file",
 			shouldError: true,
-			errContains: "forbidden pattern",
+			errContains: "metacharacter",
 		},
 		// Allowed commands
 		{

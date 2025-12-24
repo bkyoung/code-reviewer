@@ -3,7 +3,7 @@ package verify
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/bkyoung/code-reviewer/internal/usecase/verify"
@@ -79,24 +79,49 @@ func (t *ReadFileTool) Execute(ctx context.Context, input string) (string, error
 }
 
 // validatePath checks that a path is safe (no traversal, no absolute paths).
+// Works across platforms by normalizing separators and using filepath package.
 func validatePath(filePath string) error {
-	// Block absolute paths
-	if strings.HasPrefix(filePath, "/") {
+	// Normalize backslashes to forward slashes for consistent checking
+	normalized := strings.ReplaceAll(filePath, "\\", "/")
+
+	// Block absolute paths (Unix-style and Windows-style)
+	if filepath.IsAbs(filePath) || strings.HasPrefix(normalized, "/") {
 		return fmt.Errorf("absolute paths not allowed: %s", filePath)
 	}
 
-	// Clean the path to resolve any . or .. components
-	cleaned := path.Clean(filePath)
+	// Block Windows drive letters (C:, D:, etc.)
+	if len(normalized) >= 2 && normalized[1] == ':' {
+		return fmt.Errorf("absolute paths not allowed: %s", filePath)
+	}
 
-	// After cleaning, check for path traversal attempts
-	if strings.HasPrefix(cleaned, "..") {
+	// Block UNC paths (\\server\share or //server/share)
+	if strings.HasPrefix(normalized, "//") {
+		return fmt.Errorf("UNC paths not allowed: %s", filePath)
+	}
+
+	// Check for path traversal BEFORE cleaning to catch all variants
+	// This includes: .., ../, ..\, foo/../bar, etc.
+	if containsTraversal(normalized) {
+		return fmt.Errorf("path traversal not allowed: %s", filePath)
+	}
+
+	// Clean the path to resolve . components
+	cleaned := filepath.Clean(filePath)
+
+	// Double-check after cleaning (path.Clean may produce different results)
+	cleanedNorm := strings.ReplaceAll(cleaned, "\\", "/")
+	if containsTraversal(cleanedNorm) {
 		return fmt.Errorf("path traversal not allowed: %s", filePath)
 	}
 
 	// Check for hidden files/directories (starting with .)
-	// This prevents access to .git, .env, etc.
-	parts := strings.Split(cleaned, "/")
+	// Use the normalized path with forward slashes for splitting
+	parts := strings.Split(cleanedNorm, "/")
 	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		// Block hidden files/directories but allow "." as current dir reference
 		if strings.HasPrefix(part, ".") && part != "." {
 			return fmt.Errorf("hidden files/directories not allowed: %s", filePath)
 		}
@@ -105,24 +130,54 @@ func validatePath(filePath string) error {
 	return nil
 }
 
+// containsTraversal checks if a normalized path contains directory traversal.
+func containsTraversal(normalizedPath string) bool {
+	parts := strings.Split(normalizedPath, "/")
+	for _, part := range parts {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // validateGlobPattern checks that a glob pattern is safe.
 func validateGlobPattern(pattern string) error {
-	// Block absolute paths
-	if strings.HasPrefix(pattern, "/") {
+	// Normalize backslashes to forward slashes
+	normalized := strings.ReplaceAll(pattern, "\\", "/")
+	normalizedLower := strings.ToLower(normalized)
+
+	// Block absolute paths (Unix and Windows style)
+	if strings.HasPrefix(normalized, "/") {
 		return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
 	}
 
-	// Block patterns that start with path traversal
-	if strings.HasPrefix(pattern, "..") {
+	// Block Windows drive letters
+	if len(normalized) >= 2 && normalized[1] == ':' {
+		return fmt.Errorf("absolute paths not allowed in glob: %s", pattern)
+	}
+
+	// Block UNC paths
+	if strings.HasPrefix(normalized, "//") {
+		return fmt.Errorf("UNC paths not allowed in glob: %s", pattern)
+	}
+
+	// Block patterns that contain path traversal
+	if containsTraversal(normalized) {
 		return fmt.Errorf("path traversal not allowed in glob: %s", pattern)
 	}
 
 	// Block patterns explicitly targeting hidden/sensitive directories
-	// Note: We allow patterns like "**/*.go" which might incidentally match hidden dirs,
-	// but block explicit targeting like ".git/*" or ".env"
-	for _, forbidden := range []string{".git", ".env", ".ssh", ".aws", ".config", ".secret"} {
-		if strings.Contains(pattern, forbidden) {
-			return fmt.Errorf("pattern targets forbidden directory: %s", forbidden)
+	// Use case-insensitive matching and check path segments to avoid false positives
+	// (e.g., don't block "src/.github" just because it contains ".git" substring)
+	forbiddenDirs := []string{".git", ".env", ".ssh", ".aws", ".config", ".secret"}
+	parts := strings.Split(normalizedLower, "/")
+	for _, part := range parts {
+		for _, forbidden := range forbiddenDirs {
+			// Check exact match or if it's the start of the segment
+			if part == forbidden || strings.HasPrefix(part, forbidden+"/") {
+				return fmt.Errorf("pattern targets forbidden directory: %s", forbidden)
+			}
 		}
 	}
 
@@ -267,58 +322,56 @@ var safeCommands = map[string][]string{
 	"ls":   nil, // Any args OK
 }
 
-// dangerousPatterns are patterns that should never be allowed.
-var dangerousPatterns = []string{
+// dangerousCommands are command names that should never be allowed.
+// These are checked as complete tokens (not substrings) to avoid false positives.
+var dangerousCommands = map[string]bool{
 	// File deletion/modification
-	"rm ",
-	"rm\t",
-	"rmdir",
-	"mv ",
-	"mv\t",
-	"dd ",
-	"dd\t",
+	"rm": true, "rmdir": true, "mv": true, "dd": true,
 	// Network access
-	"curl",
-	"wget",
-	"nc ",
-	"nc\t",
-	"netcat",
-	"ssh",
-	"scp",
-	"rsync",
+	"curl": true, "wget": true, "nc": true, "netcat": true,
+	"ssh": true, "scp": true, "rsync": true, "ftp": true,
 	// Privilege escalation
-	"chmod",
-	"chown",
-	"sudo",
-	"su ",
-	"su\t",
+	"chmod": true, "chown": true, "sudo": true, "su": true,
 	// Code execution
-	"eval",
-	"exec",
-	"xargs",
-	"env ",
-	"env\t",
+	"eval": true, "exec": true, "xargs": true, "env": true,
 	// Shell spawning
-	"sh ",
-	"sh\t",
-	"bash",
-	"zsh",
-	"python",
-	"python3",
-	"ruby",
-	"perl",
-	"node",
-	// Shell metacharacters
-	">",   // Redirect output
-	">>",  // Append output
-	"|",   // Pipe (could be used to bypass restrictions)
-	";",   // Command chaining
-	"&&",  // Command chaining
-	"||",  // Command chaining
-	"`",   // Command substitution
-	"$(",  // Command substitution
-	"${",  // Variable expansion (could be exploited)
-	"\\n", // Newline escape (could inject commands)
+	"sh": true, "bash": true, "zsh": true, "ksh": true, "csh": true,
+	"python": true, "python3": true, "python2": true,
+	"ruby": true, "perl": true, "node": true, "php": true,
+}
+
+// shellMetacharacters are patterns that indicate shell features that could bypass restrictions.
+// These use substring matching because they're actual characters in the input.
+var shellMetacharacters = []string{
+	">",  // Redirect output
+	"<",  // Redirect input
+	"|",  // Pipe
+	";",  // Command chaining
+	"&&", // Conditional chaining
+	"||", // Conditional chaining
+	"`",  // Command substitution (backtick)
+	"$(", // Command substitution
+	"${", // Variable expansion
+	"\n", // Newline (could inject commands)
+}
+
+// checkDangerousTokens checks if any token in the input is a dangerous command.
+// This uses token-based matching to avoid false positives.
+func checkDangerousTokens(input string) error {
+	// Split on whitespace to get tokens
+	tokens := strings.Fields(input)
+
+	for _, token := range tokens {
+		// Normalize to lowercase for case-insensitive matching
+		tokenLower := strings.ToLower(token)
+
+		// Check if this token is a dangerous command
+		if dangerousCommands[tokenLower] {
+			return fmt.Errorf("command %q is not allowed", token)
+		}
+	}
+
+	return nil
 }
 
 // Execute runs the command if it's in the allowlist.
@@ -328,12 +381,17 @@ func (t *BashTool) Execute(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("command required")
 	}
 
-	// Check for dangerous patterns (case-insensitive for commands/keywords)
-	inputLower := strings.ToLower(input)
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(inputLower, strings.ToLower(pattern)) {
-			return "", fmt.Errorf("command contains forbidden pattern: %s", pattern)
+	// Check for shell metacharacters (these need substring matching)
+	for _, meta := range shellMetacharacters {
+		if strings.Contains(input, meta) {
+			return "", fmt.Errorf("command contains forbidden shell metacharacter: %q", meta)
 		}
+	}
+
+	// Check for dangerous commands as tokens (not substrings)
+	// This prevents false positives like blocking "format" because it contains "rm"
+	if err := checkDangerousTokens(input); err != nil {
+		return "", err
 	}
 
 	// Parse command
