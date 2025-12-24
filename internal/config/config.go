@@ -14,6 +14,7 @@ type Config struct {
 	Store         StoreConfig               `yaml:"store"`
 	Observability ObservabilityConfig       `yaml:"observability"`
 	Review        ReviewConfig              `yaml:"review"`
+	Verification  VerificationConfig        `yaml:"verification"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -147,6 +148,44 @@ type ReviewActions struct {
 	OnNonBlocking string `yaml:"onNonBlocking"`
 }
 
+// VerificationConfig configures the agent verification behavior.
+// When enabled, candidate findings from discovery are verified by an agent
+// before being reported.
+type VerificationConfig struct {
+	// Enabled toggles agent verification of findings.
+	Enabled bool `yaml:"enabled"`
+
+	// Depth controls how thoroughly the agent verifies findings.
+	// Valid values: "quick" (read file only), "medium" (read + grep), "deep" (run build/tests).
+	Depth string `yaml:"depth"`
+
+	// CostCeiling is the maximum USD to spend on verification per review.
+	// When reached, remaining candidates are reported as unverified with lower confidence.
+	CostCeiling float64 `yaml:"costCeiling"`
+
+	// Confidence contains per-severity confidence thresholds.
+	Confidence ConfidenceThresholds `yaml:"confidence"`
+}
+
+// ConfidenceThresholds define minimum confidence levels (0-100) for reporting findings.
+// Findings below the threshold for their severity level are discarded.
+type ConfidenceThresholds struct {
+	// Default is used when a severity-specific threshold is not set.
+	Default int `yaml:"default"`
+
+	// Critical is the threshold for critical severity findings.
+	Critical int `yaml:"critical"`
+
+	// High is the threshold for high severity findings.
+	High int `yaml:"high"`
+
+	// Medium is the threshold for medium severity findings.
+	Medium int `yaml:"medium"`
+
+	// Low is the threshold for low severity findings.
+	Low int `yaml:"low"`
+}
+
 // Merge combines multiple configuration instances, prioritising the latter ones.
 func Merge(configs ...Config) Config {
 	result := Config{}
@@ -170,6 +209,7 @@ func merge(base, overlay Config) Config {
 	result.Store = chooseStore(base.Store, overlay.Store)
 	result.Observability = chooseObservability(base.Observability, overlay.Observability)
 	result.Review = chooseReview(base.Review, overlay.Review)
+	result.Verification = chooseVerification(base.Verification, overlay.Verification)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -316,4 +356,15 @@ func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
 		result.OnNonBlocking = overlay.OnNonBlocking
 	}
 	return result
+}
+
+func chooseVerification(base, overlay VerificationConfig) VerificationConfig {
+	if overlay.Enabled || overlay.Depth != "" || overlay.CostCeiling != 0 || hasConfidenceThresholds(overlay.Confidence) {
+		return overlay
+	}
+	return base
+}
+
+func hasConfidenceThresholds(ct ConfidenceThresholds) bool {
+	return ct.Default != 0 || ct.Critical != 0 || ct.High != 0 || ct.Medium != 0 || ct.Low != 0
 }

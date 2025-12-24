@@ -333,3 +333,148 @@ func TestBotUsernameMergePreservesBase(t *testing.T) {
 		t.Errorf("expected BotUsername 'base-bot[bot]' from base, got %s", merged.Review.BotUsername)
 	}
 }
+
+func TestVerificationConfigDefaults(t *testing.T) {
+	cfg, err := config.Load(config.LoaderOptions{
+		EnvPrefix: "CR_TEST_VERIF_DEFAULTS",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Check defaults are applied
+	if cfg.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be false by default")
+	}
+	if cfg.Verification.Depth != "medium" {
+		t.Errorf("expected Verification.Depth 'medium', got %s", cfg.Verification.Depth)
+	}
+	if cfg.Verification.CostCeiling != 0.50 {
+		t.Errorf("expected Verification.CostCeiling 0.50, got %f", cfg.Verification.CostCeiling)
+	}
+	if cfg.Verification.Confidence.Default != 75 {
+		t.Errorf("expected Verification.Confidence.Default 75, got %d", cfg.Verification.Confidence.Default)
+	}
+	if cfg.Verification.Confidence.Critical != 60 {
+		t.Errorf("expected Verification.Confidence.Critical 60, got %d", cfg.Verification.Confidence.Critical)
+	}
+	if cfg.Verification.Confidence.High != 70 {
+		t.Errorf("expected Verification.Confidence.High 70, got %d", cfg.Verification.Confidence.High)
+	}
+	if cfg.Verification.Confidence.Medium != 75 {
+		t.Errorf("expected Verification.Confidence.Medium 75, got %d", cfg.Verification.Confidence.Medium)
+	}
+	if cfg.Verification.Confidence.Low != 85 {
+		t.Errorf("expected Verification.Confidence.Low 85, got %d", cfg.Verification.Confidence.Low)
+	}
+}
+
+func TestVerificationConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+verification:
+  enabled: true
+  depth: deep
+  costCeiling: 1.25
+  confidence:
+    default: 80
+    critical: 50
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_VERIF_FILE",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	if !cfg.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be true from file")
+	}
+	if cfg.Verification.Depth != "deep" {
+		t.Errorf("expected Verification.Depth 'deep', got %s", cfg.Verification.Depth)
+	}
+	if cfg.Verification.CostCeiling != 1.25 {
+		t.Errorf("expected Verification.CostCeiling 1.25, got %f", cfg.Verification.CostCeiling)
+	}
+	if cfg.Verification.Confidence.Default != 80 {
+		t.Errorf("expected Verification.Confidence.Default 80, got %d", cfg.Verification.Confidence.Default)
+	}
+	if cfg.Verification.Confidence.Critical != 50 {
+		t.Errorf("expected Verification.Confidence.Critical 50, got %d", cfg.Verification.Confidence.Critical)
+	}
+}
+
+func TestVerificationConfigMerge(t *testing.T) {
+	base := config.Config{
+		Verification: config.VerificationConfig{
+			Enabled:     false,
+			Depth:       "quick",
+			CostCeiling: 0.25,
+			Confidence: config.ConfidenceThresholds{
+				Default:  70,
+				Critical: 55,
+				High:     65,
+				Medium:   70,
+				Low:      80,
+			},
+		},
+	}
+	overlay := config.Config{
+		Verification: config.VerificationConfig{
+			Enabled: true,
+			Depth:   "deep",
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	// Overlay should replace entire verification config (all-or-nothing pattern)
+	if !merged.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be true from overlay")
+	}
+	if merged.Verification.Depth != "deep" {
+		t.Errorf("expected Verification.Depth 'deep' from overlay, got %s", merged.Verification.Depth)
+	}
+	// When overlay has any verification config, it replaces base entirely
+	if merged.Verification.CostCeiling != 0 {
+		t.Errorf("expected Verification.CostCeiling 0 from overlay (not set), got %f", merged.Verification.CostCeiling)
+	}
+}
+
+func TestVerificationConfigMergePreservesBase(t *testing.T) {
+	base := config.Config{
+		Verification: config.VerificationConfig{
+			Enabled:     true,
+			Depth:       "quick",
+			CostCeiling: 0.25,
+			Confidence: config.ConfidenceThresholds{
+				Default: 70,
+			},
+		},
+	}
+	overlay := config.Config{
+		// Empty verification config - should preserve base
+	}
+
+	merged := config.Merge(base, overlay)
+
+	if !merged.Verification.Enabled {
+		t.Error("expected Verification.Enabled to be preserved from base")
+	}
+	if merged.Verification.Depth != "quick" {
+		t.Errorf("expected Verification.Depth 'quick' from base, got %s", merged.Verification.Depth)
+	}
+	if merged.Verification.CostCeiling != 0.25 {
+		t.Errorf("expected Verification.CostCeiling 0.25 from base, got %f", merged.Verification.CostCeiling)
+	}
+	if merged.Verification.Confidence.Default != 70 {
+		t.Errorf("expected Verification.Confidence.Default 70 from base, got %d", merged.Verification.Confidence.Default)
+	}
+}
