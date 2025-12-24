@@ -93,6 +93,25 @@ type GitHubPoster interface {
 	PostReview(ctx context.Context, req GitHubPostRequest) (*GitHubPostResult, error)
 }
 
+// StatusScanner defines the outbound port for detecting status updates from PR comments.
+// This scans PR comment replies for keywords like "acknowledged" or "disputed" to
+// update finding statuses before reconciliation.
+type StatusScanner interface {
+	// ScanForStatusUpdates fetches PR comments and detects status update keywords in replies.
+	// Returns a map of fingerprint → new status for each finding that has a status update.
+	// The botUsername is used to identify which comments were posted by the bot.
+	ScanForStatusUpdates(ctx context.Context, owner, repo string, prNumber int, botUsername string) ([]StatusUpdateResult, error)
+}
+
+// StatusUpdateResult represents a detected status update from a PR comment reply.
+type StatusUpdateResult struct {
+	Fingerprint domain.FindingFingerprint
+	NewStatus   domain.FindingStatus
+	Reason      string
+	UpdatedBy   string
+	UpdatedAt   time.Time
+}
+
 // GitHubPostRequest contains all data needed to post a review to GitHub.
 type GitHubPostRequest struct {
 	Owner     string
@@ -190,6 +209,7 @@ type OrchestratorDeps struct {
 	// Incremental review support (Epic #53)
 	TrackingStore TrackingStore // Optional: tracks reviewed commits for incremental reviews
 	DiffComputer  *DiffComputer // Optional: computes incremental vs full diffs (auto-created if nil)
+	StatusScanner StatusScanner // Optional: detects status updates from PR comment replies (#60)
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -755,6 +775,34 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			// Detect first review: nil state OR empty Findings map (handles empty-but-non-nil case)
 			isFirstReview := trackingState == nil || len(trackingState.Findings) == 0
 
+			// Scan for status updates from PR comment replies BEFORE reconciliation.
+			// This ensures acknowledged/disputed findings maintain their status across reviews.
+			if !isFirstReview && o.deps.StatusScanner != nil {
+				statusUpdates, err := o.deps.StatusScanner.ScanForStatusUpdates(
+					ctx, req.GitHubOwner, req.GitHubRepo, req.PRNumber, req.BotUsername,
+				)
+				if err != nil {
+					// Log warning but continue - status scanning failures shouldn't break reviews
+					if o.deps.Logger != nil {
+						o.deps.Logger.LogWarning(ctx, "failed to scan for status updates", map[string]interface{}{
+							"error":    err.Error(),
+							"prNumber": req.PRNumber,
+						})
+					} else {
+						log.Printf("warning: failed to scan for status updates: %v\n", err)
+					}
+				} else if len(statusUpdates) > 0 {
+					// Apply status updates to tracking state
+					applied := applyStatusUpdatesToState(trackingState.Findings, statusUpdates, req.CommitSHA, reconcileTime)
+					if o.deps.Logger != nil {
+						o.deps.Logger.LogInfo(ctx, "applied status updates from PR comments", map[string]interface{}{
+							"detected": len(statusUpdates),
+							"applied":  applied,
+						})
+					}
+				}
+			}
+
 			// ReconciliationResult errors are logged inside reconcileAndFilterFindings
 			newFindings, updatedState, _ := o.reconcileAndFilterFindings(
 				ctx,
@@ -815,9 +863,6 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				}
 			}
 
-			// TODO(#60): Detect status updates from PR comment replies and reactions
-			// Before reconciliation, scan for user replies that indicate status changes
-			// (e.g., "acknowledged", "won't fix", "disputed") and update finding statuses
 		}
 
 		// Create review with potentially filtered findings for posting
@@ -1140,4 +1185,45 @@ func computeAttentionSeverities(req BranchRequest) map[string]bool {
 	checkAction("low", req.ActionOnLow, false)
 
 	return result
+}
+
+// applyStatusUpdatesToState applies detected status updates to existing findings.
+// This is called before reconciliation to ensure user feedback (acknowledged/disputed)
+// is preserved across review cycles.
+//
+// Returns the number of updates successfully applied.
+func applyStatusUpdatesToState(
+	findings map[domain.FindingFingerprint]domain.TrackedFinding,
+	updates []StatusUpdateResult,
+	currentCommit string,
+	timestamp time.Time,
+) int {
+	applied := 0
+
+	for _, update := range updates {
+		finding, exists := findings[update.Fingerprint]
+		if !exists {
+			// Fingerprint not found in current state - might be from old review
+			continue
+		}
+
+		// Only update if status is currently open.
+		// Once acknowledged/disputed, the status is sticky until the code is fixed.
+		if finding.Status != domain.FindingStatusOpen {
+			continue
+		}
+
+		// Apply the status update
+		err := finding.UpdateStatus(update.NewStatus, update.Reason, currentCommit, update.UpdatedAt)
+		if err != nil {
+			log.Printf("warning: failed to apply status update for %s: %v", update.Fingerprint, err)
+			continue
+		}
+
+		// Write back to map (TrackedFinding is a value type)
+		findings[update.Fingerprint] = finding
+		applied++
+	}
+
+	return applied
 }

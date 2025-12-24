@@ -7,6 +7,13 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
+// fingerprintMarkerStart is the HTML comment prefix for embedding fingerprints.
+// This marker is invisible in rendered markdown but can be extracted for reply matching.
+const fingerprintMarkerStart = "<!-- CR_FINGERPRINT:"
+
+// fingerprintMarkerEnd closes the HTML comment containing the fingerprint.
+const fingerprintMarkerEnd = " -->"
+
 // ReviewActions configures the GitHub review action for each finding severity level.
 // This mirrors config.ReviewActions but lives in the adapter layer to avoid coupling.
 type ReviewActions struct {
@@ -49,6 +56,7 @@ var defaultBlockingSeverities = map[string]bool{
 
 // BuildReviewComments converts positioned findings to GitHub review comments.
 // Only findings with a valid DiffPosition (InDiff() == true) are included.
+// Each comment includes an embedded fingerprint for linking replies to findings.
 // This function is pure and does not modify the input.
 func BuildReviewComments(findings []PositionedFinding) []ReviewComment {
 	var comments []ReviewComment
@@ -58,10 +66,14 @@ func BuildReviewComments(findings []PositionedFinding) []ReviewComment {
 			continue
 		}
 
+		// Compute fingerprint and embed in comment body
+		fingerprint := domain.FingerprintFromFinding(pf.Finding)
+		body := FormatFindingCommentWithFingerprint(pf.Finding, fingerprint)
+
 		comments = append(comments, ReviewComment{
 			Path:     pf.Finding.File,
 			Position: *pf.DiffPosition,
-			Body:     FormatFindingComment(pf.Finding),
+			Body:     body,
 		})
 	}
 
@@ -98,6 +110,77 @@ func FormatFindingComment(f domain.Finding) string {
 	}
 
 	return sb.String()
+}
+
+// FormatFindingCommentWithFingerprint formats a finding as a GitHub comment with embedded fingerprint.
+// The fingerprint is stored in an HTML comment that is invisible when rendered but can be
+// extracted to link replies back to the original finding.
+func FormatFindingCommentWithFingerprint(f domain.Finding, fingerprint domain.FindingFingerprint) string {
+	var sb strings.Builder
+
+	// Start with the standard format
+	sb.WriteString(FormatFindingComment(f))
+
+	// Add fingerprint in hidden HTML comment
+	sb.WriteString("\n")
+	sb.WriteString(fingerprintMarkerStart)
+	sb.WriteString(string(fingerprint))
+	sb.WriteString(fingerprintMarkerEnd)
+
+	return sb.String()
+}
+
+// fingerprintLength is the expected length of a fingerprint (32 hex chars from 16 bytes of SHA256).
+const fingerprintLength = 32
+
+// ExtractFingerprintFromComment extracts the finding fingerprint from a GitHub comment body.
+// Returns the fingerprint and true if found and valid, or empty and false if not present or invalid.
+// This is used to link reply comments back to their original findings.
+//
+// The function validates that the extracted fingerprint matches the expected format
+// (32-character hexadecimal string) to prevent injection of arbitrary strings.
+func ExtractFingerprintFromComment(body string) (domain.FindingFingerprint, bool) {
+	startIdx := strings.Index(body, fingerprintMarkerStart)
+	if startIdx == -1 {
+		return "", false
+	}
+
+	// Find the content start (after the marker)
+	contentStart := startIdx + len(fingerprintMarkerStart)
+
+	// Find the end marker
+	remaining := body[contentStart:]
+	endIdx := strings.Index(remaining, fingerprintMarkerEnd)
+	if endIdx == -1 {
+		return "", false
+	}
+
+	// Extract and trim the fingerprint
+	fp := strings.TrimSpace(remaining[:endIdx])
+	if fp == "" {
+		return "", false
+	}
+
+	// Validate fingerprint format: must be exactly 32 hexadecimal characters
+	if !isValidFingerprint(fp) {
+		return "", false
+	}
+
+	return domain.FindingFingerprint(fp), true
+}
+
+// isValidFingerprint checks if a string is a valid fingerprint format.
+// A valid fingerprint is exactly 32 lowercase hexadecimal characters.
+func isValidFingerprint(fp string) bool {
+	if len(fp) != fingerprintLength {
+		return false
+	}
+	for _, c := range fp {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // DetermineReviewEvent determines the appropriate ReviewEvent based on finding severities.

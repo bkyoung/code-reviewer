@@ -117,3 +117,36 @@ type DismissReviewResponse struct {
 	ID    int64  `json:"id"`
 	State string `json:"state"` // Should be "DISMISSED"
 }
+
+// PullRequestComment represents a review comment on a pull request.
+// This is returned by GET /repos/{owner}/{repo}/pulls/{pull_number}/comments
+// See: https://docs.github.com/en/rest/pulls/comments#list-review-comments-on-a-pull-request
+type PullRequestComment struct {
+	ID        int64  `json:"id"`
+	NodeID    string `json:"node_id"`
+	Body      string `json:"body"`
+	Path      string `json:"path"`
+	Position  *int   `json:"position"` // Null for outdated comments
+	Line      *int   `json:"line"`     // Line number in the file
+	User      User   `json:"user"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	HTMLURL   string `json:"html_url"`
+
+	// InReplyToID is set for replies to other comments.
+	// Zero means this is a top-level comment (not a reply).
+	InReplyToID int64 `json:"in_reply_to_id,omitempty"`
+
+	// PullRequestReviewID is the ID of the review this comment belongs to.
+	PullRequestReviewID int64 `json:"pull_request_review_id,omitempty"`
+}
+
+// CommentWithReplies groups a parent review comment with its replies.
+// This structure is used for detecting status updates from reply chains.
+type CommentWithReplies struct {
+	// Parent is the original review comment (created by the bot).
+	Parent PullRequestComment
+
+	// Replies are comments where InReplyToID == Parent.ID, sorted by creation time.
+	Replies []PullRequestComment
+}
