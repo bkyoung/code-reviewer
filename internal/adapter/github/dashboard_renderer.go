@@ -273,8 +273,13 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 		}
 
 		sb.WriteString(fmt.Sprintf("<details%s>\n", openAttr))
-		sb.WriteString(fmt.Sprintf("<summary><strong>%s</strong> - %s in <code>%d files</code></summary>\n\n",
-			title, emoji, countUniqueFiles(findings)))
+		fileCount := countUniqueFiles(findings)
+		fileWord := "files"
+		if fileCount == 1 {
+			fileWord = "file"
+		}
+		sb.WriteString(fmt.Sprintf("<summary><strong>%s</strong> - %s in <code>%d %s</code></summary>\n\n",
+			title, emoji, fileCount, fileWord))
 
 		// Summary table
 		sb.WriteString("| File | Line | Category | Description |\n")
@@ -328,10 +333,17 @@ func (r *DashboardRenderer) renderResolvedFindings(sb *strings.Builder, data rev
 	}
 
 	// Sort by severity (highest first), then by file/line
+	// Unknown severities sort last (rank 99)
 	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+	getSeverityRank := func(severity string) int {
+		if rank, ok := severityOrder[severity]; ok {
+			return rank
+		}
+		return 99 // Unknown severities sort last
+	}
 	sort.Slice(resolved, func(i, j int) bool {
-		si := severityOrder[resolved[i].Finding.Severity]
-		sj := severityOrder[resolved[j].Finding.Severity]
+		si := getSeverityRank(resolved[i].Finding.Severity)
+		sj := getSeverityRank(resolved[j].Finding.Severity)
 		if si != sj {
 			return si < sj
 		}
@@ -667,11 +679,19 @@ func renderIndividualFinding(sb *strings.Builder, f domain.TrackedFinding, emoji
 
 // TruncateDescription truncates a description to the specified length.
 // If the description exceeds maxLen, it's truncated with "..." appended.
+// Uses rune-based truncation to handle multi-byte UTF-8 characters correctly.
 func TruncateDescription(desc string, maxLen int) string {
-	if len(desc) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(desc)
+	if len(runes) <= maxLen {
 		return desc
 	}
-	return desc[:maxLen-3] + "..."
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // FormatCost formats a cost value with appropriate precision.

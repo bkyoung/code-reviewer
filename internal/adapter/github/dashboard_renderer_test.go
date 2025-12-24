@@ -512,9 +512,14 @@ func TestDashboardRenderer_RenderDashboard_ResolvedFindings(t *testing.T) {
 		t.Error("expected 'Resolved Findings' section")
 	}
 
-	// Check for strikethrough formatting
-	if !strings.Contains(body, "~~") {
-		t.Error("expected strikethrough in resolved findings")
+	// Check for specific strikethrough table cell with file name
+	if !strings.Contains(body, "~~`main.go`~~") {
+		t.Error("expected strikethrough with file name in resolved findings")
+	}
+
+	// Check for strikethrough severity
+	if !strings.Contains(body, "~~high~~") {
+		t.Error("expected strikethrough severity in resolved findings")
 	}
 
 	// Check for short commit SHA in resolved info
@@ -584,6 +589,54 @@ func TestDashboardRenderer_RenderDashboard_ExpandableIndividualFindings(t *testi
 	}
 }
 
+func TestDashboardRenderer_RenderDashboard_EmptySuggestion(t *testing.T) {
+	renderer := github.NewDashboardRenderer()
+
+	data := review.DashboardData{
+		Target: review.ReviewTarget{
+			Repository: "owner/repo",
+			PRNumber:   1,
+			HeadSHA:    "abc123",
+		},
+		Findings: map[domain.FindingFingerprint]domain.TrackedFinding{
+			"fp1": {
+				Fingerprint: "fp1",
+				Status:      domain.FindingStatusOpen,
+				Finding: domain.Finding{
+					File:        "main.go",
+					LineStart:   10,
+					Severity:    "high",
+					Category:    "bug",
+					Description: "Potential null pointer dereference",
+					Suggestion:  "", // Empty suggestion
+				},
+			},
+		},
+		LastUpdated:         time.Now(),
+		ReviewStatus:        domain.ReviewStatusCompleted,
+		AttentionSeverities: map[string]bool{"high": true},
+		Review:              &domain.Review{ProviderName: "anthropic"},
+	}
+
+	body, err := renderer.RenderDashboard(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should not contain suggestion section when suggestion is empty
+	if strings.Contains(body, "**Suggestion:**") {
+		t.Error("should not show suggestion section when suggestion is empty")
+	}
+
+	// Should still contain the finding details
+	if !strings.Contains(body, "main.go") {
+		t.Error("expected file name in finding")
+	}
+	if !strings.Contains(body, "null pointer") {
+		t.Error("expected description in finding")
+	}
+}
+
 func TestDashboardRenderer_RenderDashboard_SectionSeparator(t *testing.T) {
 	renderer := github.NewDashboardRenderer()
 
@@ -614,5 +667,91 @@ func TestDashboardRenderer_RenderDashboard_SectionSeparator(t *testing.T) {
 	// Check for horizontal rule separator between findings and metadata
 	if !strings.Contains(body, "---\n") {
 		t.Error("expected horizontal rule separator between findings and metadata sections")
+	}
+}
+
+func TestTruncateDescription_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		desc     string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "normal truncation",
+			desc:     "This is a long description that needs truncation",
+			maxLen:   20,
+			expected: "This is a long de...",
+		},
+		{
+			name:     "no truncation needed",
+			desc:     "Short",
+			maxLen:   20,
+			expected: "Short",
+		},
+		{
+			name:     "maxLen zero",
+			desc:     "Some text",
+			maxLen:   0,
+			expected: "",
+		},
+		{
+			name:     "maxLen negative",
+			desc:     "Some text",
+			maxLen:   -5,
+			expected: "",
+		},
+		{
+			name:     "maxLen 1",
+			desc:     "ABCDEF",
+			maxLen:   1,
+			expected: "A",
+		},
+		{
+			name:     "maxLen 2",
+			desc:     "ABCDEF",
+			maxLen:   2,
+			expected: "AB",
+		},
+		{
+			name:     "maxLen 3",
+			desc:     "ABCDEF",
+			maxLen:   3,
+			expected: "ABC",
+		},
+		{
+			name:     "maxLen 4 with truncation",
+			desc:     "ABCDEF",
+			maxLen:   4,
+			expected: "A...",
+		},
+		{
+			name:     "UTF-8 characters",
+			desc:     "こんにちは世界", // Japanese: "Hello World"
+			maxLen:   5,
+			expected: "こん...",
+		},
+		{
+			name:     "UTF-8 no truncation",
+			desc:     "日本語",
+			maxLen:   10,
+			expected: "日本語",
+		},
+		{
+			name:     "empty string",
+			desc:     "",
+			maxLen:   10,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := github.TruncateDescription(tt.desc, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("TruncateDescription(%q, %d) = %q, want %q",
+					tt.desc, tt.maxLen, result, tt.expected)
+			}
+		})
 	}
 }
