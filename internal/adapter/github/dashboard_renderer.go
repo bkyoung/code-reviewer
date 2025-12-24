@@ -37,6 +37,11 @@ func NewDashboardRenderer() *DashboardRenderer {
 //   - InProgress: Shows "Review In Progress" with minimal info
 //   - Completed: Shows full findings table, review summary, costs, etc.
 func (r *DashboardRenderer) RenderDashboard(data review.DashboardData) (string, error) {
+	// Validate required fields
+	if err := data.Target.Validate(); err != nil {
+		return "", fmt.Errorf("invalid target: %w", err)
+	}
+
 	var sb strings.Builder
 
 	// Marker for identification
@@ -279,7 +284,7 @@ func (r *DashboardRenderer) renderFindingsBySeverity(sb *strings.Builder, data r
 
 // renderAppendix shows edge cases (findings outside diff, binary files, renames).
 func (r *DashboardRenderer) renderAppendix(sb *strings.Builder, data review.DashboardData) {
-	if data.Diff == nil {
+	if data.Diff == nil || len(data.Diff.Files) == 0 {
 		return
 	}
 
