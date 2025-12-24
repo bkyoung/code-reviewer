@@ -333,10 +333,10 @@ func (r *DashboardRenderer) renderResolvedFindings(sb *strings.Builder, data rev
 	}
 
 	// Sort by severity (highest first), then by file/line
-	// Unknown severities sort last (rank 99)
 	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
 	getSeverityRank := func(severity string) int {
-		if rank, ok := severityOrder[severity]; ok {
+		// Normalize to lowercase for case-insensitive lookup
+		if rank, ok := severityOrder[strings.ToLower(severity)]; ok {
 			return rank
 		}
 		return 99 // Unknown severities sort last
@@ -680,13 +680,15 @@ func renderIndividualFinding(sb *strings.Builder, f domain.TrackedFinding, emoji
 // TruncateDescription truncates a description to the specified length.
 // If the description exceeds maxLen, it's truncated with "..." appended.
 // Uses rune-based truncation to handle multi-byte UTF-8 characters correctly.
+// Invalid UTF-8 sequences are replaced with the Unicode replacement character.
 func TruncateDescription(desc string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
 	runes := []rune(desc)
 	if len(runes) <= maxLen {
-		return desc
+		// Return normalized string (invalid UTF-8 replaced with U+FFFD)
+		return string(runes)
 	}
 	if maxLen <= 3 {
 		return string(runes[:maxLen])
