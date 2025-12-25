@@ -19,9 +19,14 @@ type Config struct {
 
 // ProviderConfig configures a single LLM provider.
 type ProviderConfig struct {
-	// Enabled controls whether this provider is used. When nil (not set in config),
-	// the provider is considered enabled if it has an API key configured.
-	// When explicitly set to false, the provider is disabled regardless of API key.
+	// Enabled controls whether this provider is used for reviews.
+	// This is a tri-state field with the following semantics:
+	//   - nil (not set in config): Provider is enabled if APIKey is non-empty.
+	//     This preserves backward compatibility with configs that only set apiKey.
+	//   - true: Provider is explicitly enabled, even without an APIKey.
+	//     Use this for keyless providers like Ollama that don't require authentication.
+	//   - false: Provider is explicitly disabled, even if APIKey is present.
+	//     Use this to temporarily disable a provider without removing credentials.
 	Enabled *bool  `yaml:"enabled,omitempty"`
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"apiKey"`
