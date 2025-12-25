@@ -251,7 +251,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("review.botUsername", "github-actions[bot]")
 
 	// Verification defaults (Epic #92 - agent verification)
-	v.SetDefault("verification.enabled", true)
+	// Disabled by default to avoid unexpected LLM costs; users must opt-in
+	v.SetDefault("verification.enabled", false)
 	v.SetDefault("verification.provider", "gemini")
 	v.SetDefault("verification.model", "gemini-3-flash-preview")
 	v.SetDefault("verification.maxTokens", 64000)
