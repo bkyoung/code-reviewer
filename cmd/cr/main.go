@@ -872,9 +872,20 @@ func buildProviderMaxTokens(providers map[string]config.ProviderConfig) map[stri
 }
 
 // isProviderUsable checks if a provider configuration is usable for verification.
-// A provider is usable if it exists in the config, is enabled, and has an API key.
+// A provider is usable if it exists and has an API key (for API-based providers),
+// or if it's explicitly enabled (for local providers like Ollama that don't need keys).
+// This maintains backward compatibility with existing configs that have API keys set
+// without explicitly setting "enabled: true".
 func isProviderUsable(cfg config.ProviderConfig, exists bool) bool {
-	return exists && cfg.Enabled && cfg.APIKey != ""
+	if !exists {
+		return false
+	}
+	// Provider with API key is always usable (backward compatible)
+	if cfg.APIKey != "" {
+		return true
+	}
+	// Local/keyless providers need explicit enabling
+	return cfg.Enabled
 }
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.

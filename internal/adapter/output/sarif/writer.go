@@ -54,24 +54,6 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 	results := make([]map[string]interface{}, 0, len(artifact.Review.Findings))
 
 	for _, finding := range artifact.Review.Findings {
-		// SARIF requires startLine >= 1 (1-indexed)
-		startLine := finding.LineStart
-		if startLine < 1 {
-			startLine = 1
-		}
-
-		// endLine must be >= startLine
-		endLine := finding.LineEnd
-		if endLine < startLine {
-			endLine = startLine
-		}
-
-		// Use placeholder URI if file is empty
-		fileURI := finding.File
-		if fileURI == "" {
-			fileURI = "unknown"
-		}
-
 		// SARIF requires non-empty message text
 		messageText := finding.Description
 		if messageText == "" {
@@ -90,19 +72,34 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 			"message": map[string]interface{}{
 				"text": messageText,
 			},
-			"locations": []map[string]interface{}{
-				{
-					"physicalLocation": map[string]interface{}{
-						"artifactLocation": map[string]interface{}{
-							"uri": fileURI,
-						},
-						"region": map[string]interface{}{
-							"startLine": startLine,
-							"endLine":   endLine,
-						},
-					},
+		}
+
+		// Build location only if we have meaningful file info
+		// Omit locations entirely for file-level or project-level findings
+		if finding.File != "" {
+			physicalLocation := map[string]interface{}{
+				"artifactLocation": map[string]interface{}{
+					"uri": finding.File,
 				},
-			},
+			}
+
+			// Only include region if we have meaningful line info
+			// (don't fabricate line 1 for findings without specific locations)
+			if finding.LineStart >= 1 {
+				startLine := finding.LineStart
+				endLine := finding.LineEnd
+				if endLine < startLine {
+					endLine = startLine
+				}
+				physicalLocation["region"] = map[string]interface{}{
+					"startLine": startLine,
+					"endLine":   endLine,
+				}
+			}
+
+			result["locations"] = []map[string]interface{}{
+				{"physicalLocation": physicalLocation},
+			}
 		}
 
 		// Add suggestion as a property (fixes requires artifactChanges which we don't have)

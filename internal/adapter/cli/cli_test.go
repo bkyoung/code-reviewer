@@ -360,11 +360,41 @@ func TestVerificationFlags_ConfidenceOutOfRangeWarns(t *testing.T) {
 		t.Fatalf("command execution failed: %v", err)
 	}
 
-	// Should warn and fall back to config default
+	// Should warn and fall back to safe default (75)
 	if !strings.Contains(errBuf.String(), "out of range") {
 		t.Errorf("expected 'out of range' warning, got: %q", errBuf.String())
 	}
-	if stub.request.VerificationConfig.ConfidenceCritical != 60 {
-		t.Errorf("expected fallback to config confidence 60, got %d", stub.request.VerificationConfig.ConfidenceCritical)
+	// Invalid values fall back to safe default (75), not config default
+	if stub.request.VerificationConfig.ConfidenceCritical != 75 {
+		t.Errorf("expected fallback to safe default 75, got %d", stub.request.VerificationConfig.ConfidenceCritical)
+	}
+}
+
+func TestVerificationFlags_ConfigDefaultOutOfRangeWarns(t *testing.T) {
+	stub := &branchStub{}
+	errBuf := &bytes.Buffer{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: errBuf},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            true,
+			ConfidenceCritical: 150, // Invalid config default
+		},
+		Version: "v1.0.0",
+	})
+
+	// No CLI flag set - should use config default but validate it
+	root.SetArgs([]string{"review", "branch", "main"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should warn about invalid config default
+	if !strings.Contains(errBuf.String(), "config") || !strings.Contains(errBuf.String(), "out of range") {
+		t.Errorf("expected 'config ... out of range' warning, got: %q", errBuf.String())
+	}
+	// Should fall back to safe default (75)
+	if stub.request.VerificationConfig.ConfidenceCritical != 75 {
+		t.Errorf("expected fallback to safe default 75, got %d", stub.request.VerificationConfig.ConfidenceCritical)
 	}
 }

@@ -368,17 +368,33 @@ func resolveFloat64(cmd *cobra.Command, flagName string, cliValue, configDefault
 // resolveInt returns the CLI value if the flag was explicitly set,
 // otherwise returns the config default. For confidence flags (0-100), validates the range.
 func resolveInt(cmd *cobra.Command, flagName string, cliValue, configDefault int) int {
+	const safeConfidenceDefault = 75
+
+	// Helper to validate confidence range
+	isConfidenceFlag := strings.HasPrefix(flagName, "confidence-")
+	validateConfidence := func(value int, source string) int {
+		if value < 0 || value > 100 {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s confidence value %d out of range (0-100) for --%s, using safe default %d\n", source, value, flagName, safeConfidenceDefault)
+			return safeConfidenceDefault
+		}
+		return value
+	}
+
 	if !cmd.Flags().Changed(flagName) {
+		// Validate config default for confidence flags
+		if isConfidenceFlag {
+			return validateConfidence(configDefault, "config")
+		}
 		return configDefault
 	}
-	// Confidence values must be in 0-100 range
-	if strings.HasPrefix(flagName, "confidence-") {
-		if cliValue < 0 || cliValue > 100 {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: confidence value %d out of range (0-100) for --%s, using config default %d\n", cliValue, flagName, configDefault)
-			return configDefault
-		}
-	} else if cliValue < 0 {
-		// Other int flags should be non-negative
+
+	// Validate CLI value
+	if isConfidenceFlag {
+		return validateConfidence(cliValue, "CLI")
+	}
+
+	// Other int flags should be non-negative
+	if cliValue < 0 {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: negative value %d for --%s, using config default %d\n", cliValue, flagName, configDefault)
 		return configDefault
 	}
