@@ -36,8 +36,7 @@ archives:
         formats:
           - zip
     files:
-      - LICENSE*
-      - README*
+      - README.md
       - docs/GITHUB_ACTION_SETUP.md
 
 checksum:
