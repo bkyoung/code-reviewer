@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.openai.com"
-	defaultTimeout = 60 * time.Second
+	defaultBaseURL      = "https://api.openai.com"
+	defaultTimeout      = 60 * time.Second
+	defaultSystemPrompt = "You are a code review assistant. Analyze the code and provide feedback in JSON format."
 )
 
 // isO1Model checks if the model is an OpenAI reasoning model (o1, o3, o4 series).
@@ -146,8 +147,8 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		c.metrics.RecordRequest("openai", c.model)
 	}
 
-	// Determine system prompt (use override if provided)
-	systemPrompt := "You are a code review assistant. Analyze the code and provide feedback in JSON format."
+	// Determine system prompt (use override if provided, otherwise use default)
+	systemPrompt := defaultSystemPrompt
 	if options.System != "" {
 		systemPrompt = options.System
 	}

@@ -501,24 +501,30 @@ func gzipCompress(data []byte) ([]byte, error) {
 const maxDecompressedSize = maxMetadataSize * 10
 
 // gzipDecompress decompresses gzip-compressed data with size limits.
-func gzipDecompress(data []byte) ([]byte, error) {
+// Returns an error if the data is invalid gzip or exceeds maxDecompressedSize.
+func gzipDecompress(data []byte) (result []byte, err error) {
 	reader, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid gzip data: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close gzip reader: %w", closeErr)
+		}
+	}()
 
-	// Use LimitReader to prevent decompression bombs
-	limited := io.LimitReader(reader, maxDecompressedSize+1)
-	decompressed, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, err
+	// Read with a size limit to prevent decompression bombs.
+	// We use a buffer and read in chunks to detect oversized data accurately.
+	var buf bytes.Buffer
+	n, err := io.CopyN(&buf, reader, maxDecompressedSize+1)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("decompression failed: %w", err)
 	}
 
-	// Check if we hit the limit (data was truncated)
-	if len(decompressed) > maxDecompressedSize {
-		return nil, fmt.Errorf("decompressed data exceeds limit: %d bytes (max %d)", len(decompressed), maxDecompressedSize)
+	// If we read exactly maxDecompressedSize+1 bytes, the data exceeds our limit
+	if n > maxDecompressedSize {
+		return nil, fmt.Errorf("decompressed data exceeds limit: read %d bytes (max %d)", n, maxDecompressedSize)
 	}
 
-	return decompressed, nil
+	return buf.Bytes(), nil
 }

@@ -776,7 +776,7 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 
 	for _, name := range providerOrder {
 		providerCfg, ok := cfg.Providers[name]
-		if !ok || !providerCfg.Enabled || providerCfg.APIKey == "" {
+		if !isProviderUsable(providerCfg, ok) {
 			continue
 		}
 
@@ -869,6 +869,12 @@ func buildProviderMaxTokens(providers map[string]config.ProviderConfig) map[stri
 		}
 	}
 	return result
+}
+
+// isProviderUsable checks if a provider configuration is usable for verification.
+// A provider is usable if it exists in the config, is enabled, and has an API key.
+func isProviderUsable(cfg config.ProviderConfig, exists bool) bool {
+	return exists && cfg.Enabled && cfg.APIKey != ""
 }
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.

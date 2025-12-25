@@ -351,20 +351,36 @@ func resolveVerificationDepth(cmd *cobra.Command, cliValue, configDefault string
 	return configDefault
 }
 
-// resolveFloat64 returns the CLI value if the flag was explicitly set and non-zero,
-// otherwise returns the config default.
+// resolveFloat64 returns the CLI value if the flag was explicitly set,
+// otherwise returns the config default. Validates the value is non-negative.
 func resolveFloat64(cmd *cobra.Command, flagName string, cliValue, configDefault float64) float64 {
-	if cmd.Flags().Changed(flagName) && cliValue > 0 {
-		return cliValue
+	if !cmd.Flags().Changed(flagName) {
+		return configDefault
 	}
-	return configDefault
+	// Validate non-negative (cost ceiling, etc. should not be negative)
+	if cliValue < 0 {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: negative value %.2f for --%s, using config default %.2f\n", cliValue, flagName, configDefault)
+		return configDefault
+	}
+	return cliValue
 }
 
-// resolveInt returns the CLI value if the flag was explicitly set and non-zero,
-// otherwise returns the config default.
+// resolveInt returns the CLI value if the flag was explicitly set,
+// otherwise returns the config default. For confidence flags (0-100), validates the range.
 func resolveInt(cmd *cobra.Command, flagName string, cliValue, configDefault int) int {
-	if cmd.Flags().Changed(flagName) && cliValue > 0 {
-		return cliValue
+	if !cmd.Flags().Changed(flagName) {
+		return configDefault
 	}
-	return configDefault
+	// Confidence values must be in 0-100 range
+	if strings.HasPrefix(flagName, "confidence-") {
+		if cliValue < 0 || cliValue > 100 {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: confidence value %d out of range (0-100) for --%s, using config default %d\n", cliValue, flagName, configDefault)
+			return configDefault
+		}
+	} else if cliValue < 0 {
+		// Other int flags should be non-negative
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: negative value %d for --%s, using config default %d\n", cliValue, flagName, configDefault)
+		return configDefault
+	}
+	return cliValue
 }

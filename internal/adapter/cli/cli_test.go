@@ -265,3 +265,106 @@ func TestVerificationFlags_InvalidDepthWarns(t *testing.T) {
 		t.Errorf("expected fallback to config depth 'medium', got %q", stub.request.VerificationConfig.Depth)
 	}
 }
+
+func TestVerificationFlags_ZeroCostCeilingAllowed(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:     true,
+			CostCeiling: 1.50, // Config has non-zero value
+		},
+		Version: "v1.0.0",
+	})
+
+	// Explicitly set cost ceiling to 0 to disable cost limit
+	root.SetArgs([]string{"review", "branch", "main", "--verification-cost-ceiling", "0"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should use the explicit zero value, not the config default
+	if stub.request.VerificationConfig.CostCeiling != 0 {
+		t.Errorf("expected cost ceiling 0, got %f", stub.request.VerificationConfig.CostCeiling)
+	}
+}
+
+func TestVerificationFlags_ZeroConfidenceAllowed(t *testing.T) {
+	stub := &branchStub{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: io.Discard},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:           true,
+			ConfidenceDefault: 75,
+		},
+		Version: "v1.0.0",
+	})
+
+	// Explicitly set confidence to 0 (verify nothing)
+	root.SetArgs([]string{"review", "branch", "main", "--confidence-default", "0"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should use the explicit zero value, not the config default
+	if stub.request.VerificationConfig.ConfidenceDefault != 0 {
+		t.Errorf("expected confidence default 0, got %d", stub.request.VerificationConfig.ConfidenceDefault)
+	}
+}
+
+func TestVerificationFlags_NegativeCostCeilingWarns(t *testing.T) {
+	stub := &branchStub{}
+	errBuf := &bytes.Buffer{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: errBuf},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:     true,
+			CostCeiling: 1.50,
+		},
+		Version: "v1.0.0",
+	})
+
+	root.SetArgs([]string{"review", "branch", "main", "--verification-cost-ceiling", "-1.0"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should warn and fall back to config default
+	if !strings.Contains(errBuf.String(), "warning") {
+		t.Errorf("expected warning for negative cost ceiling, got: %q", errBuf.String())
+	}
+	if stub.request.VerificationConfig.CostCeiling != 1.50 {
+		t.Errorf("expected fallback to config cost ceiling 1.50, got %f", stub.request.VerificationConfig.CostCeiling)
+	}
+}
+
+func TestVerificationFlags_ConfidenceOutOfRangeWarns(t *testing.T) {
+	stub := &branchStub{}
+	errBuf := &bytes.Buffer{}
+	root := cli.NewRootCommand(cli.Dependencies{
+		BranchReviewer: stub,
+		Args:           cli.Arguments{OutWriter: io.Discard, ErrWriter: errBuf},
+		DefaultVerification: cli.DefaultVerification{
+			Enabled:            true,
+			ConfidenceCritical: 60,
+		},
+		Version: "v1.0.0",
+	})
+
+	// Test value > 100
+	root.SetArgs([]string{"review", "branch", "main", "--confidence-critical", "150"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("command execution failed: %v", err)
+	}
+
+	// Should warn and fall back to config default
+	if !strings.Contains(errBuf.String(), "out of range") {
+		t.Errorf("expected 'out of range' warning, got: %q", errBuf.String())
+	}
+	if stub.request.VerificationConfig.ConfidenceCritical != 60 {
+		t.Errorf("expected fallback to config confidence 60, got %d", stub.request.VerificationConfig.ConfidenceCritical)
+	}
+}
