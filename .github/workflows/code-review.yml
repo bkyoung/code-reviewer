@@ -86,22 +86,6 @@ jobs:
           echo "Found markdown: $MARKDOWN_FILE"
           echo "Found SARIF: $SARIF_FILE"
 
-      - name: Post review summary as PR comment
-        if: always()  # Post even if review found issues
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Add header to distinguish this from human reviews
-          echo "## 🤖 AI Code Review" > comment.md
-          echo "" >> comment.md
-          echo "_Automated review by code-reviewer. [View inline annotations in Files Changed tab](${{ github.event.pull_request.html_url }}/files)_" >> comment.md
-          echo "" >> comment.md
-          cat ${{ steps.find-files.outputs.markdown_file }} >> comment.md
-
-          # Post as PR comment
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body-file comment.md
-
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v4
         if: always()  # Upload even if review found issues
@@ -115,7 +99,5 @@ jobs:
         if: always()  # Always upload for debugging
         with:
           name: code-review-results
-          path: |
-            review-output/
-            comment.md
+          path: review-output/
           retention-days: 30
