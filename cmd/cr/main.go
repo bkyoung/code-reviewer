@@ -27,7 +27,6 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/adapter/repository"
 	storeAdapter "github.com/bkyoung/code-reviewer/internal/adapter/store"
 	"github.com/bkyoung/code-reviewer/internal/adapter/store/sqlite"
-	"github.com/bkyoung/code-reviewer/internal/adapter/tracking"
 	verifyadapter "github.com/bkyoung/code-reviewer/internal/adapter/verify"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/determinism"
@@ -175,22 +174,12 @@ func run() error {
 		}
 	}
 
-	// Create GitHub poster, tracking store, and status scanner if token is available
+	// Create GitHub poster if token is available
 	var githubPoster review.GitHubPoster
-	var trackingStore review.TrackingStore
-	var statusScanner review.StatusScanner
 	if githubToken := os.Getenv("GITHUB_TOKEN"); githubToken != "" {
 		githubClient := githubadapter.NewClient(githubToken)
 		reviewPoster := usecasegithub.NewReviewPoster(githubClient)
 		githubPoster = &githubPosterAdapter{poster: reviewPoster}
-
-		// Enable finding deduplication and incremental reviews with unified dashboard
-		githubStore := tracking.NewGitHubStore(githubToken)
-		githubStore.SetDashboardRenderer(githubadapter.NewDashboardRenderer())
-		trackingStore = githubStore
-
-		// Enable status detection from PR comment replies (#60)
-		statusScanner = githubadapter.NewGitHubStatusScanner(githubClient)
 	}
 
 	// Create verification agent if enabled and a suitable provider is available
@@ -218,8 +207,6 @@ func run() error {
 		PlanningAgent:     planningAgent,
 		RepoDir:           repoDir,
 		GitHubPoster:      githubPoster,
-		TrackingStore:     trackingStore,
-		StatusScanner:     statusScanner,
 		Verifier:          verifier,
 		ProviderMaxTokens: providerMaxTokens,
 	})

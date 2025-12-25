@@ -1,7 +1,6 @@
 package review
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -123,29 +122,4 @@ func (ts TrackingState) LatestReviewedCommit() string {
 		return ""
 	}
 	return ts.ReviewedCommits[len(ts.ReviewedCommits)-1]
-}
-
-// TrackingStore manages persistence of finding tracking state.
-// Implementations can store state in GitHub PR comments, SQLite, or in-memory.
-type TrackingStore interface {
-	// Load retrieves the current tracking state for a target.
-	// Returns an empty state (not error) if no prior state exists.
-	// The returned state will have Target set to the input target.
-	Load(ctx context.Context, target ReviewTarget) (TrackingState, error)
-
-	// Save persists the tracking state for a target.
-	// The state.Target field determines where the state is stored.
-	Save(ctx context.Context, state TrackingState) error
-
-	// SaveDashboard persists a unified dashboard comment with full review content.
-	// This extends Save with richer presentation (findings tables, costs, etc.).
-	// Returns the URL of the dashboard comment for linking from the review body.
-	// Implementations that don't support dashboards can call Save internally
-	// and return an empty URL.
-	SaveDashboard(ctx context.Context, data DashboardData) (commentURL string, err error)
-
-	// Clear removes all tracking state for a target.
-	// This is typically called when a PR is merged or closed.
-	// Clearing a non-existent target is not an error.
-	Clear(ctx context.Context, target ReviewTarget) error
 }
