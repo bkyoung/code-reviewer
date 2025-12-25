@@ -4,7 +4,7 @@ project_name: code-reviewer
 
 before:
   hooks:
-    - go mod tidy
+    # Note: go mod tidy removed to avoid dirty git state during release
     - go test ./...
 
 builds:
@@ -12,6 +12,8 @@ builds:
     main: ./cmd/cr
     binary: cr
     env:
+      # CGO disabled for static binaries. SQLite store (currently unused) will
+      # show a warning at runtime but tool functions normally without it.
       - CGO_ENABLED=0
     goos:
       - linux
