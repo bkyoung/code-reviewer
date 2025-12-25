@@ -222,6 +222,11 @@ type OrchestratorDeps struct {
 
 	// Verification support (Epic #92)
 	Verifier Verifier // Optional: verifies candidate findings before reporting
+
+	// ProviderMaxTokens allows per-provider max output token overrides.
+	// Key is provider name, value is max output tokens.
+	// If not set for a provider, the default from PromptBuilder is used.
+	ProviderMaxTokens map[string]int
 }
 
 // ProviderRequest describes the payload the LLM provider expects.
@@ -279,6 +284,9 @@ type BranchRequest struct {
 
 // VerificationSettings holds configuration for the verification stage.
 type VerificationSettings struct {
+	// Depth controls verification thoroughness: "minimal", "medium", or "thorough".
+	Depth string
+
 	// CostCeiling is the maximum USD to spend on verification per review.
 	CostCeiling float64
 
@@ -583,6 +591,11 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 				providerReq.Seed = seed
 			}
 
+			// Apply per-provider MaxSize override if configured
+			if maxTokens, ok := o.deps.ProviderMaxTokens[name]; ok && maxTokens > 0 {
+				providerReq.MaxSize = maxTokens
+			}
+
 			// Apply redaction if redactor is available
 			if o.deps.Redactor != nil {
 				redactedPrompt, err := o.deps.Redactor.Redact(providerReq.Prompt)
@@ -773,6 +786,9 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 			// Replace Findings with only the reportable ones for backward compatibility
 			// This ensures GitHub poster and other consumers use filtered findings
 			mergedReview.Findings = convertVerifiedToFindings(reportable)
+
+			// Log detailed verification results for each finding
+			logVerificationDetails(ctx, verified, reportable, req.VerificationConfig, o.deps.Logger)
 
 			if o.deps.Logger != nil {
 				o.deps.Logger.LogInfo(ctx, "verification complete", map[string]interface{}{

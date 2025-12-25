@@ -54,34 +54,58 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 	results := make([]map[string]interface{}, 0, len(artifact.Review.Findings))
 
 	for _, finding := range artifact.Review.Findings {
+		// SARIF requires non-empty message text
+		messageText := finding.Description
+		if messageText == "" {
+			messageText = "No description provided"
+		}
+
+		// Use a valid ruleId (category or fallback)
+		ruleID := finding.Category
+		if ruleID == "" {
+			ruleID = "code-review"
+		}
+
 		result := map[string]interface{}{
-			"ruleId": finding.Category,
+			"ruleId": ruleID,
 			"level":  convertSeverity(finding.Severity),
 			"message": map[string]interface{}{
-				"text": finding.Description,
-			},
-			"locations": []map[string]interface{}{
-				{
-					"physicalLocation": map[string]interface{}{
-						"artifactLocation": map[string]interface{}{
-							"uri": finding.File,
-						},
-						"region": map[string]interface{}{
-							"startLine": finding.LineStart,
-							"endLine":   finding.LineEnd,
-						},
-					},
-				},
+				"text": messageText,
 			},
 		}
 
-		if finding.Suggestion != "" {
-			result["fixes"] = []map[string]interface{}{
-				{
-					"description": map[string]interface{}{
-						"text": finding.Suggestion,
-					},
+		// Build location only if we have meaningful file info
+		// Omit locations entirely for file-level or project-level findings
+		if finding.File != "" {
+			physicalLocation := map[string]interface{}{
+				"artifactLocation": map[string]interface{}{
+					"uri": finding.File,
 				},
+			}
+
+			// Only include region if we have meaningful line info
+			// (don't fabricate line 1 for findings without specific locations)
+			if finding.LineStart >= 1 {
+				startLine := finding.LineStart
+				endLine := finding.LineEnd
+				if endLine < startLine {
+					endLine = startLine
+				}
+				physicalLocation["region"] = map[string]interface{}{
+					"startLine": startLine,
+					"endLine":   endLine,
+				}
+			}
+
+			result["locations"] = []map[string]interface{}{
+				{"physicalLocation": physicalLocation},
+			}
+		}
+
+		// Add suggestion as a property (fixes requires artifactChanges which we don't have)
+		if finding.Suggestion != "" {
+			result["properties"] = map[string]interface{}{
+				"suggestion": finding.Suggestion,
 			}
 		}
 

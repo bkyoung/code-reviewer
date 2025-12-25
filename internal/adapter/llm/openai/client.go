@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.openai.com"
-	defaultTimeout = 60 * time.Second
+	defaultBaseURL      = "https://api.openai.com"
+	defaultTimeout      = 60 * time.Second
+	defaultSystemPrompt = "You are a code review assistant. Analyze the code and provide feedback in JSON format."
 )
 
 // isO1Model checks if the model is an OpenAI reasoning model (o1, o3, o4 series).
@@ -113,6 +114,7 @@ type CallOptions struct {
 	Temperature float64
 	Seed        *uint64
 	MaxTokens   int
+	System      string // Optional system prompt override (uses default if empty)
 }
 
 // APIResponse represents the parsed response from the API.
@@ -145,13 +147,19 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		c.metrics.RecordRequest("openai", c.model)
 	}
 
+	// Determine system prompt (use override if provided, otherwise use default)
+	systemPrompt := defaultSystemPrompt
+	if options.System != "" {
+		systemPrompt = options.System
+	}
+
 	// Build request
 	reqBody := ChatCompletionRequest{
 		Model: c.model,
 		Messages: []Message{
 			{
 				Role:    "system",
-				Content: "You are a code review assistant. Analyze the code and provide feedback in JSON format.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",

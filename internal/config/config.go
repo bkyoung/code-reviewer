@@ -19,9 +19,22 @@ type Config struct {
 
 // ProviderConfig configures a single LLM provider.
 type ProviderConfig struct {
-	Enabled bool   `yaml:"enabled"`
+	// Enabled controls whether this provider is used for reviews.
+	// This is a tri-state field with the following semantics:
+	//   - nil (not set in config): Provider is enabled if APIKey is non-empty.
+	//     This preserves backward compatibility with configs that only set apiKey.
+	//   - true: Provider is explicitly enabled, even without an APIKey.
+	//     Use this for keyless providers like Ollama that don't require authentication.
+	//   - false: Provider is explicitly disabled, even if APIKey is present.
+	//     Use this to temporarily disable a provider without removing credentials.
+	Enabled *bool  `yaml:"enabled,omitempty"`
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"apiKey"`
+
+	// MaxOutputTokens overrides the default max output tokens for this provider.
+	// Use this for models with different output limits (e.g., older models with 8K,
+	// or newer models with 128K+). Default: 64000 (works for Claude 4.5, GPT-5.2, Gemini 3).
+	MaxOutputTokens *int `yaml:"maxOutputTokens,omitempty"`
 
 	// HTTP overrides (optional, use global HTTP config if not set)
 	Timeout        *string `yaml:"timeout,omitempty"`
@@ -154,6 +167,18 @@ type ReviewActions struct {
 type VerificationConfig struct {
 	// Enabled toggles agent verification of findings.
 	Enabled bool `yaml:"enabled"`
+
+	// Provider is the LLM provider for verification (e.g., "gemini", "anthropic", "openai").
+	// Default: "gemini"
+	Provider string `yaml:"provider"`
+
+	// Model is the model to use for verification.
+	// Default: "gemini-3-flash-preview" (fast, large context, cost-effective)
+	Model string `yaml:"model"`
+
+	// MaxTokens is the maximum output tokens for batch verification responses.
+	// Default: 64000 (large enough for many findings)
+	MaxTokens int `yaml:"maxTokens"`
 
 	// Depth controls how thoroughly the agent verifies findings.
 	// Valid values: "quick" (read file only), "medium" (read + grep), "deep" (run build/tests).
@@ -359,10 +384,57 @@ func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
 }
 
 func chooseVerification(base, overlay VerificationConfig) VerificationConfig {
-	if overlay.Enabled || overlay.Depth != "" || overlay.CostCeiling != 0 || hasConfidenceThresholds(overlay.Confidence) {
-		return overlay
+	result := base
+
+	// If overlay has any verification config set, use its Enabled value
+	// This allows overlay to disable verification (Enabled=false) when other fields are set
+	if hasAnyVerificationConfig(overlay) {
+		result.Enabled = overlay.Enabled
 	}
-	return base
+
+	// Provider: overlay wins if non-empty
+	if overlay.Provider != "" {
+		result.Provider = overlay.Provider
+	}
+
+	// Model: overlay wins if non-empty
+	if overlay.Model != "" {
+		result.Model = overlay.Model
+	}
+
+	// MaxTokens: overlay wins if non-zero
+	if overlay.MaxTokens != 0 {
+		result.MaxTokens = overlay.MaxTokens
+	}
+
+	// Depth: overlay wins if non-empty
+	if overlay.Depth != "" {
+		result.Depth = overlay.Depth
+	}
+
+	// CostCeiling: overlay wins if non-zero
+	if overlay.CostCeiling != 0 {
+		result.CostCeiling = overlay.CostCeiling
+	}
+
+	// Confidence: overlay wins if any field is set
+	if hasConfidenceThresholds(overlay.Confidence) {
+		result.Confidence = overlay.Confidence
+	}
+
+	return result
+}
+
+// hasAnyVerificationConfig returns true if any verification field is set in the config.
+// This is used to determine if the Enabled field should be respected from the overlay.
+func hasAnyVerificationConfig(vc VerificationConfig) bool {
+	return vc.Enabled ||
+		vc.Provider != "" ||
+		vc.Model != "" ||
+		vc.MaxTokens != 0 ||
+		vc.Depth != "" ||
+		vc.CostCeiling != 0 ||
+		hasConfidenceThresholds(vc.Confidence)
 }
 
 func hasConfidenceThresholds(ct ConfidenceThresholds) bool {

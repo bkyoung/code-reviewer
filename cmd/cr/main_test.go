@@ -9,6 +9,9 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
 
+// boolPtr is a helper to create *bool values in tests.
+func boolPtr(b bool) *bool { return &b }
+
 // mockProvider is a simple mock for testing
 type mockProvider struct {
 	name  string
@@ -165,6 +168,109 @@ func TestCreatePlanningProvider(t *testing.T) {
 				if got != expectedProvider {
 					t.Errorf("createPlanningProvider() returned different provider instance, want same instance")
 				}
+			}
+		})
+	}
+}
+
+func TestIsProviderEnabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.ProviderConfig
+		want    bool
+		comment string
+	}{
+		// Enabled = nil (not set in config)
+		{
+			name:    "nil Enabled, no APIKey",
+			cfg:     config.ProviderConfig{Enabled: nil, APIKey: ""},
+			want:    false,
+			comment: "no API key means not usable",
+		},
+		{
+			name:    "nil Enabled, with APIKey",
+			cfg:     config.ProviderConfig{Enabled: nil, APIKey: "sk-test"},
+			want:    true,
+			comment: "backward compat: API key presence enables provider",
+		},
+
+		// Enabled = false (explicitly disabled)
+		{
+			name:    "explicit false, no APIKey",
+			cfg:     config.ProviderConfig{Enabled: boolPtr(false), APIKey: ""},
+			want:    false,
+			comment: "explicitly disabled",
+		},
+		{
+			name:    "explicit false, with APIKey",
+			cfg:     config.ProviderConfig{Enabled: boolPtr(false), APIKey: "sk-test"},
+			want:    false,
+			comment: "explicit disable wins over API key presence",
+		},
+
+		// Enabled = true (explicitly enabled)
+		{
+			name:    "explicit true, no APIKey",
+			cfg:     config.ProviderConfig{Enabled: boolPtr(true), APIKey: ""},
+			want:    true,
+			comment: "explicitly enabled (for keyless providers like Ollama)",
+		},
+		{
+			name:    "explicit true, with APIKey",
+			cfg:     config.ProviderConfig{Enabled: boolPtr(true), APIKey: "sk-test"},
+			want:    true,
+			comment: "explicitly enabled with API key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isProviderEnabled(tt.cfg)
+			if got != tt.want {
+				t.Errorf("isProviderEnabled() = %v, want %v (%s)", got, tt.want, tt.comment)
+			}
+		})
+	}
+}
+
+func TestIsProviderUsable(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    config.ProviderConfig
+		exists bool
+		want   bool
+	}{
+		{
+			name:   "provider does not exist",
+			cfg:    config.ProviderConfig{APIKey: "sk-test"},
+			exists: false,
+			want:   false,
+		},
+		{
+			name:   "provider exists and enabled",
+			cfg:    config.ProviderConfig{Enabled: boolPtr(true), APIKey: "sk-test"},
+			exists: true,
+			want:   true,
+		},
+		{
+			name:   "provider exists but disabled",
+			cfg:    config.ProviderConfig{Enabled: boolPtr(false), APIKey: "sk-test"},
+			exists: true,
+			want:   false,
+		},
+		{
+			name:   "provider exists, nil enabled, has API key",
+			cfg:    config.ProviderConfig{Enabled: nil, APIKey: "sk-test"},
+			exists: true,
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isProviderUsable(tt.cfg, tt.exists)
+			if got != tt.want {
+				t.Errorf("isProviderUsable() = %v, want %v", got, tt.want)
 			}
 		})
 	}

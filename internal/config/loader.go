@@ -95,6 +95,11 @@ func expandEnvVars(cfg Config) Config {
 	cfg.Merge.Model = expandEnvString(cfg.Merge.Model)
 	cfg.Merge.Strategy = expandEnvString(cfg.Merge.Strategy)
 
+	// Expand verification config
+	cfg.Verification.Provider = expandEnvString(cfg.Verification.Provider)
+	cfg.Verification.Model = expandEnvString(cfg.Verification.Model)
+	cfg.Verification.Depth = expandEnvString(cfg.Verification.Depth)
+
 	// Expand git config
 	cfg.Git.RepositoryDir = expandEnvString(cfg.Git.RepositoryDir)
 
@@ -225,15 +230,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("observability.metrics.enabled", true)
 
 	// Provider defaults (Phase 1 + Phase 2)
-	v.SetDefault("providers.openai.enabled", false)
+	// Note: providers.*.enabled is intentionally not defaulted.
+	// When nil (unset), isProviderEnabled uses API key presence to determine if enabled.
+	// This maintains backward compatibility while allowing explicit enabled: false to work.
 	v.SetDefault("providers.openai.model", "gpt-4o")
-	v.SetDefault("providers.anthropic.enabled", false)
 	v.SetDefault("providers.anthropic.model", "claude-3-5-sonnet-20241022")
-	v.SetDefault("providers.gemini.enabled", false)
 	v.SetDefault("providers.gemini.model", "gemini-pro")
-	v.SetDefault("providers.ollama.enabled", false)
 	v.SetDefault("providers.ollama.model", "llama2")
-	v.SetDefault("providers.static.enabled", true)
 	v.SetDefault("providers.static.model", "static-v1")
 
 	// Review action defaults (Phase 2) - configures GitHub review actions per severity
@@ -248,7 +251,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("review.botUsername", "github-actions[bot]")
 
 	// Verification defaults (Epic #92 - agent verification)
+	// Disabled by default to avoid unexpected LLM costs; users must opt-in
 	v.SetDefault("verification.enabled", false)
+	v.SetDefault("verification.provider", "gemini")
+	v.SetDefault("verification.model", "gemini-3-flash-preview")
+	v.SetDefault("verification.maxTokens", 64000)
 	v.SetDefault("verification.depth", "medium")
 	v.SetDefault("verification.costCeiling", 0.50)
 	v.SetDefault("verification.confidence.default", 75)
@@ -256,6 +263,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("verification.confidence.high", 70)
 	v.SetDefault("verification.confidence.medium", 75)
 	v.SetDefault("verification.confidence.low", 85)
+
+	// Merge defaults (synthesis provider)
+	// Uses alias without date suffix to always get latest model version
+	v.SetDefault("merge.provider", "anthropic")
+	v.SetDefault("merge.model", "claude-haiku-4-5")
 }
 
 func defaultStorePath() string {

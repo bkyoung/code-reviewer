@@ -99,8 +99,9 @@ func (c *HTTPClient) SetPricing(pricing llmhttp.Pricing) {
 
 // CallOptions contains options for the API call.
 type CallOptions struct {
-	Temperature float64
-	MaxTokens   int
+	Temperature       float64
+	MaxTokens         int
+	SystemInstruction *string // Optional override for system instruction (nil=use default, empty=""=disable, non-empty=override)
 }
 
 // APIResponse represents the parsed response from the API.
@@ -132,13 +133,24 @@ func (c *HTTPClient) Call(ctx context.Context, prompt string, options CallOption
 		c.metrics.RecordRequest("gemini", c.model)
 	}
 
-	// Build request with system instruction for JSON format
+	// Determine system instruction: nil=use default, empty=""=disable, non-empty=override
+	var sysInstrContent *Content
+	if options.SystemInstruction == nil {
+		// Use default system instruction
+		sysInstrContent = &Content{
+			Parts: []Part{{Text: systemInstruction}},
+		}
+	} else if *options.SystemInstruction != "" {
+		// Use provided override
+		sysInstrContent = &Content{
+			Parts: []Part{{Text: *options.SystemInstruction}},
+		}
+	}
+	// If options.SystemInstruction is empty string pointer, sysInstrContent stays nil (disabled)
+
+	// Build request
 	reqBody := GenerateContentRequest{
-		SystemInstruction: &Content{
-			Parts: []Part{
-				{Text: systemInstruction},
-			},
-		},
+		SystemInstruction: sysInstrContent,
 		Contents: []Content{
 			{
 				Parts: []Part{

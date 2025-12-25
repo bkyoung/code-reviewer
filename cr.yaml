@@ -54,9 +54,28 @@ planning:
   timeout: "30s"
 
 # Merge Configuration (for multi-provider consensus)
-# merge:
-#   enabled: true
-#   strategy: "weighted"
+merge:
+  enabled: true
+  strategy: "consensus"
+  # LLM provider for summary synthesis (defaults to anthropic/claude-haiku-4-5)
+  provider: "anthropic"
+  model: "claude-haiku-4-5"
+
+# Verification Configuration (agent verification of findings)
+verification:
+  enabled: true
+  # LLM provider for verification (defaults to gemini/gemini-3-flash-preview)
+  provider: "gemini"
+  model: "gemini-3-flash-preview"
+  maxTokens: 64000
+  depth: "medium"
+  costCeiling: 0.50
+  confidence:
+    default: 75
+    critical: 60
+    high: 70
+    medium: 75
+    low: 85
 
 # Budget Configuration (cost control)
 # budget:

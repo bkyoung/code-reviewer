@@ -7,6 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// boolPtr is a helper to create *bool values in tests.
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestExpandEnvString(t *testing.T) {
 	// Set test environment variables
 	os.Setenv("TEST_API_KEY", "secret-key-123")
@@ -74,7 +79,7 @@ func TestExpandEnvVars(t *testing.T) {
 	cfg := Config{
 		Providers: map[string]ProviderConfig{
 			"openai": {
-				Enabled: true,
+				Enabled: boolPtr(true),
 				Model:   "gpt-4o-mini",
 				APIKey:  "${OPENAI_API_KEY}",
 			},
@@ -314,7 +319,7 @@ func TestExpandEnvVars_ProviderHTTPOverrides(t *testing.T) {
 	cfg := Config{
 		Providers: map[string]ProviderConfig{
 			"ollama": {
-				Enabled:    true,
+				Enabled:    boolPtr(true),
 				Model:      "llama2",
 				Timeout:    &timeout,
 				MaxRetries: &maxRetries,

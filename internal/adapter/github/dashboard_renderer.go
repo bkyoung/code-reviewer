@@ -1,6 +1,8 @@
 package github
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,7 +18,11 @@ import (
 // This must be unique enough to avoid false matches with user comments.
 const dashboardMarker = "<!-- CODE_REVIEWER_DASHBOARD_V1 -->"
 
-// dashboardMetadataStart marks the beginning of the embedded base64-encoded JSON metadata.
+// dashboardMetadataStartGZ marks gzip-compressed, base64-encoded metadata.
+// Format: JSON → gzip → base64. Significantly reduces size for large finding sets.
+const dashboardMetadataStartGZ = "<!-- DASHBOARD_METADATA_B64_GZ"
+
+// dashboardMetadataStart marks base64-encoded JSON metadata (legacy, uncompressed).
 const dashboardMetadataStart = "<!-- DASHBOARD_METADATA_B64"
 
 // dashboardMetadataEnd marks the end of the embedded metadata.
@@ -531,10 +537,14 @@ func (r *DashboardRenderer) embedMetadata(sb *strings.Builder, data review.Dashb
 		return err
 	}
 
-	// Base64 encode
-	encoded := base64.StdEncoding.EncodeToString(jsonBytes)
+	// Gzip compress then base64 encode
+	compressed, err := gzipCompress(jsonBytes)
+	if err != nil {
+		return fmt.Errorf("failed to compress metadata: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(compressed)
 
-	sb.WriteString(dashboardMetadataStart)
+	sb.WriteString(dashboardMetadataStartGZ)
 	sb.WriteString("\n")
 	sb.WriteString(encoded)
 	sb.WriteString("\n")
@@ -715,4 +725,17 @@ func BuildReviewPointer(dashboardURL string) string {
 		return "Code review complete. See the tracking comment for details."
 	}
 	return fmt.Sprintf("See the [Code Review Dashboard](%s) for full details.", dashboardURL)
+}
+
+// gzipCompress compresses data using gzip.
+func gzipCompress(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	if _, err := writer.Write(data); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

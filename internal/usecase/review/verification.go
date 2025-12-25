@@ -2,6 +2,8 @@ package review
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -189,4 +191,65 @@ func convertVerifiedToFindings(verified []domain.VerifiedFinding) []domain.Findi
 		findings = append(findings, v.Finding)
 	}
 	return findings
+}
+
+// logVerificationDetails logs detailed verification results for each finding.
+// This provides visibility into what was filtered and why.
+func logVerificationDetails(ctx context.Context, verified []domain.VerifiedFinding, reportable []domain.VerifiedFinding, settings VerificationSettings, logger Logger) {
+	// Build set of reportable findings for quick lookup
+	reportableSet := make(map[string]bool)
+	for _, f := range reportable {
+		key := fmt.Sprintf("%s:%d", f.Finding.File, f.Finding.LineStart)
+		reportableSet[key] = true
+	}
+
+	// Log header
+	log.Println("=== VERIFICATION REPORT ===")
+	log.Printf("Total findings: %d | Reportable: %d | Filtered: %d",
+		len(verified), len(reportable), len(verified)-len(reportable))
+	log.Println("")
+
+	// Log each finding's verification result
+	for i, v := range verified {
+		key := fmt.Sprintf("%s:%d", v.Finding.File, v.Finding.LineStart)
+		isReportable := reportableSet[key]
+		threshold := getThresholdForSeverity(v.Finding.Severity, settings)
+
+		// Determine filter reason
+		filterReason := ""
+		if !isReportable {
+			if !v.Verified {
+				filterReason = "NOT_VERIFIED"
+			} else if v.Confidence < threshold {
+				filterReason = fmt.Sprintf("CONFIDENCE_BELOW_THRESHOLD(%d<%d)", v.Confidence, threshold)
+			}
+		}
+
+		// Status indicator
+		status := "✓ PASS"
+		if !isReportable {
+			status = "✗ FILTERED"
+		}
+
+		// Log the finding
+		log.Printf("[%d] %s | %s:%d | %s | confidence=%d threshold=%d",
+			i+1, status, v.Finding.File, v.Finding.LineStart, v.Finding.Severity, v.Confidence, threshold)
+		log.Printf("    Description: %.80s...", truncateString(v.Finding.Description, 80))
+		log.Printf("    Verified: %t | Classification: %s", v.Verified, v.Classification)
+		log.Printf("    Evidence: %.100s", truncateString(v.Evidence, 100))
+		if filterReason != "" {
+			log.Printf("    Filter Reason: %s", filterReason)
+		}
+		log.Println("")
+	}
+
+	log.Println("=== END VERIFICATION REPORT ===")
+}
+
+// truncateString truncates a string to maxLen characters.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
 }
