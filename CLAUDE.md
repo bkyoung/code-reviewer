@@ -2,8 +2,8 @@
 
 **Project:** AI-Powered Code Review Tool
 **Status:** Phase 2 In Progress
-**Version:** v0.2.3
-**Last Updated:** 2025-12-22
+**Version:** v0.3.0
+**Last Updated:** 2025-12-25
 
 ---
 
