@@ -776,7 +776,7 @@ func createVerifier(cfg config.Config, providers map[string]review.Provider, rep
 
 	for _, name := range providerOrder {
 		providerCfg, ok := cfg.Providers[name]
-		if !ok || providerCfg.APIKey == "" {
+		if !ok || !providerCfg.Enabled || providerCfg.APIKey == "" {
 			continue
 		}
 
@@ -878,9 +878,8 @@ type openaiLLMAdapter struct {
 }
 
 func (a *openaiLLMAdapter) Call(ctx context.Context, systemPrompt, userPrompt string) (string, int, int, float64, error) {
-	// Combine system and user prompts (OpenAI handles system prompt in the message)
-	fullPrompt := systemPrompt + "\n\n" + userPrompt
-	resp, err := a.client.Call(ctx, fullPrompt, openai.CallOptions{
+	resp, err := a.client.Call(ctx, userPrompt, openai.CallOptions{
+		System:      systemPrompt,
 		Temperature: 0.0, // Deterministic for verification
 		MaxTokens:   a.maxTokens,
 	})
