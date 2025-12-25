@@ -1,9 +1,12 @@
 package tracking
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"sort"
 	"strings"
@@ -23,11 +26,20 @@ const dashboardCommentMarker = "<!-- CODE_REVIEWER_DASHBOARD_V1 -->"
 
 // trackingMetadataStart marks the beginning of the embedded base64-encoded JSON metadata.
 // The payload is base64 encoded to avoid issues with HTML comment delimiters (-->) in JSON.
+// DEPRECATED: Use trackingMetadataStartGZ for new comments.
 const trackingMetadataStart = "<!-- TRACKING_METADATA_B64"
+
+// trackingMetadataStartGZ marks gzip-compressed, base64-encoded metadata.
+// Format: JSON → gzip → base64. Significantly reduces size for large finding sets.
+const trackingMetadataStartGZ = "<!-- TRACKING_METADATA_B64_GZ"
 
 // dashboardMetadataStart marks the beginning of the embedded base64-encoded JSON metadata
 // in unified dashboard comments. This is used by the DashboardRenderer.
+// DEPRECATED: Use dashboardMetadataStartGZ for new comments.
 const dashboardMetadataStart = "<!-- DASHBOARD_METADATA_B64"
+
+// dashboardMetadataStartGZ marks gzip-compressed dashboard metadata.
+const dashboardMetadataStartGZ = "<!-- DASHBOARD_METADATA_B64_GZ"
 
 // trackingMetadataEnd marks the end of the embedded metadata.
 const trackingMetadataEnd = "-->"
@@ -36,7 +48,8 @@ const trackingMetadataEnd = "-->"
 const legacyMetadataStart = "<!-- TRACKING_METADATA"
 
 // maxMetadataSize limits the size of base64-encoded metadata to prevent DoS.
-// GitHub comments are limited to ~65k chars, so 64KB aligns with that limit.
+// With gzip compression, this limit is rarely hit (typical 70-90% compression).
+// GitHub comments are limited to ~65k chars, so 64KB provides headroom.
 const maxMetadataSize = 64 * 1024
 
 // trackingStateJSON is the JSON-serializable form of TrackingState.
@@ -196,9 +209,13 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 	}
 
 	// Embedded metadata (hidden from rendered view)
-	// Base64 encode to avoid issues with --> in JSON content
-	encoded := base64.StdEncoding.EncodeToString(jsonBytes)
-	sb.WriteString(trackingMetadataStart)
+	// Gzip compress then base64 encode to reduce size and avoid --> in JSON content
+	compressed, err := gzipCompress(jsonBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to compress metadata: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(compressed)
+	sb.WriteString(trackingMetadataStartGZ)
 	sb.WriteString("\n")
 	sb.WriteString(encoded)
 	sb.WriteString("\n")
@@ -209,25 +226,41 @@ func RenderTrackingComment(state review.TrackingState) (string, error) {
 
 // extractMetadata extracts the JSON string from between metadata markers.
 // Supports multiple formats for compatibility:
-//   - trackingMetadataStart: base64-encoded tracking comment format
-//   - dashboardMetadataStart: base64-encoded unified dashboard format
+//   - trackingMetadataStartGZ: gzip-compressed, base64-encoded (preferred)
+//   - dashboardMetadataStartGZ: gzip-compressed dashboard format
+//   - trackingMetadataStart: base64-encoded tracking comment format (legacy)
+//   - dashboardMetadataStart: base64-encoded unified dashboard format (legacy)
 //   - legacyMetadataStart: raw JSON legacy format
 func extractMetadata(body string) (string, error) {
-	// Try tracking metadata format first (base64)
-	startIdx := strings.Index(body, trackingMetadataStart)
-	markerLen := len(trackingMetadataStart)
+	// Try compressed formats first (preferred)
+	startIdx := strings.Index(body, trackingMetadataStartGZ)
+	markerLen := len(trackingMetadataStartGZ)
+	isCompressed := true
 	isBase64 := true
 
-	// Try dashboard metadata format (base64)
+	if startIdx == -1 {
+		startIdx = strings.Index(body, dashboardMetadataStartGZ)
+		markerLen = len(dashboardMetadataStartGZ)
+	}
+
+	// Fall back to uncompressed base64 formats
+	if startIdx == -1 {
+		startIdx = strings.Index(body, trackingMetadataStart)
+		markerLen = len(trackingMetadataStart)
+		isCompressed = false
+	}
+
 	if startIdx == -1 {
 		startIdx = strings.Index(body, dashboardMetadataStart)
 		markerLen = len(dashboardMetadataStart)
+		isCompressed = false
 	}
 
-	// Fall back to legacy format if neither base64 format found
+	// Fall back to legacy raw JSON format
 	if startIdx == -1 {
 		startIdx = strings.Index(body, legacyMetadataStart)
 		markerLen = len(legacyMetadataStart)
+		isCompressed = false
 		isBase64 = false
 	}
 
@@ -256,13 +289,23 @@ func extractMetadata(body string) (string, error) {
 		return "", fmt.Errorf("metadata too large: %d bytes (max %d)", len(content), maxMetadataSize)
 	}
 
-	// Decode if base64 encoded
+	// Decode based on format
 	if isBase64 {
 		// Use Strict decoding to reject malformed padding
 		decoded, err := base64.StdEncoding.Strict().DecodeString(content)
 		if err != nil {
 			return "", fmt.Errorf("failed to decode base64 metadata: %w", err)
 		}
+
+		// Decompress if gzip-compressed
+		if isCompressed {
+			decompressed, err := gzipDecompress(decoded)
+			if err != nil {
+				return "", fmt.Errorf("failed to decompress metadata: %w", err)
+			}
+			return string(decompressed), nil
+		}
+
 		return string(decoded), nil
 	}
 
@@ -438,4 +481,27 @@ func jsonToState(stateJSON trackingStateJSON) (review.TrackingState, error) {
 		LastUpdated:     stateJSON.LastUpdated,
 		ReviewStatus:    reviewStatus,
 	}, nil
+}
+
+// gzipCompress compresses data using gzip.
+func gzipCompress(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	if _, err := writer.Write(data); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// gzipDecompress decompresses gzip-compressed data.
+func gzipDecompress(data []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
 }
