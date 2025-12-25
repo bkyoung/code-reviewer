@@ -54,34 +54,61 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 	results := make([]map[string]interface{}, 0, len(artifact.Review.Findings))
 
 	for _, finding := range artifact.Review.Findings {
+		// SARIF requires startLine >= 1 (1-indexed)
+		startLine := finding.LineStart
+		if startLine < 1 {
+			startLine = 1
+		}
+
+		// endLine must be >= startLine
+		endLine := finding.LineEnd
+		if endLine < startLine {
+			endLine = startLine
+		}
+
+		// Use placeholder URI if file is empty
+		fileURI := finding.File
+		if fileURI == "" {
+			fileURI = "unknown"
+		}
+
+		// SARIF requires non-empty message text
+		messageText := finding.Description
+		if messageText == "" {
+			messageText = "No description provided"
+		}
+
+		// Use a valid ruleId (category or fallback)
+		ruleID := finding.Category
+		if ruleID == "" {
+			ruleID = "code-review"
+		}
+
 		result := map[string]interface{}{
-			"ruleId": finding.Category,
+			"ruleId": ruleID,
 			"level":  convertSeverity(finding.Severity),
 			"message": map[string]interface{}{
-				"text": finding.Description,
+				"text": messageText,
 			},
 			"locations": []map[string]interface{}{
 				{
 					"physicalLocation": map[string]interface{}{
 						"artifactLocation": map[string]interface{}{
-							"uri": finding.File,
+							"uri": fileURI,
 						},
 						"region": map[string]interface{}{
-							"startLine": finding.LineStart,
-							"endLine":   finding.LineEnd,
+							"startLine": startLine,
+							"endLine":   endLine,
 						},
 					},
 				},
 			},
 		}
 
+		// Add suggestion as a property (fixes requires artifactChanges which we don't have)
 		if finding.Suggestion != "" {
-			result["fixes"] = []map[string]interface{}{
-				{
-					"description": map[string]interface{}{
-						"text": finding.Suggestion,
-					},
-				},
+			result["properties"] = map[string]interface{}{
+				"suggestion": finding.Suggestion,
 			}
 		}
 
