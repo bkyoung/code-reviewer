@@ -19,7 +19,10 @@ type Config struct {
 
 // ProviderConfig configures a single LLM provider.
 type ProviderConfig struct {
-	Enabled bool   `yaml:"enabled"`
+	// Enabled controls whether this provider is used. When nil (not set in config),
+	// the provider is considered enabled if it has an API key configured.
+	// When explicitly set to false, the provider is disabled regardless of API key.
+	Enabled *bool  `yaml:"enabled,omitempty"`
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"apiKey"`
 

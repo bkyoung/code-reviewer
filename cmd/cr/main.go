@@ -530,7 +530,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	providers := make(map[string]review.Provider)
 
 	// OpenAI provider
-	if cfg, ok := providersConfig["openai"]; ok && cfg.Enabled {
+	if cfg, ok := providersConfig["openai"]; ok && isProviderEnabled(cfg) {
 		model := cfg.Model
 		if model == "" {
 			model = "gpt-4o-mini"
@@ -558,7 +558,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	}
 
 	// Anthropic/Claude provider
-	if cfg, ok := providersConfig["anthropic"]; ok && cfg.Enabled {
+	if cfg, ok := providersConfig["anthropic"]; ok && isProviderEnabled(cfg) {
 		model := cfg.Model
 		if model == "" {
 			model = "claude-3-5-sonnet-20241022"
@@ -584,7 +584,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	}
 
 	// Google Gemini provider
-	if cfg, ok := providersConfig["gemini"]; ok && cfg.Enabled {
+	if cfg, ok := providersConfig["gemini"]; ok && isProviderEnabled(cfg) {
 		model := cfg.Model
 		if model == "" {
 			model = "gemini-1.5-pro"
@@ -610,7 +610,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	}
 
 	// Ollama provider (local LLM)
-	if cfg, ok := providersConfig["ollama"]; ok && cfg.Enabled {
+	if cfg, ok := providersConfig["ollama"]; ok && isProviderEnabled(cfg) {
 		model := cfg.Model
 		if model == "" {
 			model = "codellama"
@@ -635,7 +635,7 @@ func buildProviders(providersConfig map[string]config.ProviderConfig, httpConfig
 	}
 
 	// Static provider (for testing)
-	if cfg, ok := providersConfig["static"]; ok && cfg.Enabled {
+	if cfg, ok := providersConfig["static"]; ok && isProviderEnabled(cfg) {
 		model := cfg.Model
 		if model == "" {
 			model = "static-model"
@@ -871,21 +871,31 @@ func buildProviderMaxTokens(providers map[string]config.ProviderConfig) map[stri
 	return result
 }
 
+// isProviderEnabled checks if a provider should be used based on its configuration.
+// The logic handles three cases for the Enabled field:
+//   - nil (not set): provider is enabled if it has an API key (backward compatible)
+//   - false: provider is explicitly disabled, regardless of API key
+//   - true: provider is explicitly enabled (required for keyless providers like Ollama)
+func isProviderEnabled(cfg config.ProviderConfig) bool {
+	// If explicitly disabled, respect that regardless of API key
+	if cfg.Enabled != nil && !*cfg.Enabled {
+		return false
+	}
+	// If explicitly enabled, use it
+	if cfg.Enabled != nil && *cfg.Enabled {
+		return true
+	}
+	// Not set (nil): enable if API key is present (backward compatible)
+	return cfg.APIKey != ""
+}
+
 // isProviderUsable checks if a provider configuration is usable for verification.
-// A provider is usable if it exists and has an API key (for API-based providers),
-// or if it's explicitly enabled (for local providers like Ollama that don't need keys).
-// This maintains backward compatibility with existing configs that have API keys set
-// without explicitly setting "enabled: true".
+// Wraps isProviderEnabled with an existence check.
 func isProviderUsable(cfg config.ProviderConfig, exists bool) bool {
 	if !exists {
 		return false
 	}
-	// Provider with API key is always usable (backward compatible)
-	if cfg.APIKey != "" {
-		return true
-	}
-	// Local/keyless providers need explicit enabling
-	return cfg.Enabled
+	return isProviderEnabled(cfg)
 }
 
 // openaiLLMAdapter adapts openai.HTTPClient to verifyadapter.LLMClient.

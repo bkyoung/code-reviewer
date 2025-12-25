@@ -16,9 +16,11 @@ import (
 )
 
 // Test helpers for config
+func boolPtr(b bool) *bool { return &b }
+
 func testProviderConfig() config.ProviderConfig {
 	return config.ProviderConfig{
-		Enabled: true,
+		Enabled: boolPtr(true),
 		Model:   "claude-3-5-sonnet-20241022",
 	}
 }
