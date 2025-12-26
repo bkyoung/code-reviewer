@@ -3,6 +3,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 
@@ -91,6 +92,16 @@ type PostReviewResult struct {
 
 	// DismissedCount is the number of previous bot reviews that were dismissed.
 	DismissedCount int
+
+	// Status counts from reply analysis (Issue #108)
+	// AcknowledgedCount is the number of existing findings with acknowledgment replies.
+	AcknowledgedCount int
+
+	// DisputedCount is the number of existing findings with dispute replies.
+	DisputedCount int
+
+	// OpenCount is the number of existing findings with no status-changing replies.
+	OpenCount int
 }
 
 // PostReview posts a code review to GitHub.
@@ -99,6 +110,8 @@ type PostReviewResult struct {
 //
 // If BotUsername is set:
 //   - Existing bot comments are fetched to deduplicate findings (Issue #107)
+//   - Reply statuses are analyzed to determine acknowledged/disputed findings (Issue #108)
+//   - Acknowledged/disputed findings don't count toward blocking
 //   - Previous reviews from that bot are dismissed AFTER posting succeeds
 //
 // This ensures the PR always has at least one review signal - if posting fails,
@@ -111,16 +124,24 @@ type PostReviewResult struct {
 func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*PostReviewResult, error) {
 	findings := req.Findings
 	var duplicatesSkipped int
+	var existingStatuses map[domain.FindingFingerprint]domain.FindingStatus
+	var statusCounts StatusCounts
 
-	// Deduplicate findings if BotUsername is set
+	// Analyze existing comments if BotUsername is set
 	if req.BotUsername != "" {
+		var comments []github.PullRequestComment
 		var err error
-		findings, duplicatesSkipped, err = p.deduplicateFindings(ctx, req)
+
+		// Fetch comments once for both deduplication and status analysis
+		comments, err = p.client.ListPullRequestComments(ctx, req.Owner, req.Repo, req.PullNumber)
 		if err != nil {
-			// Log and continue without deduplication
-			log.Printf("warning: failed to fetch comments for deduplication: %v", err)
-			findings = req.Findings
-			duplicatesSkipped = 0
+			log.Printf("warning: failed to fetch comments: %v", err)
+		} else {
+			// Deduplicate findings
+			findings, duplicatesSkipped = filterDuplicateFindings(req.Findings, comments, req.BotUsername)
+
+			// Analyze reply statuses (Issue #108)
+			existingStatuses, statusCounts = analyzeFindingStatuses(comments, req.BotUsername)
 		}
 	}
 
@@ -128,16 +149,21 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	inDiffCount := github.CountInDiffFindings(findings)
 	skippedCount := len(findings) - inDiffCount
 
-	// Determine review event using ORIGINAL findings, not deduplicated ones.
-	// This ensures the review status reflects the actual state of the code.
-	// If there are existing high-severity findings (already posted), we still
-	// need to REQUEST_CHANGES to keep the PR blocked.
+	// Determine review event considering reply statuses.
+	// Acknowledged/disputed findings don't count toward blocking.
+	// NOTE: We use req.Findings (original, unfiltered) rather than the deduplicated
+	// `findings` because even duplicated high-severity findings should still block
+	// the PR if they haven't been acknowledged/disputed. The deduplication only
+	// affects what comments are posted, not the blocking decision.
 	var event github.ReviewEvent
 	if req.OverrideEvent != "" {
 		event = req.OverrideEvent
 	} else {
-		event = github.DetermineReviewEventWithActions(req.Findings, req.ReviewActions)
+		event = determineEffectiveEvent(req.Findings, existingStatuses, req.ReviewActions)
 	}
+
+	// Build the summary with status section appended (if applicable)
+	summary := req.Review.Summary + formatStatusSection(statusCounts)
 
 	// Call the client to create the new review first
 	input := github.CreateReviewInput{
@@ -146,7 +172,7 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 		PullNumber: req.PullNumber,
 		CommitSHA:  req.CommitSHA,
 		Event:      event,
-		Summary:    req.Review.Summary,
+		Summary:    summary,
 		Findings:   findings,
 	}
 
@@ -171,6 +197,9 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 		Event:             event,
 		HTMLURL:           resp.HTMLURL,
 		DismissedCount:    dismissedCount,
+		AcknowledgedCount: statusCounts.Acknowledged,
+		DisputedCount:     statusCounts.Disputed,
+		OpenCount:         statusCounts.Open,
 	}, nil
 }
 
@@ -226,29 +255,28 @@ func shouldDismissReview(review github.ReviewSummary, botUsername string) bool {
 	return true
 }
 
-// deduplicateFindings fetches existing bot comments from the PR and filters out
-// any findings that have already been posted (based on fingerprint matching).
-// Returns the filtered findings, the count of duplicates skipped, and any error.
-func (p *ReviewPoster) deduplicateFindings(
-	ctx context.Context,
-	req PostReviewRequest,
-) ([]github.PositionedFinding, int, error) {
-	// Fetch existing PR comments
-	comments, err := p.client.ListPullRequestComments(ctx, req.Owner, req.Repo, req.PullNumber)
-	if err != nil {
-		return nil, 0, err
-	}
+// StatusCounts tracks the count of findings by status.
+type StatusCounts struct {
+	Open         int
+	Acknowledged int
+	Disputed     int
+}
 
-	// Extract fingerprints from bot's comments
-	existingFingerprints := extractBotFingerprints(comments, req.BotUsername)
+// filterDuplicateFindings filters out findings that have already been posted.
+// Returns the filtered findings and the count of duplicates skipped.
+func filterDuplicateFindings(
+	findings []github.PositionedFinding,
+	comments []github.PullRequestComment,
+	botUsername string,
+) ([]github.PositionedFinding, int) {
+	existingFingerprints := extractBotFingerprints(comments, botUsername)
 	if len(existingFingerprints) == 0 {
-		return req.Findings, 0, nil
+		return findings, 0
 	}
 
-	// Filter out findings that already have comments
 	var filtered []github.PositionedFinding
 	var duplicatesSkipped int
-	for _, pf := range req.Findings {
+	for _, pf := range findings {
 		fp := domain.FingerprintFromFinding(pf.Finding)
 		if existingFingerprints[fp] {
 			duplicatesSkipped++
@@ -257,7 +285,7 @@ func (p *ReviewPoster) deduplicateFindings(
 		filtered = append(filtered, pf)
 	}
 
-	return filtered, duplicatesSkipped, nil
+	return filtered, duplicatesSkipped
 }
 
 // extractBotFingerprints extracts fingerprints from comments authored by the bot.
@@ -278,4 +306,107 @@ func extractBotFingerprints(comments []github.PullRequestComment, botUsername st
 	}
 
 	return fingerprints
+}
+
+// analyzeFindingStatuses analyzes bot comments and their replies to determine
+// the status of each existing finding (Issue #108).
+// Returns a map of fingerprint → status and counts for each status.
+func analyzeFindingStatuses(
+	comments []github.PullRequestComment,
+	botUsername string,
+) (map[domain.FindingFingerprint]domain.FindingStatus, StatusCounts) {
+	statuses := make(map[domain.FindingFingerprint]domain.FindingStatus)
+	var counts StatusCounts
+
+	// Group comments by parent to get reply chains
+	grouped := github.GroupCommentsByParent(comments, botUsername)
+
+	for _, group := range grouped {
+		// Extract fingerprint from parent (bot) comment
+		fp, ok := github.ExtractFingerprintFromComment(group.Parent.Body)
+		if !ok {
+			continue // Skip comments without fingerprints (legacy)
+		}
+
+		// Collect reply texts
+		var replyTexts []string
+		for _, reply := range group.Replies {
+			replyTexts = append(replyTexts, reply.Body)
+		}
+
+		// Detect status from replies
+		status := domain.DetectStatusFromReplies(replyTexts)
+		statuses[fp] = status
+
+		// Update counts
+		switch status {
+		case domain.StatusAcknowledged:
+			counts.Acknowledged++
+		case domain.StatusDisputed:
+			counts.Disputed++
+		case domain.StatusOpen:
+			counts.Open++
+		}
+	}
+
+	return statuses, counts
+}
+
+// formatStatusSection creates a markdown section showing finding status breakdown.
+// Returns an empty string if all counts are zero.
+func formatStatusSection(counts StatusCounts) string {
+	// Only include section if there are any existing findings tracked
+	total := counts.Open + counts.Acknowledged + counts.Disputed
+	if total == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n---\n\n")
+	sb.WriteString("### Existing Finding Status\n\n")
+
+	// Always show all statuses for clarity
+	sb.WriteString("| Status | Count | Effect |\n")
+	sb.WriteString("|--------|-------|--------|\n")
+	sb.WriteString("| 🔓 Open | ")
+	sb.WriteString(fmt.Sprintf("%d", counts.Open))
+	sb.WriteString(" | Counts toward blocking |\n")
+	sb.WriteString("| ✅ Acknowledged | ")
+	sb.WriteString(fmt.Sprintf("%d", counts.Acknowledged))
+	sb.WriteString(" | Won't block (author accepted) |\n")
+	sb.WriteString("| ❌ Disputed | ")
+	sb.WriteString(fmt.Sprintf("%d", counts.Disputed))
+	sb.WriteString(" | Won't block (author disputes) |\n")
+
+	return sb.String()
+}
+
+// determineEffectiveEvent determines the review event considering reply statuses.
+// Findings that have been acknowledged or disputed don't count toward blocking.
+func determineEffectiveEvent(
+	findings []github.PositionedFinding,
+	existingStatuses map[domain.FindingFingerprint]domain.FindingStatus,
+	actions github.ReviewActions,
+) github.ReviewEvent {
+	// If no status tracking, fall back to standard behavior
+	if existingStatuses == nil {
+		return github.DetermineReviewEventWithActions(findings, actions)
+	}
+
+	// Filter findings to only include those that are "effective" (not acknowledged/disputed)
+	var effectiveFindings []github.PositionedFinding
+	for _, pf := range findings {
+		fp := domain.FingerprintFromFinding(pf.Finding)
+		status, exists := existingStatuses[fp]
+
+		// Include finding if:
+		// - It's new (not in existingStatuses)
+		// - It's in existingStatuses but status is Open
+		if !exists || status == domain.StatusOpen {
+			effectiveFindings = append(effectiveFindings, pf)
+		}
+		// Acknowledged and Disputed findings are excluded from blocking calculation
+	}
+
+	return github.DetermineReviewEventWithActions(effectiveFindings, actions)
 }

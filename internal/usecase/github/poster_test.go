@@ -956,3 +956,404 @@ func TestReviewPoster_PostReview_CaseInsensitiveBotUsernameForDedup(t *testing.T
 	assert.Equal(t, 0, result.CommentsPosted, "finding should be deduplicated despite case difference")
 	assert.Equal(t, 1, result.DuplicatesSkipped)
 }
+
+// ==== Status-Aware Deduplication Tests (Issue #108) ====
+
+func TestReviewPoster_PostReview_ReturnsStatusCounts(t *testing.T) {
+	// Set up findings with existing bot comments that have replies
+	finding1 := makeFinding("file1.go", 10, "high", "Issue with ack reply")
+	finding2 := makeFinding("file2.go", 20, "high", "Issue with dispute reply")
+	finding3 := makeFinding("file3.go", 30, "high", "Issue with no reply")
+
+	fp1 := domain.FingerprintFromFinding(finding1)
+	fp2 := domain.FingerprintFromFinding(finding2)
+	fp3 := domain.FingerprintFromFinding(finding3)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				// Bot comment for finding1
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp1) + " -->", User: github.User{Login: "bot[bot]"}},
+				// Reply with acknowledgment
+				{ID: 2, Body: "Acknowledged, will fix later", User: github.User{Login: "author"}, InReplyToID: 1},
+				// Bot comment for finding2
+				{ID: 3, Body: "<!-- CR_FINGERPRINT:" + string(fp2) + " -->", User: github.User{Login: "bot[bot]"}},
+				// Reply with dispute
+				{ID: 4, Body: "This is a false positive", User: github.User{Login: "author"}, InReplyToID: 3},
+				// Bot comment for finding3 (no reply)
+				{ID: 5, Body: "<!-- CR_FINGERPRINT:" + string(fp3) + " -->", User: github.User{Login: "bot[bot]"}},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	// All findings are duplicates (already exist in comments)
+	findings := []github.PositionedFinding{
+		{Finding: finding1, DiffPosition: diff.IntPtr(5)},
+		{Finding: finding2, DiffPosition: diff.IntPtr(15)},
+		{Finding: finding3, DiffPosition: diff.IntPtr(25)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Verify status counts
+	assert.Equal(t, 1, result.AcknowledgedCount, "should have 1 acknowledged finding")
+	assert.Equal(t, 1, result.DisputedCount, "should have 1 disputed finding")
+	assert.Equal(t, 1, result.OpenCount, "should have 1 open finding")
+}
+
+func TestReviewPoster_PostReview_AcknowledgedFindingsDontBlock(t *testing.T) {
+	// A high-severity finding that has been acknowledged should NOT block the PR
+	finding := makeFinding("file1.go", 10, "high", "Acknowledged issue")
+	fp := domain.FingerprintFromFinding(finding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				// Bot comment for the finding
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp) + " -->", User: github.User{Login: "bot[bot]"}},
+				// Author acknowledged
+				{ID: 2, Body: "Acknowledged, won't fix for now", User: github.User{Login: "author"}, InReplyToID: 1},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Should APPROVE because the finding is acknowledged (doesn't count toward blocking)
+	assert.Equal(t, github.EventApprove, result.Event, "acknowledged finding should not block PR")
+	assert.Equal(t, 1, result.AcknowledgedCount)
+}
+
+func TestReviewPoster_PostReview_DisputedFindingsDontBlock(t *testing.T) {
+	// A high-severity finding that has been disputed should NOT block the PR
+	finding := makeFinding("file1.go", 10, "high", "Disputed issue")
+	fp := domain.FingerprintFromFinding(finding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				// Bot comment for the finding
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp) + " -->", User: github.User{Login: "bot[bot]"}},
+				// Author disputed
+				{ID: 2, Body: "This is a false positive", User: github.User{Login: "author"}, InReplyToID: 1},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Should APPROVE because the finding is disputed (doesn't count toward blocking)
+	assert.Equal(t, github.EventApprove, result.Event, "disputed finding should not block PR")
+	assert.Equal(t, 1, result.DisputedCount)
+}
+
+func TestReviewPoster_PostReview_OpenFindingsStillBlock(t *testing.T) {
+	// A high-severity finding with no replies should still block
+	finding := makeFinding("file1.go", 10, "high", "Open issue")
+	fp := domain.FingerprintFromFinding(finding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				// Bot comment for the finding (no replies)
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp) + " -->", User: github.User{Login: "bot[bot]"}},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Should REQUEST_CHANGES because the finding is open (no acknowledgment/dispute)
+	assert.Equal(t, github.EventRequestChanges, result.Event, "open high-severity finding should block PR")
+	assert.Equal(t, 1, result.OpenCount)
+}
+
+func TestReviewPoster_PostReview_MixedStatusFindings(t *testing.T) {
+	// Mix of acknowledged, disputed, and open findings.
+	// Only open findings count toward blocking.
+	findingAck := makeFinding("file1.go", 10, "high", "Acknowledged")
+	findingDisputed := makeFinding("file2.go", 20, "high", "Disputed")
+	findingOpen := makeFinding("file3.go", 30, "low", "Open but low severity")
+
+	fpAck := domain.FingerprintFromFinding(findingAck)
+	fpDisputed := domain.FingerprintFromFinding(findingDisputed)
+	fpOpen := domain.FingerprintFromFinding(findingOpen)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fpAck) + " -->", User: github.User{Login: "bot[bot]"}},
+				{ID: 2, Body: "Acknowledged", User: github.User{Login: "author"}, InReplyToID: 1},
+				{ID: 3, Body: "<!-- CR_FINGERPRINT:" + string(fpDisputed) + " -->", User: github.User{Login: "bot[bot]"}},
+				{ID: 4, Body: "False positive", User: github.User{Login: "author"}, InReplyToID: 3},
+				{ID: 5, Body: "<!-- CR_FINGERPRINT:" + string(fpOpen) + " -->", User: github.User{Login: "bot[bot]"}},
+				// No reply for fpOpen
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: findingAck, DiffPosition: diff.IntPtr(5)},
+		{Finding: findingDisputed, DiffPosition: diff.IntPtr(15)},
+		{Finding: findingOpen, DiffPosition: diff.IntPtr(25)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// Only the open finding (low severity) counts → APPROVE
+	// High severity ones are acknowledged/disputed so don't block
+	assert.Equal(t, github.EventApprove, result.Event, "only open low-severity finding should not block")
+	assert.Equal(t, 1, result.AcknowledgedCount)
+	assert.Equal(t, 1, result.DisputedCount)
+	assert.Equal(t, 1, result.OpenCount)
+}
+
+func TestReviewPoster_PostReview_NewFindingsStillBlock(t *testing.T) {
+	// New findings (not yet commented on) should still block regardless of existing statuses
+	existingFinding := makeFinding("file1.go", 10, "high", "Existing acknowledged")
+	newFinding := makeFinding("file2.go", 20, "high", "Brand new finding")
+
+	fpExisting := domain.FingerprintFromFinding(existingFinding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fpExisting) + " -->", User: github.User{Login: "bot[bot]"}},
+				{ID: 2, Body: "Acknowledged", User: github.User{Login: "author"}, InReplyToID: 1},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: existingFinding, DiffPosition: diff.IntPtr(5)}, // Acknowledged - won't block
+		{Finding: newFinding, DiffPosition: diff.IntPtr(15)},     // New - will block
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	// New high-severity finding blocks even though existing one is acknowledged
+	assert.Equal(t, github.EventRequestChanges, result.Event, "new high-severity finding should block")
+	// Only 1 comment posted (new finding), existing is deduplicated
+	assert.Equal(t, 1, result.CommentsPosted)
+	assert.Equal(t, 1, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_StatusCountsZeroWithoutBotUsername(t *testing.T) {
+	// When BotUsername is empty, status counts should be zero
+	client := &MockReviewClient{}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "Issue"), DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "", // No bot username
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.AcknowledgedCount)
+	assert.Equal(t, 0, result.DisputedCount)
+	assert.Equal(t, 0, result.OpenCount)
+}
+
+func TestReviewPoster_PostReview_OverrideEventIgnoresStatuses(t *testing.T) {
+	// When OverrideEvent is set, status-based calculation is bypassed
+	finding := makeFinding("file1.go", 10, "high", "Issue")
+	fp := domain.FingerprintFromFinding(finding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp) + " -->", User: github.User{Login: "bot[bot]"}},
+				// No acknowledgment/dispute - would normally block
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:         "owner",
+		Repo:          "repo",
+		PullNumber:    1,
+		CommitSHA:     "sha",
+		Findings:      findings,
+		BotUsername:   "bot[bot]",
+		OverrideEvent: github.EventComment, // Force COMMENT regardless of status
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, github.EventComment, result.Event, "override should take precedence")
+	// Status counts should still be calculated
+	assert.Equal(t, 1, result.OpenCount)
+}
+
+func TestReviewPoster_PostReview_SummaryIncludesStatusSection(t *testing.T) {
+	// When there are existing findings with statuses, the summary should include
+	// a status breakdown section.
+	finding := makeFinding("file1.go", 10, "high", "Acknowledged issue")
+	fp := domain.FingerprintFromFinding(finding)
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{ID: 1, Body: "<!-- CR_FINGERPRINT:" + string(fp) + " -->", User: github.User{Login: "bot[bot]"}},
+				{ID: 2, Body: "Acknowledged", User: github.User{Login: "author"}, InReplyToID: 1},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			// Verify the summary includes status section
+			assert.Contains(t, input.Summary, "### Existing Finding Status")
+			assert.Contains(t, input.Summary, "🔓 Open")
+			assert.Contains(t, input.Summary, "✅ Acknowledged")
+			assert.Contains(t, input.Summary, "❌ Disputed")
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	_, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+		Review:      domain.Review{Summary: "Original summary"},
+	})
+
+	require.NoError(t, err)
+}
+
+func TestReviewPoster_PostReview_SummaryOmitsStatusSectionWhenEmpty(t *testing.T) {
+	// When there are no existing comments, the summary should NOT include
+	// the status breakdown section.
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{}, nil // No existing comments
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			// Summary should NOT include status section
+			assert.NotContains(t, input.Summary, "### Existing Finding Status")
+			assert.Equal(t, "Clean review", input.Summary)
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "New issue"), DiffPosition: diff.IntPtr(5)},
+	}
+
+	_, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+		Review:      domain.Review{Summary: "Clean review"},
+	})
+
+	require.NoError(t, err)
+}
