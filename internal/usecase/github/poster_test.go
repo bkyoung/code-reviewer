@@ -870,7 +870,9 @@ func TestReviewPoster_PostReview_CommentFetchErrorContinues(t *testing.T) {
 }
 
 func TestReviewPoster_PostReview_AllFindingsDeduplicated(t *testing.T) {
-	// When all findings are duplicates, an empty review should still be posted
+	// When all findings are duplicates, an empty review should still be posted.
+	// Critically, the review Event should still reflect the original findings'
+	// severity to keep the PR blocked if there are unresolved high-severity issues.
 	finding := makeFinding("file1.go", 10, "high", "Already posted")
 	fp := domain.FingerprintFromFinding(finding)
 	existingCommentBody := "<!-- CR_FINGERPRINT:" + string(fp) + " -->"
@@ -907,6 +909,9 @@ func TestReviewPoster_PostReview_AllFindingsDeduplicated(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.CommentsPosted)
 	assert.Equal(t, 1, result.DuplicatesSkipped)
+	// Event should still be REQUEST_CHANGES because the original finding is high severity,
+	// even though no new comments are being posted (the finding was already posted).
+	assert.Equal(t, github.EventRequestChanges, result.Event, "should still block PR for unresolved high-severity findings")
 	// Verify the review was still created (with no comments)
 	require.NotNil(t, client.LastInput)
 	assert.Len(t, client.LastInput.Findings, 0)

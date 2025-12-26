@@ -128,12 +128,15 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	inDiffCount := github.CountInDiffFindings(findings)
 	skippedCount := len(findings) - inDiffCount
 
-	// Determine review event (using deduplicated findings)
+	// Determine review event using ORIGINAL findings, not deduplicated ones.
+	// This ensures the review status reflects the actual state of the code.
+	// If there are existing high-severity findings (already posted), we still
+	// need to REQUEST_CHANGES to keep the PR blocked.
 	var event github.ReviewEvent
 	if req.OverrideEvent != "" {
 		event = req.OverrideEvent
 	} else {
-		event = github.DetermineReviewEventWithActions(findings, req.ReviewActions)
+		event = github.DetermineReviewEventWithActions(req.Findings, req.ReviewActions)
 	}
 
 	// Call the client to create the new review first
