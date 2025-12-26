@@ -84,7 +84,8 @@ type Config struct {
 	// Model is the model to use (e.g., "claude-haiku-4-5-latest").
 	Model string
 
-	// MaxTokens is the maximum context tokens.
+	// MaxTokens is the maximum output tokens for the LLM response.
+	// Default: 64000 (works for all current Claude/GPT/Gemini models)
 	MaxTokens int
 
 	// LineThreshold is the max line distance for candidates.

@@ -171,7 +171,7 @@ func parseComparisonResponse(response string, candidates []dedup.CandidatePair) 
 		if duplicateIndices[i] {
 			continue
 		}
-		// Use findingKey to avoid duplicates in the unique list
+		// Key by file+description to avoid duplicates in the unique list
 		key := cp.New.File + "|" + cp.New.Description
 		if !seen[key] {
 			result.Unique = append(result.Unique, cp.New)

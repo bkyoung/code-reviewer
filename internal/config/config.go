@@ -466,8 +466,8 @@ type SemanticDeduplicationConfig struct {
 	// Default: "claude-haiku-4-5-latest"
 	Model string `yaml:"model"`
 
-	// MaxTokens is the maximum context tokens for the deduplication request.
-	// Default: 64000
+	// MaxTokens is the maximum output tokens for the deduplication response.
+	// Default: 64000 (sufficient for all current Claude/GPT/Gemini models)
 	MaxTokens int `yaml:"maxTokens"`
 
 	// LineThreshold is the maximum line distance for findings to be considered

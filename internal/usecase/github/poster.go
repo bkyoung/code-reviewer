@@ -500,23 +500,36 @@ func (p *ReviewPoster) filterSemanticDuplicates(
 		return findings, 0
 	}
 
-	// Build set of fingerprints for findings identified as semantic duplicates
-	semanticDupFingerprints := make(map[domain.FindingFingerprint]bool)
+	// Mark original finding indices that are semantic duplicates
+	duplicateOriginalIndices := make(map[int]bool)
 	for _, dup := range result.Duplicates {
 		fp := domain.FingerprintFromFinding(dup.NewFinding)
-		semanticDupFingerprints[fp] = true
 		log.Printf("semantic dedup: %s is duplicate of existing (reason: %s)", fp, dup.Reason)
+
+		// Find which original indices correspond to this duplicate's new finding
+		// Match on all identity fields to avoid incorrectly marking findings with different severity/category
+		for origIdx, pf := range findings {
+			if dup.NewFinding.File == pf.Finding.File &&
+				dup.NewFinding.LineStart == pf.Finding.LineStart &&
+				dup.NewFinding.LineEnd == pf.Finding.LineEnd &&
+				dup.NewFinding.Category == pf.Finding.Category &&
+				dup.NewFinding.Severity == pf.Finding.Severity &&
+				dup.NewFinding.Description == pf.Finding.Description {
+				duplicateOriginalIndices[origIdx] = true
+			}
+		}
 	}
 
-	// Also consider overflow findings as unique (couldn't verify them)
-	_ = overflow // Acknowledged but not used - overflow findings remain in the original list
+	// Overflow findings remain in the original list (couldn't verify them, fail-open)
+	if len(overflow) > 0 {
+		log.Printf("semantic dedup: %d candidates exceeded limit, treating as unique", len(overflow))
+	}
 
-	// Filter out semantic duplicates from positioned findings
+	// Filter out semantic duplicates from positioned findings by index
 	var filtered []github.PositionedFinding
 	var duplicatesFound int
-	for _, pf := range findings {
-		fp := domain.FingerprintFromFinding(pf.Finding)
-		if semanticDupFingerprints[fp] {
+	for i, pf := range findings {
+		if duplicateOriginalIndices[i] {
 			duplicatesFound++
 			continue
 		}

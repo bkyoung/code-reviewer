@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/bkyoung/code-reviewer/internal/config"
 )
+
+// maxResponseSize limits the response body to prevent memory exhaustion.
+const maxResponseSize = 10 * 1024 * 1024 // 10MB
 
 const (
 	anthropicBaseURL  = "https://api.anthropic.com/v1/messages"
@@ -92,11 +97,13 @@ func (c *AnthropicClient) doRequest(ctx context.Context, prompt string, maxToken
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", llmhttp.NewTimeoutError("anthropic", err.Error())
+		return "", classifyHTTPError(err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response size to prevent memory exhaustion
+	limitedReader := io.LimitReader(resp.Body, maxResponseSize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -119,6 +126,29 @@ func (c *AnthropicClient) doRequest(ctx context.Context, prompt string, maxToken
 	}
 
 	return text, nil
+}
+
+// classifyHTTPError categorizes HTTP client errors appropriately.
+// Distinguishes between timeouts, context cancellation, and network errors.
+func classifyHTTPError(err error) error {
+	// Check for context cancellation first
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("request canceled: %w", err)
+	}
+
+	// Check for context deadline exceeded (timeout)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return llmhttp.NewTimeoutError("anthropic", "request timed out")
+	}
+
+	// Check for network timeout
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return llmhttp.NewTimeoutError("anthropic", "network timeout")
+	}
+
+	// Other network errors are retryable service unavailable
+	return llmhttp.NewServiceUnavailableError("anthropic", err.Error())
 }
 
 // mapError converts HTTP status codes to typed errors.
