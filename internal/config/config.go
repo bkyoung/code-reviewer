@@ -16,6 +16,7 @@ type Config struct {
 	Review        ReviewConfig              `yaml:"review"`
 	Verification  VerificationConfig        `yaml:"verification"`
 	Deduplication DeduplicationConfig       `yaml:"deduplication"`
+	SizeGuards    SizeGuardsConfig          `yaml:"sizeGuards"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -237,6 +238,7 @@ func merge(base, overlay Config) Config {
 	result.Review = chooseReview(base.Review, overlay.Review)
 	result.Verification = chooseVerification(base.Verification, overlay.Verification)
 	result.Deduplication = chooseDeduplication(base.Deduplication, overlay.Deduplication)
+	result.SizeGuards = chooseSizeGuards(base.SizeGuards, overlay.SizeGuards)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -525,5 +527,124 @@ func chooseSemanticDeduplication(base, overlay SemanticDeduplicationConfig) Sema
 		result.MaxCandidates = overlay.MaxCandidates
 	}
 
+	return result
+}
+
+// SizeGuardsConfig configures PR size limits and truncation behavior.
+// This prevents context overflow when reviewing large PRs by warning at
+// a threshold and truncating at a maximum.
+type SizeGuardsConfig struct {
+	// Enabled toggles size guard functionality.
+	// Default: true
+	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// WarnTokens is the token count at which to emit a warning.
+	// The review continues but includes a note about size.
+	// Default: 150000 (targets Claude 4.5's 200k context with margin)
+	WarnTokens int `yaml:"warnTokens"`
+
+	// MaxTokens is the maximum token count before truncation.
+	// Files are removed by priority until under this limit.
+	// Default: 200000 (Claude 4.5's context limit)
+	MaxTokens int `yaml:"maxTokens"`
+
+	// Providers allows per-provider override of size limits.
+	// Use this when targeting providers with different context limits
+	// (e.g., Gemini 1.5 Pro has 1M+ tokens, older GPT-4 has 128k).
+	Providers map[string]ProviderSizeConfig `yaml:"providers,omitempty"`
+}
+
+// ProviderSizeConfig allows per-provider size limit overrides.
+type ProviderSizeConfig struct {
+	// WarnTokens overrides the global warn threshold for this provider.
+	WarnTokens int `yaml:"warnTokens,omitempty"`
+
+	// MaxTokens overrides the global max threshold for this provider.
+	MaxTokens int `yaml:"maxTokens,omitempty"`
+}
+
+// GetLimitsForProvider returns the warn and max token limits for a specific provider.
+// If the provider has overrides configured, those are used; otherwise global defaults apply.
+func (c SizeGuardsConfig) GetLimitsForProvider(provider string) (warn, max int) {
+	warn, max = c.WarnTokens, c.MaxTokens
+
+	// Apply global defaults if not set
+	if warn == 0 {
+		warn = 150000
+	}
+	if max == 0 {
+		max = 200000
+	}
+
+	// Apply provider-specific overrides
+	if pc, ok := c.Providers[provider]; ok {
+		if pc.WarnTokens > 0 {
+			warn = pc.WarnTokens
+		}
+		if pc.MaxTokens > 0 {
+			max = pc.MaxTokens
+		}
+	}
+
+	return warn, max
+}
+
+// IsEnabled returns whether size guards are enabled.
+// Defaults to true if not explicitly set.
+func (c SizeGuardsConfig) IsEnabled() bool {
+	if c.Enabled == nil {
+		return true // Default enabled
+	}
+	return *c.Enabled
+}
+
+// chooseSizeGuards merges SizeGuardsConfig with overlay taking precedence.
+func chooseSizeGuards(base, overlay SizeGuardsConfig) SizeGuardsConfig {
+	result := base
+
+	// Enabled: overlay wins if set (not nil)
+	if overlay.Enabled != nil {
+		result.Enabled = overlay.Enabled
+	}
+
+	// WarnTokens: overlay wins if non-zero
+	if overlay.WarnTokens != 0 {
+		result.WarnTokens = overlay.WarnTokens
+	}
+
+	// MaxTokens: overlay wins if non-zero
+	if overlay.MaxTokens != 0 {
+		result.MaxTokens = overlay.MaxTokens
+	}
+
+	// Providers: merge maps
+	result.Providers = mergeProviderSizeConfigs(base.Providers, overlay.Providers)
+
+	return result
+}
+
+// mergeProviderSizeConfigs merges provider size config maps.
+func mergeProviderSizeConfigs(base, overlay map[string]ProviderSizeConfig) map[string]ProviderSizeConfig {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+	result := make(map[string]ProviderSizeConfig, len(base)+len(overlay))
+	for key, value := range base {
+		result[key] = value
+	}
+	for key, value := range overlay {
+		// Merge individual provider configs
+		if existing, ok := result[key]; ok {
+			if value.WarnTokens != 0 {
+				existing.WarnTokens = value.WarnTokens
+			}
+			if value.MaxTokens != 0 {
+				existing.MaxTokens = value.MaxTokens
+			}
+			result[key] = existing
+		} else {
+			result[key] = value
+		}
+	}
 	return result
 }
