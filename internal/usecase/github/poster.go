@@ -492,6 +492,24 @@ func (p *ReviewPoster) filterSemanticDuplicates(
 		return findings, 0
 	}
 
+	// Build set of original indices that were included in candidates (not overflow).
+	// This prevents overflow findings from being incorrectly marked as duplicates
+	// if they happen to have identical fields to a candidate that was marked duplicate.
+	candidateOriginalIndices := make(map[int]bool)
+	for _, cp := range candidates {
+		for origIdx, pf := range findings {
+			if cp.New.File == pf.Finding.File &&
+				cp.New.LineStart == pf.Finding.LineStart &&
+				cp.New.LineEnd == pf.Finding.LineEnd &&
+				cp.New.Category == pf.Finding.Category &&
+				cp.New.Severity == pf.Finding.Severity &&
+				cp.New.Description == pf.Finding.Description {
+				candidateOriginalIndices[origIdx] = true
+				break // Each candidate maps to one original
+			}
+		}
+	}
+
 	// Call the semantic comparer
 	result, err := p.semanticComparer.Compare(ctx, candidates)
 	if err != nil {
@@ -500,15 +518,18 @@ func (p *ReviewPoster) filterSemanticDuplicates(
 		return findings, 0
 	}
 
-	// Mark original finding indices that are semantic duplicates
+	// Mark original finding indices that are semantic duplicates.
+	// Only consider indices that were actually sent as candidates (not overflow).
 	duplicateOriginalIndices := make(map[int]bool)
 	for _, dup := range result.Duplicates {
 		fp := domain.FingerprintFromFinding(dup.NewFinding)
 		log.Printf("semantic dedup: %s is duplicate of existing (reason: %s)", fp, dup.Reason)
 
 		// Find which original indices correspond to this duplicate's new finding
-		// Match on all identity fields to avoid incorrectly marking findings with different severity/category
 		for origIdx, pf := range findings {
+			if !candidateOriginalIndices[origIdx] {
+				continue // Skip overflow findings
+			}
 			if dup.NewFinding.File == pf.Finding.File &&
 				dup.NewFinding.LineStart == pf.Finding.LineStart &&
 				dup.NewFinding.LineEnd == pf.Finding.LineEnd &&
