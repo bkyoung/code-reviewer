@@ -15,6 +15,7 @@ type Config struct {
 	Observability ObservabilityConfig       `yaml:"observability"`
 	Review        ReviewConfig              `yaml:"review"`
 	Verification  VerificationConfig        `yaml:"verification"`
+	Deduplication DeduplicationConfig       `yaml:"deduplication"`
 }
 
 // ProviderConfig configures a single LLM provider.
@@ -235,6 +236,7 @@ func merge(base, overlay Config) Config {
 	result.Observability = chooseObservability(base.Observability, overlay.Observability)
 	result.Review = chooseReview(base.Review, overlay.Review)
 	result.Verification = chooseVerification(base.Verification, overlay.Verification)
+	result.Deduplication = chooseDeduplication(base.Deduplication, overlay.Deduplication)
 	result.Providers = mergeProviders(base.Providers, overlay.Providers)
 
 	return result
@@ -439,4 +441,89 @@ func hasAnyVerificationConfig(vc VerificationConfig) bool {
 
 func hasConfidenceThresholds(ct ConfidenceThresholds) bool {
 	return ct.Default != 0 || ct.Critical != 0 || ct.High != 0 || ct.Medium != 0 || ct.Low != 0
+}
+
+// DeduplicationConfig configures semantic deduplication of findings.
+// When enabled, findings that overlap spatially but have different fingerprints
+// are compared using an LLM to detect semantic duplicates.
+type DeduplicationConfig struct {
+	// Semantic configures the LLM-based semantic deduplication (stage 2).
+	// Stage 1 (fingerprint matching) is always enabled and has no configuration.
+	Semantic SemanticDeduplicationConfig `yaml:"semantic"`
+}
+
+// SemanticDeduplicationConfig configures LLM-based semantic deduplication.
+type SemanticDeduplicationConfig struct {
+	// Enabled toggles semantic deduplication.
+	// Default: true
+	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// Provider is the LLM provider for semantic comparison (e.g., "anthropic", "openai").
+	// Default: "anthropic"
+	Provider string `yaml:"provider"`
+
+	// Model is the model to use for semantic comparison.
+	// Default: "claude-haiku-4-5-latest"
+	Model string `yaml:"model"`
+
+	// MaxTokens is the maximum context tokens for the deduplication request.
+	// Default: 64000
+	MaxTokens int `yaml:"maxTokens"`
+
+	// LineThreshold is the maximum line distance for findings to be considered
+	// potentially duplicate. Findings further apart are not compared.
+	// Default: 10
+	LineThreshold int `yaml:"lineThreshold"`
+
+	// MaxCandidates is the maximum number of candidate pairs to send for
+	// semantic comparison per review. This acts as a cost guard.
+	// Default: 50
+	MaxCandidates int `yaml:"maxCandidates"`
+}
+
+// chooseDeduplication merges DeduplicationConfig with overlay taking precedence.
+func chooseDeduplication(base, overlay DeduplicationConfig) DeduplicationConfig {
+	result := base
+
+	// Merge semantic config
+	result.Semantic = chooseSemanticDeduplication(base.Semantic, overlay.Semantic)
+
+	return result
+}
+
+// chooseSemanticDeduplication merges SemanticDeduplicationConfig.
+func chooseSemanticDeduplication(base, overlay SemanticDeduplicationConfig) SemanticDeduplicationConfig {
+	result := base
+
+	// Enabled: overlay wins if set (not nil)
+	if overlay.Enabled != nil {
+		result.Enabled = overlay.Enabled
+	}
+
+	// Provider: overlay wins if non-empty
+	if overlay.Provider != "" {
+		result.Provider = overlay.Provider
+	}
+
+	// Model: overlay wins if non-empty
+	if overlay.Model != "" {
+		result.Model = overlay.Model
+	}
+
+	// MaxTokens: overlay wins if non-zero
+	if overlay.MaxTokens != 0 {
+		result.MaxTokens = overlay.MaxTokens
+	}
+
+	// LineThreshold: overlay wins if non-zero
+	if overlay.LineThreshold != 0 {
+		result.LineThreshold = overlay.LineThreshold
+	}
+
+	// MaxCandidates: overlay wins if non-zero
+	if overlay.MaxCandidates != 0 {
+		result.MaxCandidates = overlay.MaxCandidates
+	}
+
+	return result
 }
