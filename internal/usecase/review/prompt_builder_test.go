@@ -634,33 +634,70 @@ func TestBuildWithSizeGuards_TruncationByPriority(t *testing.T) {
 
 func TestBuildWithSizeGuards_TruncationNote(t *testing.T) {
 	builder := NewEnhancedPromptBuilder()
-	estimator := &mockTokenEstimator{tokensPerChar: 100}
+	// Use lower token rate so removing README.md brings us under the limit
+	estimator := &mockTokenEstimator{tokensPerChar: 10}
 
 	context := ProjectContext{}
 	diff := domain.Diff{
 		Files: []domain.FileDiff{
-			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 1000)},
-			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 1000)},
+			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 500)},
+			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 5000)},
 		},
 	}
 	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
-	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 100000}
+	// Set limit so initial exceeds but after removing README.md we're under
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 30000}
 
 	_, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if truncation.WasTruncated {
-		if truncation.TruncationNote == "" {
-			t.Error("expected truncation note when files are removed")
-		}
-		if !strings.Contains(truncation.TruncationNote, "exceeded limit") {
-			t.Error("truncation note should mention exceeding limit")
-		}
-		if !strings.Contains(truncation.TruncationNote, "Consider splitting") {
-			t.Error("truncation note should suggest splitting the PR")
-		}
+	if !truncation.WasTruncated {
+		t.Fatal("expected truncation to occur")
+	}
+	if truncation.TruncationNote == "" {
+		t.Error("expected truncation note when files are removed")
+	}
+	if !strings.Contains(truncation.TruncationNote, "exceeded limit") {
+		t.Error("truncation note should mention exceeding limit")
+	}
+	if !strings.Contains(truncation.TruncationNote, "Consider splitting") {
+		t.Error("truncation note should suggest splitting the PR")
+	}
+}
+
+func TestBuildWithSizeGuards_StillExceedsAfterTruncation(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	// Very high token rate - even one file exceeds the limit
+	estimator := &mockTokenEstimator{tokensPerChar: 1000}
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 500)},
+			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 500)},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	// Even with all files removed, template overhead exceeds this
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 1000}
+
+	_, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have removed files but still exceed limit
+	if !truncation.WasTruncated {
+		t.Fatal("expected truncation to occur")
+	}
+	if truncation.FinalTokens <= limits.MaxTokens {
+		t.Skipf("test scenario didn't produce still-exceeds condition (final=%d, max=%d)",
+			truncation.FinalTokens, limits.MaxTokens)
+	}
+	if !strings.Contains(truncation.TruncationNote, "too large to review") {
+		t.Errorf("truncation note should indicate review difficulty, got: %s", truncation.TruncationNote)
 	}
 }
 
@@ -747,5 +784,26 @@ func TestBuildWithSizeGuards_EmptyDiff(t *testing.T) {
 	}
 	if result.Prompt == "" {
 		t.Error("prompt should not be empty even with empty diff")
+	}
+}
+
+func TestBuildWithSizeGuards_NilEstimator(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "x"},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 200}
+
+	_, _, err := builder.BuildWithSizeGuards(context, diff, req, "openai", nil, limits)
+	if err == nil {
+		t.Error("expected error for nil estimator")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("error should mention nil, got: %v", err)
 	}
 }

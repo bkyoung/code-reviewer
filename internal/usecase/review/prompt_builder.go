@@ -99,6 +99,11 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 	estimator TokenEstimator,
 	limits SizeGuardLimits,
 ) (ProviderRequest, TruncationResult, error) {
+	// Validate inputs
+	if estimator == nil {
+		return ProviderRequest{}, TruncationResult{}, fmt.Errorf("estimator cannot be nil")
+	}
+
 	// Select template for provider
 	templateText := b.defaultTemplate
 	if providerTemplate, ok := b.providerTemplates[providerName]; ok {
@@ -156,15 +161,29 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 	result.FinalTokens = finalTokens
 	result.RemovedFiles = removedFiles
 
+	// Check if we still exceed limits after truncation
+	stillExceedsLimit := finalTokens > limits.MaxTokens
+
 	if result.WasTruncated {
-		result.TruncationNote = fmt.Sprintf(
-			"PR size (%d tokens) exceeded limit (%d tokens). Removed %d file(s) for review: %s. "+
-				"The review may be incomplete. Consider splitting this PR into smaller changes.",
-			originalTokens,
-			limits.MaxTokens,
-			len(removedFiles),
-			strings.Join(removedFiles, ", "),
-		)
+		if stillExceedsLimit {
+			result.TruncationNote = fmt.Sprintf(
+				"PR size (%d tokens) exceeded limit (%d tokens). Removed %d file(s) but still at %d tokens. "+
+					"The review will likely fail or be incomplete. This PR is too large to review effectively.",
+				originalTokens,
+				limits.MaxTokens,
+				len(removedFiles),
+				finalTokens,
+			)
+		} else {
+			result.TruncationNote = fmt.Sprintf(
+				"PR size (%d tokens) exceeded limit (%d tokens). Removed %d file(s) for review: %s. "+
+					"The review may be incomplete. Consider splitting this PR into smaller changes.",
+				originalTokens,
+				limits.MaxTokens,
+				len(removedFiles),
+				strings.Join(removedFiles, ", "),
+			)
+		}
 	}
 
 	return ProviderRequest{
