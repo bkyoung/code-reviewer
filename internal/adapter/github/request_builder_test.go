@@ -632,3 +632,113 @@ func TestHasBlockingFindings(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractCommentDetails(t *testing.T) {
+	tests := []struct {
+		name            string
+		commentBody     string
+		wantNil         bool
+		wantSeverity    string
+		wantCategory    string
+		wantLineStart   int
+		wantLineEnd     int
+		wantDescription string
+	}{
+		{
+			name: "full comment with all fields",
+			commentBody: `**Severity:** high | **Category:** security
+
+📍 Line 42
+
+SQL injection vulnerability detected in user input handling.
+
+**Suggestion:** Use parameterized queries
+
+<!-- CR_FINGERPRINT:abc123def456abc123def456abc12345 -->`,
+			wantNil:         false,
+			wantSeverity:    "high",
+			wantCategory:    "security",
+			wantLineStart:   42,
+			wantLineEnd:     42,
+			wantDescription: "SQL injection vulnerability detected in user input handling.",
+		},
+		{
+			name: "multi-line range",
+			commentBody: `**Severity:** medium | **Category:** complexity
+
+📍 Lines 10-25
+
+Function is too long and should be refactored.
+
+<!-- CR_FINGERPRINT:abc123def456abc123def456abc12345 -->`,
+			wantNil:         false,
+			wantSeverity:    "medium",
+			wantCategory:    "complexity",
+			wantLineStart:   10,
+			wantLineEnd:     25,
+			wantDescription: "Function is too long and should be refactored.",
+		},
+		{
+			name: "no suggestion",
+			commentBody: `**Severity:** low | **Category:** style
+
+📍 Line 5
+
+Variable name could be more descriptive.
+
+<!-- CR_FINGERPRINT:abc123def456abc123def456abc12345 -->`,
+			wantNil:         false,
+			wantSeverity:    "low",
+			wantCategory:    "style",
+			wantLineStart:   5,
+			wantLineEnd:     5,
+			wantDescription: "Variable name could be more descriptive.",
+		},
+		{
+			name: "no category",
+			commentBody: `**Severity:** critical
+
+📍 Line 100
+
+Critical issue found.
+
+<!-- CR_FINGERPRINT:abc123def456abc123def456abc12345 -->`,
+			wantNil:         false,
+			wantSeverity:    "critical",
+			wantCategory:    "",
+			wantLineStart:   100,
+			wantLineEnd:     100,
+			wantDescription: "Critical issue found.",
+		},
+		{
+			name:        "no fingerprint - returns nil",
+			commentBody: "Just a regular comment without fingerprint",
+			wantNil:     true,
+		},
+		{
+			name: "legacy comment format",
+			commentBody: `Some old format comment
+
+without proper fingerprint markers`,
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := github.ExtractCommentDetails(tt.commentBody)
+
+			if tt.wantNil {
+				assert.Nil(t, details, "expected nil details")
+				return
+			}
+
+			require.NotNil(t, details, "expected non-nil details")
+			assert.Equal(t, tt.wantSeverity, details.Severity, "severity mismatch")
+			assert.Equal(t, tt.wantCategory, details.Category, "category mismatch")
+			assert.Equal(t, tt.wantLineStart, details.LineStart, "lineStart mismatch")
+			assert.Equal(t, tt.wantLineEnd, details.LineEnd, "lineEnd mismatch")
+			assert.Equal(t, tt.wantDescription, details.Description, "description mismatch")
+		})
+	}
+}

@@ -300,3 +300,110 @@ func filterInDiff(findings []PositionedFinding) []PositionedFinding {
 	}
 	return result
 }
+
+// ExtractedCommentDetails holds parsed information from a bot comment body.
+// This is used for semantic deduplication where we need to compare finding content.
+type ExtractedCommentDetails struct {
+	Fingerprint domain.FindingFingerprint
+	Severity    string
+	Category    string
+	Description string
+	LineStart   int
+	LineEnd     int
+}
+
+// ExtractCommentDetails parses a bot comment body to extract finding details.
+// Returns nil if the comment doesn't appear to be a structured finding comment.
+func ExtractCommentDetails(body string) *ExtractedCommentDetails {
+	// Must have a fingerprint to be a valid finding comment
+	fp, ok := ExtractFingerprintFromComment(body)
+	if !ok {
+		return nil
+	}
+
+	details := &ExtractedCommentDetails{
+		Fingerprint: fp,
+	}
+
+	// Extract severity: **Severity:** value
+	if idx := strings.Index(body, "**Severity:** "); idx != -1 {
+		start := idx + len("**Severity:** ")
+		end := start
+		for end < len(body) && body[end] != '\n' && body[end] != '|' {
+			end++
+		}
+		details.Severity = strings.TrimSpace(body[start:end])
+	}
+
+	// Extract category: | **Category:** value
+	if idx := strings.Index(body, "**Category:** "); idx != -1 {
+		start := idx + len("**Category:** ")
+		end := start
+		for end < len(body) && body[end] != '\n' {
+			end++
+		}
+		details.Category = strings.TrimSpace(body[start:end])
+	}
+
+	// Extract line reference: 📍 Line X or 📍 Lines X-Y
+	if idx := strings.Index(body, "📍 Line"); idx != -1 {
+		start := idx + len("📍 Line")
+		// Skip optional 's' for "Lines"
+		if start < len(body) && body[start] == 's' {
+			start++
+		}
+		// Skip whitespace
+		for start < len(body) && (body[start] == ' ' || body[start] == '\t') {
+			start++
+		}
+		// Parse first number
+		numStart := start
+		for start < len(body) && body[start] >= '0' && body[start] <= '9' {
+			start++
+		}
+		if numStart < start {
+			// Ignore parse error - LineStart stays 0 if unparseable
+			_, _ = fmt.Sscanf(body[numStart:start], "%d", &details.LineStart)
+			details.LineEnd = details.LineStart // Default to same line
+		}
+		// Check for range: -Y
+		if start < len(body) && body[start] == '-' {
+			start++ // skip '-'
+			numStart = start
+			for start < len(body) && body[start] >= '0' && body[start] <= '9' {
+				start++
+			}
+			if numStart < start {
+				// Ignore parse error - LineEnd stays at LineStart if unparseable
+				_, _ = fmt.Sscanf(body[numStart:start], "%d", &details.LineEnd)
+			}
+		}
+	}
+
+	// Extract description: text between line reference and **Suggestion:** (or fingerprint if no suggestion)
+	descStart := -1
+	if idx := strings.Index(body, "📍 Line"); idx != -1 {
+		// Find end of line reference line
+		lineEnd := strings.Index(body[idx:], "\n")
+		if lineEnd != -1 {
+			descStart = idx + lineEnd + 1
+			// Skip blank line after line reference
+			for descStart < len(body) && body[descStart] == '\n' {
+				descStart++
+			}
+		}
+	}
+
+	if descStart != -1 && descStart < len(body) {
+		// Find end of description (before **Suggestion:** or fingerprint marker)
+		descEnd := len(body)
+		if idx := strings.Index(body[descStart:], "\n**Suggestion:**"); idx != -1 {
+			descEnd = descStart + idx
+		} else if idx := strings.Index(body[descStart:], fingerprintMarkerStart); idx != -1 {
+			descEnd = descStart + idx
+		}
+		details.Description = strings.TrimSpace(body[descStart:descEnd])
+	}
+
+	return details
+}

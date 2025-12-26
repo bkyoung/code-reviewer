@@ -9,6 +9,7 @@ import (
 
 	"github.com/bkyoung/code-reviewer/internal/adapter/github"
 	"github.com/bkyoung/code-reviewer/internal/domain"
+	"github.com/bkyoung/code-reviewer/internal/usecase/dedup"
 )
 
 // ReviewClient defines the interface for interacting with GitHub reviews.
@@ -25,14 +26,49 @@ type ReviewClient interface {
 // filters out findings that are not in the diff, and delegates the actual
 // API call to the ReviewClient.
 type ReviewPoster struct {
-	client ReviewClient
+	client           ReviewClient
+	semanticComparer dedup.SemanticComparer
+	semanticConfig   SemanticDedupConfig
+}
+
+// SemanticDedupConfig configures semantic deduplication behavior.
+type SemanticDedupConfig struct {
+	// LineThreshold is the maximum line distance for candidate pairing.
+	LineThreshold int
+
+	// MaxCandidates limits the number of candidates per review (cost guard).
+	MaxCandidates int
+}
+
+// DefaultSemanticDedupConfig returns sensible defaults for semantic deduplication.
+func DefaultSemanticDedupConfig() SemanticDedupConfig {
+	return SemanticDedupConfig{
+		LineThreshold: 10,
+		MaxCandidates: 50,
+	}
+}
+
+// ReviewPosterOption configures a ReviewPoster.
+type ReviewPosterOption func(*ReviewPoster)
+
+// WithSemanticComparer sets the semantic comparer for LLM-based deduplication.
+func WithSemanticComparer(comparer dedup.SemanticComparer, config SemanticDedupConfig) ReviewPosterOption {
+	return func(p *ReviewPoster) {
+		p.semanticComparer = comparer
+		p.semanticConfig = config
+	}
 }
 
 // NewReviewPoster creates a new ReviewPoster with the given client.
-func NewReviewPoster(client ReviewClient) *ReviewPoster {
-	return &ReviewPoster{
-		client: client,
+func NewReviewPoster(client ReviewClient, opts ...ReviewPosterOption) *ReviewPoster {
+	p := &ReviewPoster{
+		client:         client,
+		semanticConfig: DefaultSemanticDedupConfig(),
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // PostReviewRequest contains all data needed to post a review.
@@ -81,8 +117,12 @@ type PostReviewResult struct {
 	CommentsSkipped int
 
 	// DuplicatesSkipped is the number of findings skipped because they were
-	// already posted in previous reviews (deduplication).
+	// already posted in previous reviews (exact fingerprint match).
 	DuplicatesSkipped int
+
+	// SemanticDuplicatesSkipped is the number of findings skipped because they
+	// were determined to be semantic duplicates of existing findings (LLM-based).
+	SemanticDuplicatesSkipped int
 
 	// Event is the review event that was used.
 	Event github.ReviewEvent
@@ -124,6 +164,7 @@ type PostReviewResult struct {
 func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*PostReviewResult, error) {
 	findings := req.Findings
 	var duplicatesSkipped int
+	var semanticDuplicatesSkipped int
 	var existingStatuses map[domain.FindingFingerprint]domain.FindingStatus
 	var statusCounts StatusCounts
 
@@ -137,8 +178,13 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 		if err != nil {
 			log.Printf("warning: failed to fetch comments: %v", err)
 		} else {
-			// Deduplicate findings
+			// Stage 1: Fingerprint deduplication (exact match)
 			findings, duplicatesSkipped = filterDuplicateFindings(req.Findings, comments, req.BotUsername)
+
+			// Stage 2: Semantic deduplication (LLM-based) - Issue #111
+			if p.semanticComparer != nil && len(findings) > 0 {
+				findings, semanticDuplicatesSkipped = p.filterSemanticDuplicates(ctx, findings, comments, req.BotUsername)
+			}
 
 			// Analyze reply statuses (Issue #108)
 			existingStatuses, statusCounts = analyzeFindingStatuses(comments, req.BotUsername)
@@ -190,16 +236,17 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	}
 
 	return &PostReviewResult{
-		ReviewID:          resp.ID,
-		CommentsPosted:    inDiffCount,
-		CommentsSkipped:   skippedCount,
-		DuplicatesSkipped: duplicatesSkipped,
-		Event:             event,
-		HTMLURL:           resp.HTMLURL,
-		DismissedCount:    dismissedCount,
-		AcknowledgedCount: statusCounts.Acknowledged,
-		DisputedCount:     statusCounts.Disputed,
-		OpenCount:         statusCounts.Open,
+		ReviewID:                  resp.ID,
+		CommentsPosted:            inDiffCount,
+		CommentsSkipped:           skippedCount,
+		DuplicatesSkipped:         duplicatesSkipped,
+		SemanticDuplicatesSkipped: semanticDuplicatesSkipped,
+		Event:                     event,
+		HTMLURL:                   resp.HTMLURL,
+		DismissedCount:            dismissedCount,
+		AcknowledgedCount:         statusCounts.Acknowledged,
+		DisputedCount:             statusCounts.Disputed,
+		OpenCount:                 statusCounts.Open,
 	}, nil
 }
 
@@ -409,4 +456,151 @@ func determineEffectiveEvent(
 	}
 
 	return github.DetermineReviewEventWithActions(effectiveFindings, actions)
+}
+
+// filterSemanticDuplicates uses LLM-based comparison to identify findings that are
+// semantic duplicates of existing comments, even if they have different fingerprints.
+// Returns the filtered findings and count of semantic duplicates found.
+func (p *ReviewPoster) filterSemanticDuplicates(
+	ctx context.Context,
+	findings []github.PositionedFinding,
+	comments []github.PullRequestComment,
+	botUsername string,
+) ([]github.PositionedFinding, int) {
+	// Convert bot comments to ExistingFinding for candidate detection
+	existingFindings := extractExistingFindings(comments, botUsername)
+	if len(existingFindings) == 0 {
+		return findings, 0
+	}
+
+	// Convert positioned findings to domain.Finding for candidate detection
+	var domainFindings []domain.Finding
+	for _, pf := range findings {
+		domainFindings = append(domainFindings, pf.Finding)
+	}
+
+	// Find candidate pairs (spatially overlapping findings)
+	candidates, overflow := dedup.FindCandidates(
+		domainFindings,
+		existingFindings,
+		p.semanticConfig.LineThreshold,
+		p.semanticConfig.MaxCandidates,
+	)
+
+	// If no candidates, nothing to compare
+	if len(candidates) == 0 {
+		return findings, 0
+	}
+
+	// Build set of original indices that were included in candidates (not overflow).
+	// This prevents overflow findings from being incorrectly marked as duplicates
+	// if they happen to have identical fields to a candidate that was marked duplicate.
+	candidateOriginalIndices := make(map[int]bool)
+	for _, cp := range candidates {
+		for origIdx, pf := range findings {
+			if cp.New.File == pf.Finding.File &&
+				cp.New.LineStart == pf.Finding.LineStart &&
+				cp.New.LineEnd == pf.Finding.LineEnd &&
+				cp.New.Category == pf.Finding.Category &&
+				cp.New.Severity == pf.Finding.Severity &&
+				cp.New.Description == pf.Finding.Description {
+				candidateOriginalIndices[origIdx] = true
+				break // Each candidate maps to one original
+			}
+		}
+	}
+
+	// Call the semantic comparer
+	result, err := p.semanticComparer.Compare(ctx, candidates)
+	if err != nil {
+		// Fail open: on error, treat all findings as unique
+		log.Printf("warning: semantic dedup failed: %v (treating all as unique)", err)
+		return findings, 0
+	}
+
+	// Mark original finding indices that are semantic duplicates.
+	// Only consider indices that were actually sent as candidates (not overflow).
+	duplicateOriginalIndices := make(map[int]bool)
+	for _, dup := range result.Duplicates {
+		fp := domain.FingerprintFromFinding(dup.NewFinding)
+		log.Printf("semantic dedup: %s is duplicate of existing (reason: %s)", fp, dup.Reason)
+
+		// Find which original indices correspond to this duplicate's new finding
+		for origIdx, pf := range findings {
+			if !candidateOriginalIndices[origIdx] {
+				continue // Skip overflow findings
+			}
+			if dup.NewFinding.File == pf.Finding.File &&
+				dup.NewFinding.LineStart == pf.Finding.LineStart &&
+				dup.NewFinding.LineEnd == pf.Finding.LineEnd &&
+				dup.NewFinding.Category == pf.Finding.Category &&
+				dup.NewFinding.Severity == pf.Finding.Severity &&
+				dup.NewFinding.Description == pf.Finding.Description {
+				duplicateOriginalIndices[origIdx] = true
+			}
+		}
+	}
+
+	// Overflow findings remain in the original list (couldn't verify them, fail-open)
+	if len(overflow) > 0 {
+		log.Printf("semantic dedup: %d candidates exceeded limit, treating as unique", len(overflow))
+	}
+
+	// Filter out semantic duplicates from positioned findings by index
+	var filtered []github.PositionedFinding
+	var duplicatesFound int
+	for i, pf := range findings {
+		if duplicateOriginalIndices[i] {
+			duplicatesFound++
+			continue
+		}
+		filtered = append(filtered, pf)
+	}
+
+	return filtered, duplicatesFound
+}
+
+// extractExistingFindings converts bot comments to ExistingFinding for semantic comparison.
+func extractExistingFindings(comments []github.PullRequestComment, botUsername string) []dedup.ExistingFinding {
+	var existing []dedup.ExistingFinding
+
+	for _, comment := range comments {
+		// Skip comments not from the bot
+		if !strings.EqualFold(comment.User.Login, botUsername) {
+			continue
+		}
+
+		// Skip replies (only process top-level comments)
+		if comment.InReplyToID != 0 {
+			continue
+		}
+
+		// Extract structured details from comment body
+		details := github.ExtractCommentDetails(comment.Body)
+		if details == nil {
+			continue // Not a structured finding comment
+		}
+
+		// Use line from API if available, otherwise use parsed line
+		lineStart := details.LineStart
+		lineEnd := details.LineEnd
+		if comment.Line != nil && *comment.Line > 0 {
+			lineStart = *comment.Line
+			if lineEnd == 0 {
+				lineEnd = lineStart
+			}
+		}
+
+		existing = append(existing, dedup.ExistingFinding{
+			Fingerprint: details.Fingerprint,
+			File:        comment.Path,
+			LineStart:   lineStart,
+			LineEnd:     lineEnd,
+			Description: details.Description,
+			Severity:    details.Severity,
+			Category:    details.Category,
+		})
+	}
+
+	return existing
 }
