@@ -132,7 +132,7 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 	}
 
 	// Truncation needed - remove files by priority until under limit
-	truncatedDiff, removedFiles := b.truncateDiff(
+	truncatedDiff, removedFiles, truncErr := b.truncateDiff(
 		diff,
 		context,
 		req,
@@ -140,6 +140,9 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 		estimator,
 		limits.MaxTokens,
 	)
+	if truncErr != nil {
+		return ProviderRequest{}, TruncationResult{}, truncErr
+	}
 
 	// Re-render with truncated diff
 	prompt, err = b.renderTemplate(templateText, context, truncatedDiff, req)
@@ -177,6 +180,10 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 // - Priority 2: Configuration files (.yaml, .yml, .json, .toml, etc.)
 // - Priority 1: Test files (files containing "test" or "spec")
 // - Priority 0: Source code (highest priority to keep)
+//
+// Returns an error if template rendering fails, as this indicates a fundamental
+// problem that should be surfaced to the caller rather than silently returning
+// a potentially oversized diff.
 func (b *EnhancedPromptBuilder) truncateDiff(
 	diff domain.Diff,
 	context ProjectContext,
@@ -184,8 +191,11 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	templateText string,
 	estimator TokenEstimator,
 	maxTokens int,
-) (domain.Diff, []string) {
+) (domain.Diff, []string, error) {
 	// Sort files by removal priority (highest priority to remove first)
+	// Note: We create a new slice of prioritizedFile structs. The FileDiff
+	// values are copied by value (shallow copy), which is correct since
+	// FileDiff contains only value types and strings.
 	type prioritizedFile struct {
 		file     domain.FileDiff
 		priority int
@@ -213,6 +223,7 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	// Iteration guard: max iterations = number of files + 1 (for final check)
 	maxIterations := len(diff.Files) + 1
 	iterations := 0
+	var lastRenderErr error
 
 	for len(files) > 0 && iterations < maxIterations {
 		iterations++
@@ -234,14 +245,27 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 
 		prompt, err := b.renderTemplate(templateText, context, testDiff, req)
 		if err != nil {
-			// If we can't render, return what we have
-			break
+			// Track the error but continue trying with fewer files
+			lastRenderErr = err
+			// If we've already removed files, try removing more
+			if len(files) > 0 {
+				fileToRemove := files[0]
+				files = files[1:]
+				removedIndices[fileToRemove.index] = true
+				removedFiles = append(removedFiles, fileToRemove.file.Path)
+				continue
+			}
+			// No more files to remove, propagate the error
+			return domain.Diff{}, nil, fmt.Errorf("template rendering failed during truncation: %w", err)
 		}
+
+		// Rendering succeeded, clear any previous error
+		lastRenderErr = nil
 
 		tokens := estimator.EstimateTokens(prompt)
 		if tokens <= maxTokens {
 			// We're under limit, done
-			return testDiff, removedFiles
+			return testDiff, removedFiles, nil
 		}
 
 		// Remove the file with highest removal priority (first in sorted list)
@@ -258,6 +282,11 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 		}
 	}
 
+	// If we exited the loop with a render error, propagate it
+	if lastRenderErr != nil {
+		return domain.Diff{}, nil, fmt.Errorf("template rendering failed during truncation: %w", lastRenderErr)
+	}
+
 	// Build final file list
 	finalFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
 	for i, f := range diff.Files {
@@ -270,7 +299,7 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 		FromCommitHash: diff.FromCommitHash,
 		ToCommitHash:   diff.ToCommitHash,
 		Files:          finalFiles,
-	}, removedFiles
+	}, removedFiles, nil
 }
 
 // TemplateData holds all data available to templates.
