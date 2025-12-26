@@ -1,0 +1,197 @@
+# PR Code Review Triage Skill
+
+Triage, respond to, and address PR code review feedback including SARIF code scanning alerts.
+
+## Instructions
+
+When this skill is invoked (e.g., "triage the latest pr code review findings"), perform a comprehensive assessment of all feedback on the current PR and take appropriate action.
+
+## Workflow
+
+### Step 1: Gather All Feedback
+
+Collect feedback from multiple sources:
+
+```bash
+# Get current PR number (if on a feature branch)
+PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+
+# Get PR review comments (inline findings)
+gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
+  --jq '.[] | {path: .path, line: .line, body: .body, created_at: .created_at}'
+
+# Get SARIF code scanning check results
+gh api repos/{owner}/{repo}/check-runs/{check_run_id}/annotations \
+  --jq '.[] | {path: .path, line: .start_line, level: .annotation_level, message: .message}'
+
+# Get check run status (find the code scanning check)
+gh pr checks ${PR_NUMBER}
+```
+
+### Step 2: Categorize Findings
+
+Group findings into categories:
+
+| Category | Action | Examples |
+|----------|--------|----------|
+| **Errors/Failures** | Must fix | SARIF errors, blocking check failures |
+| **Security Issues** | Must fix | Vulnerabilities, injection risks, secret exposure |
+| **Bugs** | Should fix | Logic errors, edge cases, null handling |
+| **Valid Suggestions** | Consider fixing | Performance, clarity improvements |
+| **Design Disputes** | Reply inline | Intentional patterns, architecture decisions |
+| **False Positives** | Reply inline | Incorrect analysis, missing context |
+| **Low Priority** | Defer/note | Micro-optimizations, style preferences |
+
+### Step 3: Triage Decision Matrix
+
+For each finding, apply this decision matrix:
+
+```
+Is it a blocking error (SARIF error, check failure)?
+  YES → Fix immediately (highest priority)
+  NO  → Continue...
+
+Is it a security vulnerability?
+  YES → Fix immediately
+  NO  → Continue...
+
+Is it a real bug or logic error?
+  YES → Fix it
+  NO  → Continue...
+
+Is it about intentional design or architecture?
+  YES → Reply with explanation (cite principles: clean architecture, SOLID, etc.)
+  NO  → Continue...
+
+Is it a false positive or lacks context?
+  YES → Reply explaining why (reference existing code, design docs)
+  NO  → Continue...
+
+Is the fix worth the code churn?
+  YES → Fix it
+  NO  → Reply noting it's deferred or accepted risk
+```
+
+### Step 4: Address Valid Findings
+
+For findings that need fixing:
+
+1. **Make the fix** - Edit the relevant code
+2. **Add tests** - If the fix addresses a bug or edge case
+3. **Run validation** - `go test ./... && go build -o cr ./cmd/cr`
+4. **Commit with context** - Reference the finding in commit message
+
+```bash
+git add -A && git commit -m "$(cat <<'EOF'
+fix: <description of fix>
+
+Addresses code review finding: <brief description>
+EOF
+)"
+git push
+```
+
+### Step 5: Reply to Disputed Findings
+
+For findings you won't address, reply inline with clear reasoning:
+
+```bash
+# Reply to a PR comment
+gh api repos/{owner}/{repo}/pulls/{pr}/comments/{comment_id}/replies \
+  -X POST -f body="<explanation>"
+```
+
+**Good reply patterns:**
+
+- **Intentional design:** "This is intentional. [Pattern] is used because [reason]. See [reference]."
+- **Already fixed:** "Addressed in commit [hash]. See lines [X-Y]."
+- **False positive:** "[Function/pattern] actually does [X], not [Y]. The [context] ensures safety."
+- **Acceptable risk:** "This edge case is [acceptable/rare] because [reason]. The cost of fixing outweighs the risk."
+- **Separation of concerns:** "This tests [X], not [Y]. [Y] is tested separately in [location]."
+
+### Step 6: Iterate Until Clean
+
+Continue the triage cycle until:
+- All blocking errors are fixed
+- All check runs pass
+- Remaining findings are either fixed or have replies
+- No new actionable feedback appears
+
+## SARIF Code Scanning Specifics
+
+SARIF alerts have severity levels:
+
+| Level | Meaning | Action |
+|-------|---------|--------|
+| `error` / `failure` | Blocking issue | Must fix to merge |
+| `warning` | Significant concern | Should fix or explain |
+| `note` / `notice` | Observation | Fix if easy, otherwise explain |
+
+**Fetching SARIF annotations:**
+```bash
+# Find the code scanning check run
+CHECK_RUN_ID=$(gh api repos/{owner}/{repo}/commits/{sha}/check-runs \
+  --jq '.check_runs[] | select(.name == "anthropic" or .app.slug == "github-code-scanning") | .id' | head -1)
+
+# Get annotations
+gh api repos/{owner}/{repo}/check-runs/${CHECK_RUN_ID}/annotations \
+  --jq '.[] | {level: .annotation_level, path: .path, line: .start_line, msg: .message}'
+```
+
+## Common Dispute Categories
+
+### Clean Architecture / Design Patterns
+- "Following clean architecture, domain types are data without behavior. Validation belongs in the use case layer."
+- "This is intentional separation of concerns between adapters."
+
+### Premature Optimization
+- "This is a micro-optimization for code called [rarely/once]. The [X] dominates runtime."
+- "Optimizing this path would be premature - [real bottleneck] is orders of magnitude larger."
+
+### Test Design
+- "This tests [specific thing], not [other thing]. Testing both together conflates concerns."
+- "The mock isolates [X] for unit testing. Integration tests cover [Y] separately."
+
+### Error Handling
+- "Fail-fast is intentional. If [condition], it's a configuration error that should surface immediately."
+- "The fallback is documented and logged. Callers can check logs if needed."
+
+### Configuration Design
+- "By design, use `[explicit option]` rather than [implicit behavior]. This keeps the API clear."
+
+## Output Format
+
+After triaging, summarize actions taken:
+
+```markdown
+## PR Review Triage Summary
+
+### Fixed (X issues)
+| Finding | Fix |
+|---------|-----|
+| [description] | [commit/change] |
+
+### Disputed (Y issues)
+| Finding | Response |
+|---------|----------|
+| [description] | [reasoning] |
+
+### Deferred (Z issues)
+| Finding | Reason |
+|---------|--------|
+| [description] | [why deferred] |
+
+### Status
+- Blocking errors: X fixed, Y remaining
+- Check status: [passing/failing]
+- Ready for next review: [yes/no]
+```
+
+## After Loading Context
+
+1. Identify the current PR
+2. Gather all feedback sources
+3. Categorize and triage findings
+4. Fix blocking issues first
+5. Reply to disputed findings
+6. Report summary of actions taken
