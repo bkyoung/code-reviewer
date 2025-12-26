@@ -352,7 +352,7 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	}
 
 	// Compute full diff (DiffComputer is auto-wired in NewOrchestrator when Git is provided)
-	diff, err := o.deps.DiffComputer.ComputeDiffForReview(ctx, req, nil)
+	diff, err := o.deps.DiffComputer.ComputeDiffForReview(ctx, req)
 	if err != nil {
 		return Result{}, err
 	}

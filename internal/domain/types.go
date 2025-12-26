@@ -103,6 +103,33 @@ func hashFinding(input FindingInput) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// FindingFingerprint uniquely identifies a finding across reviews.
+// It's stable across line number changes if the code intent remains the same.
+type FindingFingerprint string
+
+// NewFindingFingerprint creates a stable identifier for a finding.
+// Uses file path + category + severity + normalized description prefix.
+// Line numbers are intentionally excluded so the fingerprint remains stable
+// when code shifts due to unrelated changes.
+func NewFindingFingerprint(file, category, severity, description string) FindingFingerprint {
+	// Use first 100 characters of description to allow minor wording changes.
+	// Use rune slicing to avoid splitting multi-byte UTF-8 characters.
+	descRunes := []rune(description)
+	descPrefix := description
+	if len(descRunes) > 100 {
+		descPrefix = string(descRunes[:100])
+	}
+
+	payload := fmt.Sprintf("%s|%s|%s|%s", file, category, severity, descPrefix)
+	sum := sha256.Sum256([]byte(payload))
+	return FindingFingerprint(hex.EncodeToString(sum[:16])) // 32 hex chars
+}
+
+// FingerprintFromFinding creates a fingerprint from an existing Finding.
+func FingerprintFromFinding(f Finding) FindingFingerprint {
+	return NewFindingFingerprint(f.File, f.Category, f.Severity, f.Description)
+}
+
 // Fingerprint returns a stable identifier for this finding.
 // The fingerprint is based on file, category, severity, and description prefix.
 // Line numbers are intentionally excluded so the fingerprint remains stable

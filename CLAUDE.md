@@ -3,7 +3,7 @@
 **Project:** AI-Powered Code Review Tool
 **Status:** Phase 2 In Progress
 **Version:** v0.3.0
-**Last Updated:** 2025-12-25
+**Last Updated:** 2025-12-26
 
 ---
 
@@ -35,17 +35,24 @@
 | 2.2 Review API | ✅ Complete |
 | 2.3 Request Changes | ✅ Complete |
 | 2.4 Skip Trigger | Not Started |
-| 2.5 Incremental Reviews | 🚧 Epic #53 |
-| 2.6 Finding Deduplication | 🚧 Epic #53 |
+| 2.5 Incremental Reviews | ⏸️ Deferred |
+| 2.6 Finding Deduplication | 🚧 Epic #106 |
 | 2.7 PR Size Guards | Not Started |
+| 2.8 Finding Verification | ✅ Complete |
 
-### Current Focus: Epic #53
+### v0.3.0 Features
 
-**Finding Deduplication and Status Tracking** - Unified approach for incremental reviews and deduplication with platform-agnostic architecture:
+- **Finding Verification:** Agent-based verification with confidence thresholds filters out false positives
+- **Fingerprinting:** Stable finding identifiers embedded in GitHub comments (infrastructure for future dedup)
 
-- **Domain:** Fingerprinting, status model (shared across platforms)
-- **Use Case:** Deduplication logic, incremental diffing (shared)
-- **Adapters:** GitHub (PR comment) and SQLite (CLI) - different storage, same logic
+### Current Focus: Deduplication v2 (Epic #106)
+
+**Comment-Based State** - Using GitHub PR comments as the state store instead of separate tracking:
+
+- **#107** Simplified deduplication - check existing comments before posting
+- **#108** Status-aware deduplication - detect replies, accurate review status
+
+Key insight: Fingerprints are already embedded in posted comments. We can read PR state instead of maintaining separate tracking.
 
 ### Key Documents
 

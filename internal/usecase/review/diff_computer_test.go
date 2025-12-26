@@ -10,17 +10,11 @@ import (
 
 // mockGitEngine is a test double for GitEngine.
 type mockGitEngine struct {
-	cumulativeDiff     domain.Diff
-	cumulativeDiffErr  error
-	incrementalDiff    domain.Diff
-	incrementalDiffErr error
-	commitExistsMap    map[string]bool
-	commitExistsErr    error // If set, CommitExists returns this error
+	cumulativeDiff    domain.Diff
+	cumulativeDiffErr error
 
 	// Call counters for verification
-	cumulativeDiffCalls  int
-	incrementalDiffCalls int
-	commitExistsCalls    int
+	cumulativeDiffCalls int
 }
 
 func (m *mockGitEngine) GetCumulativeDiff(ctx context.Context, baseRef, targetRef string, includeUncommitted bool) (domain.Diff, error) {
@@ -29,26 +23,20 @@ func (m *mockGitEngine) GetCumulativeDiff(ctx context.Context, baseRef, targetRe
 }
 
 func (m *mockGitEngine) GetIncrementalDiff(ctx context.Context, fromCommit, toCommit string) (domain.Diff, error) {
-	m.incrementalDiffCalls++
-	return m.incrementalDiff, m.incrementalDiffErr
+	// Not used by simplified DiffComputer
+	return domain.Diff{}, nil
 }
 
 func (m *mockGitEngine) CommitExists(ctx context.Context, commitSHA string) (bool, error) {
-	m.commitExistsCalls++
-	if m.commitExistsErr != nil {
-		return false, m.commitExistsErr
-	}
-	if m.commitExistsMap == nil {
-		return false, nil
-	}
-	return m.commitExistsMap[commitSHA], nil
+	// Not used by simplified DiffComputer
+	return true, nil
 }
 
 func (m *mockGitEngine) CurrentBranch(ctx context.Context) (string, error) {
 	return "main", nil
 }
 
-func TestDiffComputer_NoTrackingState_ReturnsFullDiff(t *testing.T) {
+func TestDiffComputer_ComputeDiffForReview_ReturnsFullDiff(t *testing.T) {
 	ctx := context.Background()
 	expectedDiff := domain.Diff{
 		FromCommitHash: "base123",
@@ -67,7 +55,7 @@ func TestDiffComputer_NoTrackingState_ReturnsFullDiff(t *testing.T) {
 		CommitSHA: "head456",
 	}
 
-	diff, err := computer.ComputeDiffForReview(ctx, req, nil)
+	diff, err := computer.ComputeDiffForReview(ctx, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,140 +66,12 @@ func TestDiffComputer_NoTrackingState_ReturnsFullDiff(t *testing.T) {
 	if len(diff.Files) != 1 {
 		t.Errorf("Files count = %d, want 1", len(diff.Files))
 	}
-}
-
-func TestDiffComputer_EmptyReviewedCommits_ReturnsFullDiff(t *testing.T) {
-	ctx := context.Background()
-	expectedDiff := domain.Diff{
-		FromCommitHash: "base123",
-		ToCommitHash:   "head456",
-		Files: []domain.FileDiff{
-			{Path: "main.go", Status: domain.FileStatusModified},
-		},
-	}
-
-	git := &mockGitEngine{cumulativeDiff: expectedDiff}
-	computer := NewDiffComputer(git)
-
-	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: "head456",
-	}
-
-	// State with empty reviewed commits (first review)
-	state := &TrackingState{
-		ReviewedCommits: []string{},
-	}
-
-	diff, err := computer.ComputeDiffForReview(ctx, req, state)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if diff.ToCommitHash != expectedDiff.ToCommitHash {
-		t.Errorf("ToCommitHash = %s, want %s", diff.ToCommitHash, expectedDiff.ToCommitHash)
+	if git.cumulativeDiffCalls != 1 {
+		t.Errorf("GetCumulativeDiff called %d times, want 1", git.cumulativeDiffCalls)
 	}
 }
 
-func TestDiffComputer_HasReviewedCommit_ReturnsIncrementalDiff(t *testing.T) {
-	ctx := context.Background()
-	lastReviewedCommit := "reviewed123"
-	currentHead := "head456"
-
-	fullDiff := domain.Diff{
-		FromCommitHash: "base",
-		ToCommitHash:   currentHead,
-		Files: []domain.FileDiff{
-			{Path: "old_change.go", Status: domain.FileStatusModified},
-			{Path: "new_change.go", Status: domain.FileStatusAdded},
-		},
-	}
-
-	incrementalDiff := domain.Diff{
-		FromCommitHash: lastReviewedCommit,
-		ToCommitHash:   currentHead,
-		Files: []domain.FileDiff{
-			{Path: "new_change.go", Status: domain.FileStatusAdded},
-		},
-	}
-
-	git := &mockGitEngine{
-		cumulativeDiff:  fullDiff,
-		incrementalDiff: incrementalDiff,
-		commitExistsMap: map[string]bool{lastReviewedCommit: true},
-	}
-	computer := NewDiffComputer(git)
-
-	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: currentHead,
-	}
-
-	state := &TrackingState{
-		ReviewedCommits: []string{"older123", lastReviewedCommit},
-	}
-
-	diff, err := computer.ComputeDiffForReview(ctx, req, state)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should return incremental diff, not full diff
-	if diff.FromCommitHash != lastReviewedCommit {
-		t.Errorf("FromCommitHash = %s, want %s (incremental)", diff.FromCommitHash, lastReviewedCommit)
-	}
-	if len(diff.Files) != 1 {
-		t.Errorf("Files count = %d, want 1 (only new changes)", len(diff.Files))
-	}
-	if len(diff.Files) > 0 && diff.Files[0].Path != "new_change.go" {
-		t.Errorf("File path = %s, want new_change.go", diff.Files[0].Path)
-	}
-}
-
-func TestDiffComputer_ForcePush_FallsBackToFullDiff(t *testing.T) {
-	ctx := context.Background()
-	lastReviewedCommit := "reviewed123"
-	currentHead := "head456"
-
-	fullDiff := domain.Diff{
-		FromCommitHash: "base",
-		ToCommitHash:   currentHead,
-		Files: []domain.FileDiff{
-			{Path: "main.go", Status: domain.FileStatusModified},
-		},
-	}
-
-	git := &mockGitEngine{
-		cumulativeDiff: fullDiff,
-		// Commit no longer exists (force push)
-		commitExistsMap: map[string]bool{lastReviewedCommit: false},
-	}
-	computer := NewDiffComputer(git)
-
-	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: currentHead,
-	}
-
-	state := &TrackingState{
-		ReviewedCommits: []string{lastReviewedCommit},
-	}
-
-	diff, err := computer.ComputeDiffForReview(ctx, req, state)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should fall back to full diff since commit doesn't exist
-	if diff.FromCommitHash != fullDiff.FromCommitHash {
-		t.Errorf("FromCommitHash = %s, want %s (full diff)", diff.FromCommitHash, fullDiff.FromCommitHash)
-	}
-}
-
-func TestDiffComputer_CumulativeDiffError_ReturnsError(t *testing.T) {
+func TestDiffComputer_ComputeDiffForReview_PropagatesError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("git error")
 
@@ -224,7 +84,7 @@ func TestDiffComputer_CumulativeDiffError_ReturnsError(t *testing.T) {
 		CommitSHA: "head456",
 	}
 
-	_, err := computer.ComputeDiffForReview(ctx, req, nil)
+	_, err := computer.ComputeDiffForReview(ctx, req)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -233,113 +93,35 @@ func TestDiffComputer_CumulativeDiffError_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestDiffComputer_IncrementalDiffError_ReturnsError(t *testing.T) {
+func TestDiffComputer_ComputeDiffForReview_WithUncommittedChanges(t *testing.T) {
 	ctx := context.Background()
-	lastReviewedCommit := "reviewed123"
-	expectedErr := errors.New("incremental diff error")
-
-	git := &mockGitEngine{
-		incrementalDiffErr: expectedErr,
-		commitExistsMap:    map[string]bool{lastReviewedCommit: true},
-	}
-	computer := NewDiffComputer(git)
-
-	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: "head456",
-	}
-
-	state := &TrackingState{
-		ReviewedCommits: []string{lastReviewedCommit},
-	}
-
-	_, err := computer.ComputeDiffForReview(ctx, req, state)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("error = %v, want %v", err, expectedErr)
-	}
-}
-
-func TestDiffComputer_SameCommitAlreadyReviewed_ReturnsEmptyDiff(t *testing.T) {
-	ctx := context.Background()
-	currentHead := "head456"
-
-	git := &mockGitEngine{}
-	computer := NewDiffComputer(git)
-
-	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: currentHead,
-	}
-
-	// Current head was already reviewed
-	state := &TrackingState{
-		ReviewedCommits: []string{currentHead},
-	}
-
-	diff, err := computer.ComputeDiffForReview(ctx, req, state)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should return empty diff (nothing new to review)
-	if len(diff.Files) != 0 {
-		t.Errorf("Files count = %d, want 0 (nothing new)", len(diff.Files))
-	}
-
-	// Verify early return - no git methods should be called
-	if git.commitExistsCalls != 0 {
-		t.Errorf("CommitExists called %d times, want 0 (early return)", git.commitExistsCalls)
-	}
-	if git.incrementalDiffCalls != 0 {
-		t.Errorf("GetIncrementalDiff called %d times, want 0 (early return)", git.incrementalDiffCalls)
-	}
-	if git.cumulativeDiffCalls != 0 {
-		t.Errorf("GetCumulativeDiff called %d times, want 0 (early return)", git.cumulativeDiffCalls)
-	}
-}
-
-func TestDiffComputer_CommitExistsError_FallsBackToFullDiff(t *testing.T) {
-	ctx := context.Background()
-	lastReviewedCommit := "reviewed123"
-	currentHead := "head456"
-
-	fullDiff := domain.Diff{
-		FromCommitHash: "base",
-		ToCommitHash:   currentHead,
+	expectedDiff := domain.Diff{
+		FromCommitHash: "base123",
+		ToCommitHash:   "head456",
 		Files: []domain.FileDiff{
 			{Path: "main.go", Status: domain.FileStatusModified},
+			{Path: "uncommitted.go", Status: domain.FileStatusAdded},
 		},
 	}
 
-	git := &mockGitEngine{
-		cumulativeDiff: fullDiff,
-		// Simulate error checking commit existence (e.g., repo access issue)
-		commitExistsErr: errors.New("failed to open repo"),
-	}
+	git := &mockGitEngine{cumulativeDiff: expectedDiff}
 	computer := NewDiffComputer(git)
 
 	req := BranchRequest{
-		BaseRef:   "main",
-		TargetRef: "feature",
-		CommitSHA: currentHead,
+		BaseRef:            "main",
+		TargetRef:          "feature",
+		CommitSHA:          "head456",
+		IncludeUncommitted: true,
 	}
 
-	state := &TrackingState{
-		ReviewedCommits: []string{lastReviewedCommit},
-	}
-
-	diff, err := computer.ComputeDiffForReview(ctx, req, state)
+	diff, err := computer.ComputeDiffForReview(ctx, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should fall back to full diff when CommitExists returns an error
-	if diff.FromCommitHash != fullDiff.FromCommitHash {
-		t.Errorf("FromCommitHash = %s, want %s (full diff fallback)", diff.FromCommitHash, fullDiff.FromCommitHash)
+	// Verify diff is returned correctly - the mock doesn't differentiate
+	// based on IncludeUncommitted, but the real implementation does
+	if len(diff.Files) != 2 {
+		t.Errorf("Files count = %d, want 2", len(diff.Files))
 	}
 }

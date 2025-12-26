@@ -60,7 +60,7 @@
 
 ## 2. Current State Assessment
 
-### What Exists (v0.2.3)
+### What Exists (v0.3.0)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -73,8 +73,10 @@
 | Code review initiation | ✅ Complete | Uses GitHub Review API |
 | Review summary | ✅ Complete | Programmatic summary from findings |
 | Stale review dismissal | ✅ Complete | Auto-dismisses on new push |
-| Incremental reviews | ✅ Complete | PR #65 - DiffComputer, TrackingStore integration |
-| Finding deduplication | ❌ Missing | Key MVP gap |
+| Finding verification | ✅ Complete | Agent-based verification with confidence thresholds |
+| Finding fingerprinting | ✅ Complete | Stable identifiers embedded in GitHub comments |
+| Incremental reviews | ⏸️ Deferred | Tracking code removed, needs new design |
+| Finding deduplication | ⏸️ Deferred | Tracking code removed, needs new design |
 
 ### Gap Analysis
 
@@ -84,31 +86,18 @@
 | ~~Code review API~~ | ~~Uses `gh pr comment`~~ | ~~Use `gh api` for reviews~~ | ✅ Done |
 | ~~Request changes~~ | ~~Never blocks~~ | ~~Configurable blocking~~ | ✅ Done |
 | Skip trigger | None | `[skip code-review]` | Low |
-| ~~Incremental reviews~~ | ~~Full PR every time~~ | ~~Only new changes since last review~~ | ✅ Done |
-| Finding deduplication | Re-flags same issues | Track + skip duplicates | High |
+| Incremental reviews | Full PR every time | Only new changes since last review | ⏸️ Deferred |
+| Finding deduplication | Re-flags same issues | Track + skip duplicates | 🚧 Epic #106 |
 | PR size guards | May fail on large PRs | Warn, truncate, or split | Medium |
-| Multi-cycle reviews | Single pass, noisy | Converge on high-confidence findings | High |
 
-### Architecture Decision: Platform Adaptability
+### Deduplication v2: Comment-Based State (Epic #106)
 
-Epic #53 unifies incremental reviews and finding deduplication with a clean architecture:
+The initial approach (Epic #53) was removed. The new approach uses **GitHub PR comments as the state store**:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        DOMAIN LAYER                         │
-│  Finding, TrackedFinding, FindingStatus, Fingerprint        │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                       USE CASE LAYER                        │
-│  Deduplication logic, incremental diffing, orchestration    │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                       ADAPTER LAYER                         │
-│  GitHub (PR comment)  │  SQLite (CLI)  │  Future platforms  │
-└─────────────────────────────────────────────────────────────┘
-```
+1. **#107 - Simplified Deduplication:** Check existing comments before posting; skip if fingerprint exists
+2. **#108 - Status-Aware Deduplication:** Detect acknowledgment/dispute replies; accurate review status
 
-This ensures CLI parity and future multi-platform support without rewriting core logic.
+Key insight: Fingerprints are already embedded in posted comments. We can read PR state instead of maintaining separate tracking. This integrates cleanly with the verifier pipeline.
 
 ---
 
@@ -133,14 +122,12 @@ This ensures CLI parity and future multi-platform support without rewriting core
 | 2.2: Review API | Use GitHub review API instead of comments | ✅ Complete |
 | 2.3: Request Changes | Configurable blocking behavior | ✅ Complete |
 | 2.4: Skip Trigger | `[skip code-review]` support | Not Started |
-| 2.5: Incremental Reviews | Only review new changes since last review | ✅ Complete |
-| 2.6: Finding Deduplication | Track findings, don't re-flag same issues | 🚧 In Progress |
+| 2.5: Incremental Reviews | Only review new changes since last review | ⏸️ Deferred |
+| 2.6: Finding Deduplication | Track findings, don't re-flag same issues | 🚧 Epic #106 |
 | 2.7: PR Size Guards | Warn/truncate/split large PRs | Not Started |
-| 2.8: Multi-Cycle Reviews | Confidence-filtered initial reviews | Not Started |
+| 2.8: Finding Verification | Filter false positives via agent verification | ✅ Complete |
 
-**Epic #53** unifies milestones 2.5 and 2.6 with a platform-agnostic architecture (see above).
-
-**Why these are MVP:** Without incremental reviews and deduplication, every push triggers a full re-review with duplicate findings. The tool becomes unusable noise.
+**Note:** Milestones 2.5 and 2.6 were deferred after v0.3.0. The initial tracking approach (Epic #53) was incompatible with the verifier architecture. Finding verification (2.8) was prioritized instead, significantly reducing noise by filtering low-confidence findings.
 
 ### Phase 3: Production Hardening (v0.4.x)
 **Status:** Future
