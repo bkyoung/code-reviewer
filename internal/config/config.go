@@ -565,6 +565,7 @@ type ProviderSizeConfig struct {
 
 // GetLimitsForProvider returns the warn and max token limits for a specific provider.
 // If the provider has overrides configured, those are used; otherwise global defaults apply.
+// If warn > max (misconfiguration), the values are swapped to maintain the invariant.
 func (c SizeGuardsConfig) GetLimitsForProvider(provider string) (warn, max int) {
 	warn, max = c.WarnTokens, c.MaxTokens
 
@@ -584,6 +585,11 @@ func (c SizeGuardsConfig) GetLimitsForProvider(provider string) (warn, max int) 
 		if pc.MaxTokens > 0 {
 			max = pc.MaxTokens
 		}
+	}
+
+	// Ensure warn <= max invariant (swap if misconfigured)
+	if warn > max {
+		warn, max = max, warn
 	}
 
 	return warn, max

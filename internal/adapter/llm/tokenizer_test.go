@@ -80,3 +80,45 @@ func TestEstimateTokens_LargeInput(t *testing.T) {
 		t.Errorf("EstimateTokens() for large input = %d, expected 10000-25000", tokens)
 	}
 }
+
+func TestEstimateTokens_SpecialTokens(t *testing.T) {
+	// Test that special token sequences don't cause panics
+	// These are OpenAI special tokens that could appear in user code
+	specialInputs := []string{
+		"<|endoftext|>",
+		"<|fim_prefix|>code<|fim_suffix|>more<|fim_middle|>",
+		"Normal text with <|endoftext|> embedded",
+		"func main() { // <|endoftext|> in comment }",
+	}
+
+	for _, input := range specialInputs {
+		t.Run(input[:min(20, len(input))], func(t *testing.T) {
+			// Should not panic
+			tokens := EstimateTokens(input)
+			if tokens < 1 {
+				t.Errorf("EstimateTokens() = %d for non-empty input, want >= 1", tokens)
+			}
+		})
+	}
+}
+
+func TestEstimateTokens_ShortNonEmpty(t *testing.T) {
+	// Test that very short inputs still return at least 1 token
+	shortInputs := []string{"a", "ab", "x", " "}
+
+	for _, input := range shortInputs {
+		t.Run(input, func(t *testing.T) {
+			tokens := EstimateTokens(input)
+			if tokens < 1 {
+				t.Errorf("EstimateTokens(%q) = %d, want >= 1", input, tokens)
+			}
+		})
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

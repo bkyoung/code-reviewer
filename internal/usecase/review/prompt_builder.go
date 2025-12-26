@@ -189,7 +189,7 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	type prioritizedFile struct {
 		file     domain.FileDiff
 		priority int
-		index    int
+		index    int // Original index for stable removal
 	}
 
 	files := make([]prioritizedFile, len(diff.Files))
@@ -207,10 +207,24 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	})
 
 	var removedFiles []string
-	currentFiles := make([]domain.FileDiff, len(diff.Files))
-	copy(currentFiles, diff.Files)
+	// Track which original indices have been removed
+	removedIndices := make(map[int]bool)
 
-	for len(files) > 0 {
+	// Iteration guard: max iterations = number of files + 1 (for final check)
+	maxIterations := len(diff.Files) + 1
+	iterations := 0
+
+	for len(files) > 0 && iterations < maxIterations {
+		iterations++
+
+		// Build current file list excluding removed indices
+		currentFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
+		for i, f := range diff.Files {
+			if !removedIndices[i] {
+				currentFiles = append(currentFiles, f)
+			}
+		}
+
 		// Try building prompt with current files
 		testDiff := domain.Diff{
 			FromCommitHash: diff.FromCommitHash,
@@ -234,26 +248,28 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 		fileToRemove := files[0]
 		files = files[1:]
 
-		// Remove from currentFiles
-		newFiles := make([]domain.FileDiff, 0, len(currentFiles)-1)
-		for _, f := range currentFiles {
-			if f.Path != fileToRemove.file.Path {
-				newFiles = append(newFiles, f)
-			}
-		}
-		currentFiles = newFiles
+		// Mark as removed by original index (handles duplicate paths correctly)
+		removedIndices[fileToRemove.index] = true
 		removedFiles = append(removedFiles, fileToRemove.file.Path)
 
 		// Avoid removing all files
-		if len(currentFiles) == 0 {
+		if len(removedIndices) >= len(diff.Files) {
 			break
+		}
+	}
+
+	// Build final file list
+	finalFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
+	for i, f := range diff.Files {
+		if !removedIndices[i] {
+			finalFiles = append(finalFiles, f)
 		}
 	}
 
 	return domain.Diff{
 		FromCommitHash: diff.FromCommitHash,
 		ToCommitHash:   diff.ToCommitHash,
-		Files:          currentFiles,
+		Files:          finalFiles,
 	}, removedFiles
 }
 

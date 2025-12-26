@@ -579,19 +579,38 @@ func TestSizeGuardsConfigPartialProviderOverride(t *testing.T) {
 		MaxTokens:  200000,
 		Providers: map[string]config.ProviderSizeConfig{
 			"openai": {
-				MaxTokens: 120000, // Only override max
+				MaxTokens: 120000, // Only override max (creates warn > max situation)
 			},
 		},
 	}
 
 	warn, max := cfg.GetLimitsForProvider("openai")
 
-	// Warn should use global, max should use provider override
-	if warn != 150000 {
-		t.Errorf("expected warn tokens 150000 (global), got %d", warn)
+	// When max < warn due to partial override, values are swapped
+	// to maintain warn <= max invariant
+	if warn != 120000 {
+		t.Errorf("expected warn tokens 120000 (swapped from max), got %d", warn)
 	}
-	if max != 120000 {
-		t.Errorf("expected max tokens 120000 (provider override), got %d", max)
+	if max != 150000 {
+		t.Errorf("expected max tokens 150000 (swapped from warn), got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigSwapsWarnMaxIfMisconfigured(t *testing.T) {
+	// Test that warn > max is corrected by swapping
+	cfg := config.SizeGuardsConfig{
+		WarnTokens: 200000, // Warn is higher than max (misconfigured)
+		MaxTokens:  100000,
+	}
+
+	warn, max := cfg.GetLimitsForProvider("openai")
+
+	// Should swap to maintain warn <= max
+	if warn != 100000 {
+		t.Errorf("expected warn tokens 100000 after swap, got %d", warn)
+	}
+	if max != 200000 {
+		t.Errorf("expected max tokens 200000 after swap, got %d", max)
 	}
 }
 

@@ -68,7 +68,7 @@ func buildContent(artifact domain.MarkdownArtifact) string {
 		if len(artifact.Review.TruncatedFiles) > 0 {
 			builder.WriteString("**Files excluded from review:**\n")
 			for _, f := range artifact.Review.TruncatedFiles {
-				builder.WriteString(fmt.Sprintf("- `%s`\n", f))
+				builder.WriteString(fmt.Sprintf("- `%s`\n", escapeMarkdownInlineCode(f)))
 			}
 			builder.WriteString("\n")
 		}
@@ -140,4 +140,13 @@ func sanitise(value string) string {
 	value = strings.ReplaceAll(value, string(filepath.Separator), "-")
 	value = strings.ReplaceAll(value, " ", "-")
 	return value
+}
+
+// escapeMarkdownInlineCode escapes characters that could break inline code formatting.
+// Specifically handles backticks and newlines which would break `code` spans.
+func escapeMarkdownInlineCode(s string) string {
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
 }

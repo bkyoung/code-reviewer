@@ -30,11 +30,25 @@ func getEncoder() (*tiktoken.Tiktoken, error) {
 // use similar tokenization approaches. For exact counts, providers can
 // implement their own estimation using native APIs.
 func EstimateTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+
 	enc, err := getEncoder()
 	if err != nil {
-		// Fallback to character-based estimate if tiktoken fails
-		return len(text) / 4
+		// Fallback to conservative character-based estimate if tiktoken fails.
+		// Use len/3 (more conservative than len/4) to reduce risk of underestimation.
+		// Ensure minimum of 1 for any non-empty text.
+		estimate := len(text) / 3
+		if estimate < 1 {
+			estimate = 1
+		}
+		return estimate
 	}
-	tokens := enc.Encode(text, nil, nil)
+
+	// Allow all special tokens to prevent panics on inputs containing
+	// sequences like "<|endoftext|>". For estimation purposes, we want
+	// to count these as tokens rather than crash.
+	tokens := enc.Encode(text, []string{"all"}, nil)
 	return len(tokens)
 }
