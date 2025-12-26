@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
@@ -66,4 +67,10 @@ func (p *Provider) Review(ctx context.Context, req review.ProviderRequest) (doma
 		Summary:      response.Summary,
 		Findings:     response.Findings,
 	}, nil
+}
+
+// EstimateTokens returns an estimated token count using tiktoken.
+// OpenAI uses cl100k_base encoding for GPT-4 models.
+func (p *Provider) EstimateTokens(text string) int {
+	return llm.EstimateTokens(text)
 }

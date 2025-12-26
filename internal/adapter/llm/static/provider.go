@@ -3,6 +3,7 @@ package static
 import (
 	"context"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
 )
@@ -40,4 +41,9 @@ func (p *Provider) Review(ctx context.Context, req review.ProviderRequest) (doma
 		Summary:      "This is a static review from a mock provider.",
 		Findings:     []domain.Finding{finding},
 	}, nil
+}
+
+// EstimateTokens returns 0 for the static mock provider.
+func (p *Provider) EstimateTokens(text string) int {
+	return llm.EstimateTokens(text)
 }

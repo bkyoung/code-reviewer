@@ -35,6 +35,10 @@ type GitEngine interface {
 // Provider defines the outbound port for LLM reviews.
 type Provider interface {
 	Review(ctx context.Context, req ProviderRequest) (domain.Review, error)
+
+	// EstimateTokens returns an estimated token count for the given text.
+	// Used for size budgeting to prevent context overflow.
+	EstimateTokens(text string) int
 }
 
 // Merger defines the outbound port for merging reviews.
