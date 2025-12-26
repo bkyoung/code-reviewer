@@ -150,7 +150,7 @@ func TestContainsPhrase(t *testing.T) {
 
 		// Edge cases
 		{"empty text", "", "acknowledged", false},
-		{"empty phrase", "some text", "", true}, // strings.Index returns 0 for empty
+		{"empty phrase", "some text", "", false}, // guarded against empty phrase
 		{"phrase longer than text", "ack", "acknowledged", false},
 	}
 

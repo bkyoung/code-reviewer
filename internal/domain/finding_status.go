@@ -2,7 +2,6 @@ package domain
 
 import (
 	"strings"
-	"unicode"
 )
 
 // FindingStatus represents the status of a finding based on reply analysis.
@@ -135,50 +134,54 @@ func DetectStatusFromReplies(replies []string) FindingStatus {
 }
 
 // containsPhrase checks if text contains the phrase with word boundaries.
-// A word boundary is either the start/end of string or a non-alphanumeric character.
+// A word boundary is either the start/end of string or a non-word byte.
+//
+// This implementation uses byte-based boundary checks because all keywords
+// are ASCII. This avoids UTF-8 multi-byte issues while remaining correct
+// for the intended use case (English keywords in code review comments).
 func containsPhrase(text, phrase string) bool {
-	idx := strings.Index(text, phrase)
-	if idx == -1 {
+	// Guard against empty phrase (strings.Index returns 0 for empty)
+	if phrase == "" {
 		return false
 	}
 
-	// Check left boundary
-	if idx > 0 {
-		prevChar := rune(text[idx-1])
-		if isWordChar(prevChar) {
-			// Not at word boundary, search for next occurrence
-			return containsPhraseFrom(text, phrase, idx+1)
+	// Iterative search: find all occurrences and check boundaries
+	searchStart := 0
+	for searchStart <= len(text)-len(phrase) {
+		idx := strings.Index(text[searchStart:], phrase)
+		if idx == -1 {
+			return false
 		}
+
+		// Convert to absolute index
+		absIdx := searchStart + idx
+		endIdx := absIdx + len(phrase)
+
+		// Check left boundary (byte-based, ASCII-safe)
+		leftOK := absIdx == 0 || !isWordByte(text[absIdx-1])
+
+		// Check right boundary (byte-based, ASCII-safe)
+		rightOK := endIdx == len(text) || !isWordByte(text[endIdx])
+
+		if leftOK && rightOK {
+			return true
+		}
+
+		// Move past this occurrence and continue searching
+		searchStart = absIdx + 1
 	}
 
-	// Check right boundary
-	endIdx := idx + len(phrase)
-	if endIdx < len(text) {
-		nextChar := rune(text[endIdx])
-		if isWordChar(nextChar) {
-			// Not at word boundary, search for next occurrence
-			return containsPhraseFrom(text, phrase, idx+1)
-		}
-	}
-
-	return true
+	return false
 }
 
-// containsPhraseFrom searches for phrase starting from offset.
-func containsPhraseFrom(text, phrase string, offset int) bool {
-	if offset >= len(text) {
-		return false
-	}
-	remaining := text[offset:]
-	idx := strings.Index(remaining, phrase)
-	if idx == -1 {
-		return false
-	}
-	// Recurse with absolute position
-	return containsPhrase(text[offset:], phrase)
-}
-
-// isWordChar returns true if the rune is a letter, digit, or underscore.
-func isWordChar(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+// isWordByte returns true if the byte is an ASCII word character (a-z, A-Z, 0-9, _).
+// This is intentionally byte-based rather than rune-based because:
+// 1. All keywords are ASCII, so boundary checks only need ASCII awareness
+// 2. Byte-based checks avoid UTF-8 multi-byte indexing issues
+// 3. Non-ASCII bytes (>127) are not word characters, so they act as boundaries
+func isWordByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') ||
+		b == '_'
 }
