@@ -164,12 +164,12 @@ func TestExtractJSON(t *testing.T) {
 
 func TestParseComparisonResponse(t *testing.T) {
 	tests := []struct {
-		name              string
-		response          string
-		candidates        []dedup.CandidatePair
-		wantDuplicates    int
-		wantUnique        int
-		wantError         bool
+		name           string
+		response       string
+		candidates     []dedup.CandidatePair
+		wantDuplicates int
+		wantUnique     int
+		wantError      bool
 	}{
 		{
 			name:     "all duplicates",
