@@ -182,8 +182,7 @@ func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
 // - Priority 0: Source code (highest priority to keep)
 //
 // Returns an error if template rendering fails, as this indicates a fundamental
-// problem that should be surfaced to the caller rather than silently returning
-// a potentially oversized diff.
+// problem (like template syntax errors) that cannot be fixed by removing files.
 func (b *EnhancedPromptBuilder) truncateDiff(
 	diff domain.Diff,
 	context ProjectContext,
@@ -192,10 +191,12 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	estimator TokenEstimator,
 	maxTokens int,
 ) (domain.Diff, []string, error) {
+	// Handle empty diff case
+	if len(diff.Files) == 0 {
+		return diff, nil, nil
+	}
+
 	// Sort files by removal priority (highest priority to remove first)
-	// Note: We create a new slice of prioritizedFile structs. The FileDiff
-	// values are copied by value (shallow copy), which is correct since
-	// FileDiff contains only value types and strings.
 	type prioritizedFile struct {
 		file     domain.FileDiff
 		priority int
@@ -217,80 +218,54 @@ func (b *EnhancedPromptBuilder) truncateDiff(
 	})
 
 	var removedFiles []string
-	// Track which original indices have been removed
 	removedIndices := make(map[int]bool)
 
-	// Iteration guard: max iterations = number of files + 1 (for final check)
-	maxIterations := len(diff.Files) + 1
-	iterations := 0
-	var lastRenderErr error
-
-	for len(files) > 0 && iterations < maxIterations {
-		iterations++
-
+	// Maximum iterations = number of files (one removal per iteration max)
+	for i := 0; i <= len(diff.Files); i++ {
 		// Build current file list excluding removed indices
 		currentFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
-		for i, f := range diff.Files {
-			if !removedIndices[i] {
+		for idx, f := range diff.Files {
+			if !removedIndices[idx] {
 				currentFiles = append(currentFiles, f)
 			}
 		}
 
-		// Try building prompt with current files
 		testDiff := domain.Diff{
 			FromCommitHash: diff.FromCommitHash,
 			ToCommitHash:   diff.ToCommitHash,
 			Files:          currentFiles,
 		}
 
+		// Try rendering - if this fails, it's a template error, not a size issue
 		prompt, err := b.renderTemplate(templateText, context, testDiff, req)
 		if err != nil {
-			// Track the error but continue trying with fewer files
-			lastRenderErr = err
-			// If we've already removed files, try removing more
-			if len(files) > 0 {
-				fileToRemove := files[0]
-				files = files[1:]
-				removedIndices[fileToRemove.index] = true
-				removedFiles = append(removedFiles, fileToRemove.file.Path)
-				continue
-			}
-			// No more files to remove, propagate the error
-			return domain.Diff{}, nil, fmt.Errorf("template rendering failed during truncation: %w", err)
+			// Template errors cannot be fixed by removing files - fail fast
+			return domain.Diff{}, nil, fmt.Errorf("template rendering failed: %w", err)
 		}
-
-		// Rendering succeeded, clear any previous error
-		lastRenderErr = nil
 
 		tokens := estimator.EstimateTokens(prompt)
 		if tokens <= maxTokens {
-			// We're under limit, done
+			// Success - we're under the limit
 			return testDiff, removedFiles, nil
 		}
 
-		// Remove the file with highest removal priority (first in sorted list)
+		// Still too large - remove next lowest priority file if available
+		if len(files) == 0 {
+			// No more files to remove, return what we have
+			// (caller will see it's still over limit via token count)
+			return testDiff, removedFiles, nil
+		}
+
 		fileToRemove := files[0]
 		files = files[1:]
-
-		// Mark as removed by original index (handles duplicate paths correctly)
 		removedIndices[fileToRemove.index] = true
 		removedFiles = append(removedFiles, fileToRemove.file.Path)
-
-		// Avoid removing all files
-		if len(removedIndices) >= len(diff.Files) {
-			break
-		}
 	}
 
-	// If we exited the loop with a render error, propagate it
-	if lastRenderErr != nil {
-		return domain.Diff{}, nil, fmt.Errorf("template rendering failed during truncation: %w", lastRenderErr)
-	}
-
-	// Build final file list
+	// Fallback: return remaining files (should not reach here normally)
 	finalFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
-	for i, f := range diff.Files {
-		if !removedIndices[i] {
+	for idx, f := range diff.Files {
+		if !removedIndices[idx] {
 			finalFiles = append(finalFiles, f)
 		}
 	}

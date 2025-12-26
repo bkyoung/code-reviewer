@@ -701,3 +701,51 @@ func TestBuildWithSizeGuards_PreservesSourceCode(t *testing.T) {
 		t.Error("prompt should contain main.go")
 	}
 }
+
+func TestBuildWithSizeGuards_TemplateError(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	// Set a broken template that will fail to parse/execute
+	builder.SetProviderTemplate("broken", "{{.InvalidField}}")
+
+	estimator := &mockTokenEstimator{tokensPerChar: 1}
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "x"},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 200}
+
+	_, _, err := builder.BuildWithSizeGuards(context, diff, req, "broken", estimator, limits)
+	if err == nil {
+		t.Error("expected error for broken template")
+	}
+	if !strings.Contains(err.Error(), "template") {
+		t.Errorf("error should mention template, got: %v", err)
+	}
+}
+
+func TestBuildWithSizeGuards_EmptyDiff(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	estimator := &mockTokenEstimator{tokensPerChar: 1}
+
+	context := ProjectContext{}
+	diff := domain.Diff{Files: []domain.FileDiff{}} // Empty
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 200}
+
+	result, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if truncation.WasTruncated {
+		t.Error("empty diff should not be truncated")
+	}
+	if len(truncation.RemovedFiles) > 0 {
+		t.Error("empty diff should not have removed files")
+	}
+	if result.Prompt == "" {
+		t.Error("prompt should not be empty even with empty diff")
+	}
+}
