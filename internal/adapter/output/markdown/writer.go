@@ -56,6 +56,27 @@ func buildContent(artifact domain.MarkdownArtifact) string {
 	builder.WriteString(fmt.Sprintf("- Target: %s\n", artifact.TargetRef))
 	builder.WriteString(fmt.Sprintf("- Cost: $%.4f\n\n", artifact.Review.Cost))
 
+	// Include truncation warning if PR was too large
+	if artifact.Review.WasTruncated {
+		builder.WriteString("## ⚠️ Size Limit Warning\n\n")
+		builder.WriteString("> **This review may be incomplete.** ")
+		builder.WriteString("The PR exceeded the token limit and some files were excluded from review.\n\n")
+		if artifact.Review.TruncationWarning != "" {
+			builder.WriteString(artifact.Review.TruncationWarning)
+			builder.WriteString("\n\n")
+		}
+		if len(artifact.Review.TruncatedFiles) > 0 {
+			builder.WriteString("**Files excluded from review:**\n")
+			for _, f := range artifact.Review.TruncatedFiles {
+				builder.WriteString(fmt.Sprintf("- `%s`\n", f))
+			}
+			builder.WriteString("\n")
+		}
+	} else if artifact.Review.SizeLimitExceeded {
+		builder.WriteString("## ⚠️ Large PR Notice\n\n")
+		builder.WriteString("> This PR is approaching the token limit. Consider splitting into smaller PRs for more thorough reviews.\n\n")
+	}
+
 	// Include verification summary if verification was performed
 	if len(artifact.Review.DiscoveryFindings) > 0 {
 		builder.WriteString("## Verification Summary\n\n")

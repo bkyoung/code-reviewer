@@ -521,3 +521,96 @@ func extractSection(markdown, headerName string) string {
 
 	return section.String()
 }
+
+// =============================================================================
+// Truncation Warning Tests
+// =============================================================================
+
+func TestFormatTruncationWarning_NotTruncated(t *testing.T) {
+	review := domain.Review{
+		Summary:           "All good",
+		SizeLimitExceeded: false,
+		WasTruncated:      false,
+	}
+
+	result := github.FormatTruncationWarning(review)
+
+	if result != "" {
+		t.Errorf("expected empty result for non-truncated review, got %q", result)
+	}
+}
+
+func TestFormatTruncationWarning_WarnOnly(t *testing.T) {
+	review := domain.Review{
+		Summary:           "All good",
+		SizeLimitExceeded: true,
+		WasTruncated:      false,
+	}
+
+	result := github.FormatTruncationWarning(review)
+
+	if !strings.Contains(result, "Large PR Notice") {
+		t.Errorf("expected 'Large PR Notice' for warn-only, got %q", result)
+	}
+	if strings.Contains(result, "Incomplete Review") {
+		t.Error("should not contain 'Incomplete Review' for warn-only")
+	}
+}
+
+func TestFormatTruncationWarning_Truncated(t *testing.T) {
+	review := domain.Review{
+		Summary:           "Partial review",
+		SizeLimitExceeded: true,
+		WasTruncated:      true,
+		TruncatedFiles:    []string{"README.md", "docs/guide.md", "CHANGELOG.md"},
+		TruncationWarning: "PR size exceeded limit. 3 files removed.",
+	}
+
+	result := github.FormatTruncationWarning(review)
+
+	// Should contain warning header
+	if !strings.Contains(result, "Incomplete Review") {
+		t.Errorf("expected 'Incomplete Review' header, got %q", result)
+	}
+
+	// Should contain warning message
+	if !strings.Contains(result, "exceeded the token limit") {
+		t.Errorf("expected token limit warning, got %q", result)
+	}
+
+	// Should contain custom truncation warning
+	if !strings.Contains(result, "3 files removed") {
+		t.Errorf("expected custom truncation warning, got %q", result)
+	}
+
+	// Should list truncated files
+	if !strings.Contains(result, "README.md") {
+		t.Errorf("expected README.md in truncated files, got %q", result)
+	}
+	if !strings.Contains(result, "docs/guide.md") {
+		t.Errorf("expected docs/guide.md in truncated files, got %q", result)
+	}
+	if !strings.Contains(result, "CHANGELOG.md") {
+		t.Errorf("expected CHANGELOG.md in truncated files, got %q", result)
+	}
+}
+
+func TestFormatTruncationWarning_TruncatedWithoutWarningMessage(t *testing.T) {
+	review := domain.Review{
+		Summary:           "Partial review",
+		SizeLimitExceeded: true,
+		WasTruncated:      true,
+		TruncatedFiles:    []string{"docs/large-file.md"},
+		TruncationWarning: "", // No custom warning
+	}
+
+	result := github.FormatTruncationWarning(review)
+
+	// Should still have the header and list of files
+	if !strings.Contains(result, "Incomplete Review") {
+		t.Errorf("expected 'Incomplete Review' header, got %q", result)
+	}
+	if !strings.Contains(result, "docs/large-file.md") {
+		t.Errorf("expected truncated file in output, got %q", result)
+	}
+}

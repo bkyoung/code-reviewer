@@ -155,6 +155,42 @@ func escapeMarkdownTableCell(s string) string {
 }
 
 // =============================================================================
+// Truncation Warning Helpers
+// =============================================================================
+
+// FormatTruncationWarning creates a warning section for reviews that were truncated.
+// Returns an empty string if the review was not truncated.
+func FormatTruncationWarning(r domain.Review) string {
+	if !r.WasTruncated && !r.SizeLimitExceeded {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	if r.WasTruncated {
+		sb.WriteString("## ⚠️ Incomplete Review\n\n")
+		sb.WriteString("> **Warning:** This PR exceeded the token limit. ")
+		sb.WriteString("Some files were excluded from review.\n\n")
+		if r.TruncationWarning != "" {
+			sb.WriteString(r.TruncationWarning)
+			sb.WriteString("\n\n")
+		}
+		if len(r.TruncatedFiles) > 0 {
+			sb.WriteString("**Files excluded from review:**\n")
+			for _, f := range r.TruncatedFiles {
+				sb.WriteString(fmt.Sprintf("- `%s`\n", escapeMarkdownInlineCode(f)))
+			}
+			sb.WriteString("\n")
+		}
+	} else if r.SizeLimitExceeded {
+		sb.WriteString("> ⚠️ **Large PR Notice:** This PR is approaching the token limit. ")
+		sb.WriteString("Consider splitting into smaller PRs for more thorough reviews.\n\n")
+	}
+
+	return sb.String()
+}
+
+// =============================================================================
 // Programmatic Summary Builder
 // =============================================================================
 

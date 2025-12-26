@@ -46,6 +46,14 @@ type Review struct {
 	DiscoveryFindings  []CandidateFinding `json:"discoveryFindings,omitempty"`
 	VerifiedFindings   []VerifiedFinding  `json:"verifiedFindings,omitempty"`
 	ReportableFindings []VerifiedFinding  `json:"reportableFindings,omitempty"`
+
+	// Size guard fields (Epic #7 - PR size guards)
+	// When the PR exceeds token limits, files may be truncated to fit.
+	// These fields capture what was truncated and warn users about incomplete reviews.
+	SizeLimitExceeded bool     `json:"sizeLimitExceeded,omitempty"` // True if prompt exceeded warn threshold
+	WasTruncated      bool     `json:"wasTruncated,omitempty"`      // True if files were removed to fit
+	TruncatedFiles    []string `json:"truncatedFiles,omitempty"`    // List of files removed for size
+	TruncationWarning string   `json:"truncationWarning,omitempty"` // User-friendly warning message
 }
 
 // Finding represents a single issue detected by an LLM.
