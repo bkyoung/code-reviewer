@@ -16,6 +16,7 @@ type ReviewClient interface {
 	CreateReview(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
 	ListReviews(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error)
 	DismissReview(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error)
+	ListPullRequestComments(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error)
 }
 
 // ReviewPoster orchestrates posting code review findings to GitHub as PR reviews.
@@ -78,6 +79,10 @@ type PostReviewResult struct {
 	// CommentsSkipped is the number of findings skipped (not in diff).
 	CommentsSkipped int
 
+	// DuplicatesSkipped is the number of findings skipped because they were
+	// already posted in previous reviews (deduplication).
+	DuplicatesSkipped int
+
 	// Event is the review event that was used.
 	Event github.ReviewEvent
 
@@ -92,19 +97,41 @@ type PostReviewResult struct {
 // It converts domain findings to GitHub review comments, determines the
 // appropriate review event based on severity, and posts the review.
 //
-// If BotUsername is set, previous reviews from that bot are dismissed AFTER
-// posting the new review succeeds. This ensures the PR always has at least one
-// review signal - if posting fails, previous reviews are preserved.
-// Dismiss failures are logged but do not affect the result.
+// If BotUsername is set:
+//   - Existing bot comments are fetched to deduplicate findings (Issue #107)
+//   - Previous reviews from that bot are dismissed AFTER posting succeeds
+//
+// This ensures the PR always has at least one review signal - if posting fails,
+// previous reviews are preserved. Dismiss failures are logged but do not affect
+// the result.
 //
 // Findings without a DiffPosition (not in diff) are silently skipped and
-// counted in CommentsSkipped.
+// counted in CommentsSkipped. Findings already posted (matching fingerprint)
+// are counted in DuplicatesSkipped.
 func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*PostReviewResult, error) {
-	// Count in-diff vs out-of-diff findings
-	inDiffCount := github.CountInDiffFindings(req.Findings)
-	skippedCount := len(req.Findings) - inDiffCount
+	findings := req.Findings
+	var duplicatesSkipped int
 
-	// Determine review event
+	// Deduplicate findings if BotUsername is set
+	if req.BotUsername != "" {
+		var err error
+		findings, duplicatesSkipped, err = p.deduplicateFindings(ctx, req)
+		if err != nil {
+			// Log and continue without deduplication
+			log.Printf("warning: failed to fetch comments for deduplication: %v", err)
+			findings = req.Findings
+			duplicatesSkipped = 0
+		}
+	}
+
+	// Count in-diff vs out-of-diff findings (after deduplication)
+	inDiffCount := github.CountInDiffFindings(findings)
+	skippedCount := len(findings) - inDiffCount
+
+	// Determine review event using ORIGINAL findings, not deduplicated ones.
+	// This ensures the review status reflects the actual state of the code.
+	// If there are existing high-severity findings (already posted), we still
+	// need to REQUEST_CHANGES to keep the PR blocked.
 	var event github.ReviewEvent
 	if req.OverrideEvent != "" {
 		event = req.OverrideEvent
@@ -120,7 +147,7 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 		CommitSHA:  req.CommitSHA,
 		Event:      event,
 		Summary:    req.Review.Summary,
-		Findings:   req.Findings,
+		Findings:   findings,
 	}
 
 	resp, err := p.client.CreateReview(ctx, input)
@@ -137,12 +164,13 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	}
 
 	return &PostReviewResult{
-		ReviewID:        resp.ID,
-		CommentsPosted:  inDiffCount,
-		CommentsSkipped: skippedCount,
-		Event:           event,
-		HTMLURL:         resp.HTMLURL,
-		DismissedCount:  dismissedCount,
+		ReviewID:          resp.ID,
+		CommentsPosted:    inDiffCount,
+		CommentsSkipped:   skippedCount,
+		DuplicatesSkipped: duplicatesSkipped,
+		Event:             event,
+		HTMLURL:           resp.HTMLURL,
+		DismissedCount:    dismissedCount,
 	}, nil
 }
 
@@ -196,4 +224,58 @@ func shouldDismissReview(review github.ReviewSummary, botUsername string) bool {
 
 	// Dismiss all other states (APPROVED, CHANGES_REQUESTED, COMMENTED)
 	return true
+}
+
+// deduplicateFindings fetches existing bot comments from the PR and filters out
+// any findings that have already been posted (based on fingerprint matching).
+// Returns the filtered findings, the count of duplicates skipped, and any error.
+func (p *ReviewPoster) deduplicateFindings(
+	ctx context.Context,
+	req PostReviewRequest,
+) ([]github.PositionedFinding, int, error) {
+	// Fetch existing PR comments
+	comments, err := p.client.ListPullRequestComments(ctx, req.Owner, req.Repo, req.PullNumber)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Extract fingerprints from bot's comments
+	existingFingerprints := extractBotFingerprints(comments, req.BotUsername)
+	if len(existingFingerprints) == 0 {
+		return req.Findings, 0, nil
+	}
+
+	// Filter out findings that already have comments
+	var filtered []github.PositionedFinding
+	var duplicatesSkipped int
+	for _, pf := range req.Findings {
+		fp := domain.FingerprintFromFinding(pf.Finding)
+		if existingFingerprints[fp] {
+			duplicatesSkipped++
+			continue
+		}
+		filtered = append(filtered, pf)
+	}
+
+	return filtered, duplicatesSkipped, nil
+}
+
+// extractBotFingerprints extracts fingerprints from comments authored by the bot.
+// Returns a map of fingerprints for O(1) lookup.
+func extractBotFingerprints(comments []github.PullRequestComment, botUsername string) map[domain.FindingFingerprint]bool {
+	fingerprints := make(map[domain.FindingFingerprint]bool)
+
+	for _, comment := range comments {
+		// Skip comments not from the bot (case-insensitive)
+		if !strings.EqualFold(comment.User.Login, botUsername) {
+			continue
+		}
+
+		// Try to extract fingerprint from comment body
+		if fp, ok := github.ExtractFingerprintFromComment(comment.Body); ok {
+			fingerprints[fp] = true
+		}
+	}
+
+	return fingerprints
 }

@@ -17,12 +17,13 @@ import (
 // MockReviewClient is a mock implementation of the ReviewClient interface.
 // It uses a mutex to protect shared state for thread safety in concurrent scenarios.
 type MockReviewClient struct {
-	mu                sync.Mutex
-	CreateReviewFunc  func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
-	ListReviewsFunc   func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error)
-	DismissReviewFunc func(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error)
-	LastInput         *github.CreateReviewInput
-	DismissedIDs      []int64
+	mu                          sync.Mutex
+	CreateReviewFunc            func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error)
+	ListReviewsFunc             func(ctx context.Context, owner, repo string, pullNumber int) ([]github.ReviewSummary, error)
+	DismissReviewFunc           func(ctx context.Context, owner, repo string, pullNumber int, reviewID int64, message string) (*github.DismissReviewResponse, error)
+	ListPullRequestCommentsFunc func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error)
+	LastInput                   *github.CreateReviewInput
+	DismissedIDs                []int64
 }
 
 func (m *MockReviewClient) CreateReview(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
@@ -50,6 +51,13 @@ func (m *MockReviewClient) DismissReview(ctx context.Context, owner, repo string
 		return m.DismissReviewFunc(ctx, owner, repo, pullNumber, reviewID, message)
 	}
 	return &github.DismissReviewResponse{ID: reviewID, State: "DISMISSED"}, nil
+}
+
+func (m *MockReviewClient) ListPullRequestComments(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+	if m.ListPullRequestCommentsFunc != nil {
+		return m.ListPullRequestCommentsFunc(ctx, owner, repo, pullNumber)
+	}
+	return []github.PullRequestComment{}, nil
 }
 
 // GetDismissedIDs returns a copy of dismissed IDs in a thread-safe manner.
@@ -650,4 +658,301 @@ func TestReviewPoster_PostReview_SkipsNewlyCreatedReview(t *testing.T) {
 	assert.Contains(t, client.GetDismissedIDs(), int64(100))
 	assert.Contains(t, client.GetDismissedIDs(), int64(101))
 	assert.NotContains(t, client.GetDismissedIDs(), newReviewID, "newly created review should not be dismissed")
+}
+
+// ==== Deduplication Tests (Issue #107) ====
+
+func TestReviewPoster_PostReview_DeduplicatesFindings(t *testing.T) {
+	// Simulate a previous bot comment with an embedded fingerprint.
+	// The fingerprint matches one of the findings we're about to post.
+	finding1 := makeFinding("file1.go", 10, "high", "Issue already posted")
+	finding2 := makeFinding("file2.go", 20, "medium", "New issue")
+
+	// Create a comment body with embedded fingerprint for finding1
+	fp1 := domain.FingerprintFromFinding(finding1)
+	existingCommentBody := "**Severity:** high\n\n<!-- CR_FINGERPRINT:" + string(fp1) + " -->"
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{
+					ID:   1,
+					Body: existingCommentBody,
+					User: github.User{Login: "github-actions[bot]"},
+				},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123, HTMLURL: "https://example.com/review"}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding1, DiffPosition: diff.IntPtr(5)},  // Already posted - should be skipped
+		{Finding: finding2, DiffPosition: diff.IntPtr(15)}, // New - should be posted
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "github-actions[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.CommentsPosted, "only new finding should be posted")
+	assert.Equal(t, 1, result.DuplicatesSkipped, "one duplicate should be skipped")
+	// Verify the client only received 1 finding (the non-duplicate)
+	require.NotNil(t, client.LastInput)
+	assert.Len(t, client.LastInput.Findings, 1)
+}
+
+func TestReviewPoster_PostReview_NoDuplicatesWhenNoExistingComments(t *testing.T) {
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{}, nil // No existing comments
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "Issue 1"), DiffPosition: diff.IntPtr(5)},
+		{Finding: makeFinding("file2.go", 20, "medium", "Issue 2"), DiffPosition: diff.IntPtr(15)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "github-actions[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.CommentsPosted)
+	assert.Equal(t, 0, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_IgnoresNonBotComments(t *testing.T) {
+	finding := makeFinding("file1.go", 10, "high", "Issue from human")
+	fp := domain.FingerprintFromFinding(finding)
+	humanCommentBody := "**Severity:** high\n\n<!-- CR_FINGERPRINT:" + string(fp) + " -->"
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{
+					ID:   1,
+					Body: humanCommentBody,
+					User: github.User{Login: "human-user"}, // Not the bot
+				},
+			}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "github-actions[bot]",
+	})
+
+	require.NoError(t, err)
+	// The finding should NOT be deduplicated because the comment is from a human
+	assert.Equal(t, 1, result.CommentsPosted)
+	assert.Equal(t, 0, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_IgnoresCommentsWithoutFingerprint(t *testing.T) {
+	// Legacy comments without fingerprints should be ignored
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{
+					ID:   1,
+					Body: "This is an old comment without a fingerprint",
+					User: github.User{Login: "github-actions[bot]"},
+				},
+			}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "New issue"), DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "github-actions[bot]",
+	})
+
+	require.NoError(t, err)
+	// The finding should be posted because no valid fingerprint was found
+	assert.Equal(t, 1, result.CommentsPosted)
+	assert.Equal(t, 0, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_DeduplicationDisabledWithoutBotUsername(t *testing.T) {
+	// When BotUsername is empty, deduplication is disabled
+	listCalled := false
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			listCalled = true
+			return []github.PullRequestComment{}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "Issue"), DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "", // No bot username
+	})
+
+	require.NoError(t, err)
+	assert.False(t, listCalled, "ListPullRequestComments should not be called when BotUsername is empty")
+	assert.Equal(t, 1, result.CommentsPosted)
+	assert.Equal(t, 0, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_CommentFetchErrorContinues(t *testing.T) {
+	// If fetching comments fails, continue without deduplication
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return nil, errors.New("API error")
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: makeFinding("file1.go", 10, "high", "Issue"), DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	// Should succeed despite fetch error
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.CommentsPosted)
+	assert.Equal(t, 0, result.DuplicatesSkipped)
+}
+
+func TestReviewPoster_PostReview_AllFindingsDeduplicated(t *testing.T) {
+	// When all findings are duplicates, an empty review should still be posted.
+	// Critically, the review Event should still reflect the original findings'
+	// severity to keep the PR blocked if there are unresolved high-severity issues.
+	finding := makeFinding("file1.go", 10, "high", "Already posted")
+	fp := domain.FingerprintFromFinding(finding)
+	existingCommentBody := "<!-- CR_FINGERPRINT:" + string(fp) + " -->"
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{
+					ID:   1,
+					Body: existingCommentBody,
+					User: github.User{Login: "bot[bot]"},
+				},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "bot[bot]",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.CommentsPosted)
+	assert.Equal(t, 1, result.DuplicatesSkipped)
+	// Event should still be REQUEST_CHANGES because the original finding is high severity,
+	// even though no new comments are being posted (the finding was already posted).
+	assert.Equal(t, github.EventRequestChanges, result.Event, "should still block PR for unresolved high-severity findings")
+	// Verify the review was still created (with no comments)
+	require.NotNil(t, client.LastInput)
+	assert.Len(t, client.LastInput.Findings, 0)
+}
+
+func TestReviewPoster_PostReview_CaseInsensitiveBotUsernameForDedup(t *testing.T) {
+	// Bot username matching should be case-insensitive
+	finding := makeFinding("file1.go", 10, "high", "Issue")
+	fp := domain.FingerprintFromFinding(finding)
+	existingCommentBody := "<!-- CR_FINGERPRINT:" + string(fp) + " -->"
+
+	client := &MockReviewClient{
+		ListPullRequestCommentsFunc: func(ctx context.Context, owner, repo string, pullNumber int) ([]github.PullRequestComment, error) {
+			return []github.PullRequestComment{
+				{
+					ID:   1,
+					Body: existingCommentBody,
+					User: github.User{Login: "GitHub-Actions[BOT]"}, // Different case
+				},
+			}, nil
+		},
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return &github.CreateReviewResponse{ID: 123}, nil
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	findings := []github.PositionedFinding{
+		{Finding: finding, DiffPosition: diff.IntPtr(5)},
+	}
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:       "owner",
+		Repo:        "repo",
+		PullNumber:  1,
+		CommitSHA:   "sha",
+		Findings:    findings,
+		BotUsername: "github-actions[bot]", // lowercase
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.CommentsPosted, "finding should be deduplicated despite case difference")
+	assert.Equal(t, 1, result.DuplicatesSkipped)
 }
