@@ -512,3 +512,192 @@ func TestPromptTemplate_CodeFirst(t *testing.T) {
 		t.Error("Template should mention reviewing source code files")
 	}
 }
+
+// mockTokenEstimator is a simple mock for testing size guards.
+type mockTokenEstimator struct {
+	tokensPerChar float64
+}
+
+func (m *mockTokenEstimator) EstimateTokens(text string) int {
+	return int(float64(len(text)) * m.tokensPerChar)
+}
+
+func TestBuildWithSizeGuards_NoTruncation(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	estimator := &mockTokenEstimator{tokensPerChar: 0.25} // 4 chars per token
+
+	context := ProjectContext{
+		CustomInstructions: "Focus on security",
+	}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "small patch"},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	limits := SizeGuardLimits{WarnTokens: 10000, MaxTokens: 20000}
+
+	result, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if truncation.WasTruncated {
+		t.Error("expected no truncation for small prompt")
+	}
+	if truncation.WasWarned {
+		t.Error("expected no warning for small prompt")
+	}
+	if len(truncation.RemovedFiles) > 0 {
+		t.Errorf("expected no removed files, got %v", truncation.RemovedFiles)
+	}
+	if result.Prompt == "" {
+		t.Error("expected non-empty prompt")
+	}
+}
+
+func TestBuildWithSizeGuards_WarnOnly(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	// Very high tokens per char to trigger warning without truncation
+	estimator := &mockTokenEstimator{tokensPerChar: 10}
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: "patch"},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	// Set warn low, max high - should warn but not truncate
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 1000000}
+
+	_, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !truncation.WasWarned {
+		t.Error("expected warning for prompt exceeding warn threshold")
+	}
+	if truncation.WasTruncated {
+		t.Error("expected no truncation when under max threshold")
+	}
+}
+
+func TestBuildWithSizeGuards_TruncationByPriority(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	// Use a very high token rate to force truncation
+	estimator := &mockTokenEstimator{tokensPerChar: 100}
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 100)},        // Priority 0: Source
+			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 100)},      // Priority 4: Doc
+			{Path: "config.yaml", Status: "modified", Patch: strings.Repeat("x", 100)},    // Priority 2: Config
+			{Path: "test_helper.go", Status: "modified", Patch: strings.Repeat("x", 100)}, // Priority 1: Test
+			{Path: "Dockerfile", Status: "modified", Patch: strings.Repeat("x", 100)},     // Priority 3: Build
+			{Path: "docs/design.md", Status: "modified", Patch: strings.Repeat("x", 100)}, // Priority 4: Doc
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	// Very low max to force significant truncation
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 50000}
+
+	_, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !truncation.WasTruncated {
+		t.Error("expected truncation for large prompt")
+	}
+	if len(truncation.RemovedFiles) == 0 {
+		t.Error("expected some files to be removed")
+	}
+
+	// Verify documentation files are removed first (higher priority to remove)
+	// and source code files are kept (lower priority to remove)
+	removedSet := make(map[string]bool)
+	for _, f := range truncation.RemovedFiles {
+		removedSet[f] = true
+	}
+
+	// Docs should be removed before source code
+	if removedSet["main.go"] && !removedSet["README.md"] {
+		t.Error("source code (main.go) should not be removed before documentation (README.md)")
+	}
+	if removedSet["main.go"] && !removedSet["docs/design.md"] {
+		t.Error("source code (main.go) should not be removed before documentation (docs/design.md)")
+	}
+}
+
+func TestBuildWithSizeGuards_TruncationNote(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	estimator := &mockTokenEstimator{tokensPerChar: 100}
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 1000)},
+			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 1000)},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	limits := SizeGuardLimits{WarnTokens: 100, MaxTokens: 100000}
+
+	_, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if truncation.WasTruncated {
+		if truncation.TruncationNote == "" {
+			t.Error("expected truncation note when files are removed")
+		}
+		if !strings.Contains(truncation.TruncationNote, "exceeded limit") {
+			t.Error("truncation note should mention exceeding limit")
+		}
+		if !strings.Contains(truncation.TruncationNote, "Consider splitting") {
+			t.Error("truncation note should suggest splitting the PR")
+		}
+	}
+}
+
+func TestBuildWithSizeGuards_PreservesSourceCode(t *testing.T) {
+	builder := NewEnhancedPromptBuilder()
+	// Use token rate that requires removing some files but not all
+	estimator := &mockTokenEstimator{tokensPerChar: 1}
+
+	context := ProjectContext{}
+	diff := domain.Diff{
+		Files: []domain.FileDiff{
+			{Path: "main.go", Status: "modified", Patch: strings.Repeat("x", 500)},
+			{Path: "util.go", Status: "modified", Patch: strings.Repeat("x", 500)},
+			{Path: "README.md", Status: "modified", Patch: strings.Repeat("x", 10000)},
+			{Path: "docs/guide.md", Status: "modified", Patch: strings.Repeat("x", 10000)},
+			{Path: "CHANGELOG.md", Status: "modified", Patch: strings.Repeat("x", 10000)},
+		},
+	}
+	req := BranchRequest{BaseRef: "main", TargetRef: "feature"}
+	// Set max tokens to force some truncation but keep source
+	limits := SizeGuardLimits{WarnTokens: 5000, MaxTokens: 15000}
+
+	result, truncation, err := builder.BuildWithSizeGuards(context, diff, req, "openai", estimator, limits)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Source code files should be preserved
+	if strings.Contains(strings.Join(truncation.RemovedFiles, " "), "main.go") {
+		t.Error("main.go should not be removed (source code has lowest removal priority)")
+	}
+	if strings.Contains(strings.Join(truncation.RemovedFiles, " "), "util.go") {
+		t.Error("util.go should not be removed (source code has lowest removal priority)")
+	}
+
+	// Result prompt should contain source code
+	if !strings.Contains(result.Prompt, "main.go") {
+		t.Error("prompt should contain main.go")
+	}
+}
