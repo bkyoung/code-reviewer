@@ -304,6 +304,70 @@ planning:
   enabled: false  # Disable interactive planning in CI/CD
 ```
 
+## Skipping Code Review
+
+You can skip code review for specific commits or PRs by including a skip trigger in:
+
+- **Commit messages** - Any commit in the PR
+- **PR title** - The pull request title
+- **PR description** - The pull request body/description
+
+### Supported Skip Trigger Patterns
+
+The following patterns are recognized (case-insensitive):
+
+```
+[skip code-review]
+[skip-code-review]
+```
+
+### Examples
+
+**Commit message:**
+```bash
+git commit -m "docs: update README [skip code-review]"
+```
+
+**PR title:**
+```
+WIP: Draft feature [skip code-review]
+```
+
+**PR description:**
+```markdown
+## Description
+
+This is a work-in-progress PR for the new feature.
+
+[skip code-review]
+
+## Changes
+
+- Initial scaffolding
+- Not ready for review yet
+```
+
+### Common Use Cases
+
+| Use Case | Where to Add Skip Trigger |
+|----------|---------------------------|
+| Draft PRs | PR title or description |
+| Documentation-only changes | Commit message |
+| WIP commits | Commit message |
+| Automated dependency updates | PR description (via bot config) |
+| Trivial formatting changes | Commit message |
+
+### Workflow Behavior
+
+When a skip trigger is detected:
+
+1. The workflow exits early with success status
+2. No review is posted to the PR
+3. No SARIF is uploaded to Code Scanning
+4. The workflow run shows all skipped steps clearly
+
+This ensures the PR is not blocked by a missing review while still showing that the workflow ran successfully.
+
 ## Troubleshooting
 
 ### Workflow Fails with "API Key Not Found"

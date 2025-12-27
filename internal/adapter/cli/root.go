@@ -104,6 +104,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	}
 	reviewCmd.AddCommand(branchCommand(deps.BranchReviewer, deps.DefaultOutput, deps.DefaultRepo, deps.DefaultInstructions, deps.DefaultReviewActions, deps.DefaultBotUsername, deps.DefaultVerification))
 	root.AddCommand(reviewCmd)
+	root.AddCommand(checkSkipCommand())
 
 	var showVersion bool
 	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")

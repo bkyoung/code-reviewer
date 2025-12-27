@@ -27,7 +27,26 @@ jobs:
       - name: Build code-reviewer
         run: go build -o cr ./cmd/cr
 
+      - name: Check for skip trigger
+        id: skip-check
+        run: |
+          # Get the head commit message
+          HEAD_COMMIT_MSG=$(git log -1 --format=%B ${{ github.event.pull_request.head.sha }})
+
+          # Check for skip trigger in commit message, PR title, or PR description
+          if ./cr check-skip \
+            --commit-message "$HEAD_COMMIT_MSG" \
+            --pr-title "${{ github.event.pull_request.title }}" \
+            --pr-description "${{ github.event.pull_request.body }}"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skip trigger detected, skipping code review"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "No skip trigger found, proceeding with code review"
+          fi
+
       - name: Run AI code review
+        if: steps.skip-check.outputs.skip != 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -47,6 +66,7 @@ jobs:
             --commit-sha ${{ github.event.pull_request.head.sha }}
 
       - name: Find review files
+        if: steps.skip-check.outputs.skip != 'true'
         id: find-files
         run: |
           # Debug: show what files were created
@@ -88,7 +108,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v4
-        if: always()  # Upload even if review found issues
+        if: steps.skip-check.outputs.skip != 'true'
         continue-on-error: true  # Don't fail workflow if SARIF is invalid
         with:
           sarif_file: ${{ steps.find-files.outputs.sarif_file }}
@@ -96,7 +116,7 @@ jobs:
 
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
-        if: always()  # Always upload for debugging
+        if: steps.skip-check.outputs.skip != 'true'
         with:
           name: code-review-results
           path: review-output/
