@@ -111,8 +111,8 @@ Key insight: Fingerprints are already embedded in posted comments. We can read P
 - Basic GitHub workflow integration
 - Security testing validation
 
-### Phase 2: GitHub Native (v0.3.x)
-**Status:** In Progress
+### Phase 2: GitHub Native (v0.3.x - v0.4.0)
+**Status:** ✅ Complete
 
 **Goal:** Make the bot a first-class GitHub reviewer that's usable at scale
 
@@ -121,13 +121,13 @@ Key insight: Fingerprints are already embedded in posted comments. We can read P
 | 2.1: Inline Annotations | Diff position mapping, line-specific comments | ✅ Complete |
 | 2.2: Review API | Use GitHub review API instead of comments | ✅ Complete |
 | 2.3: Request Changes | Configurable blocking behavior | ✅ Complete |
-| 2.4: Skip Trigger | `[skip code-review]` support | Not Started |
+| 2.4: Skip Trigger | `[skip code-review]` support | ✅ Complete |
 | 2.5: Incremental Reviews | Only review new changes since last review | ⏸️ Deferred |
-| 2.6: Finding Deduplication | Track findings, don't re-flag same issues | 🚧 Epic #106 |
-| 2.7: PR Size Guards | Warn/truncate/split large PRs | Not Started |
+| 2.6: Finding Deduplication | Track findings, don't re-flag same issues | ✅ Complete |
+| 2.7: PR Size Guards | Warn/truncate/split large PRs | ✅ Complete |
 | 2.8: Finding Verification | Filter false positives via agent verification | ✅ Complete |
 
-**Note:** Milestones 2.5 and 2.6 were deferred after v0.3.0. The initial tracking approach (Epic #53) was incompatible with the verifier architecture. Finding verification (2.8) was prioritized instead, significantly reducing noise by filtering low-confidence findings.
+**Note:** Milestone 2.5 (Incremental Reviews) deferred - the verification stage significantly reduces noise, making full-PR reviews acceptable for now.
 
 ### Phase 3: Production Hardening (v0.4.x)
 **Status:** Future

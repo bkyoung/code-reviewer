@@ -1,9 +1,9 @@
 # Code Reviewer - Claude Context
 
 **Project:** AI-Powered Code Review Tool
-**Status:** Phase 2 In Progress
-**Version:** v0.3.0
-**Last Updated:** 2025-12-26
+**Status:** Phase 2 Complete
+**Version:** v0.4.0
+**Last Updated:** 2025-12-27
 
 ---
 
@@ -16,43 +16,38 @@
 
 ---
 
-## Current Phase: Phase 2 - GitHub Native
+## Current Phase: Phase 3 - Production Hardening
 
 ### Phase Status
 
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phase 1: Foundation | ✅ Complete | Multi-provider LLM, local CLI, basic GitHub workflow |
-| **Phase 2: GitHub Native** | 🚧 In Progress | First-class reviewer with inline annotations |
-| Phase 3: Production | Planned | Feedback loops, cost visibility, hardening |
+| Phase 2: GitHub Native | ✅ Complete | First-class reviewer with inline annotations |
+| **Phase 3: Production** | 🚧 Next | Feedback loops, cost visibility, hardening |
 | Phase 4: Enterprise | Planned | Multi-platform, org-wide learning |
 
-### Phase 2 Progress
+### Phase 2 Summary (Complete)
 
 | Milestone | Status |
 |-----------|--------|
 | 2.1 Inline Annotations | ✅ Complete |
 | 2.2 Review API | ✅ Complete |
 | 2.3 Request Changes | ✅ Complete |
-| 2.4 Skip Trigger | Not Started |
+| 2.4 Skip Trigger | ✅ Complete |
 | 2.5 Incremental Reviews | ⏸️ Deferred |
-| 2.6 Finding Deduplication | 🚧 Epic #106 |
-| 2.7 PR Size Guards | 🚧 PR #113 |
+| 2.6 Finding Deduplication | ✅ Complete |
+| 2.7 PR Size Guards | ✅ Complete |
 | 2.8 Finding Verification | ✅ Complete |
 
-### v0.3.0 Features
+### v0.4.0 Features
 
-- **Finding Verification:** Agent-based verification with confidence thresholds filters out false positives
-- **Fingerprinting:** Stable finding identifiers embedded in GitHub comments (infrastructure for future dedup)
-
-### Current Focus: Deduplication v2 (Epic #106)
-
-**Comment-Based State** - Using GitHub PR comments as the state store instead of separate tracking:
-
-- **#107** Simplified deduplication - check existing comments before posting
-- **#108** Status-aware deduplication - detect replies, accurate review status
-
-Key insight: Fingerprints are already embedded in posted comments. We can read PR state instead of maintaining separate tracking.
+- **Skip Triggers:** Bypass reviews with `[skip code-review]` in head commit, PR title, or description
+- **Finding Deduplication:** Comment-based state using fingerprints to avoid re-posting same findings
+- **Semantic Deduplication:** LLM-based detection of similar findings across review cycles
+- **Status-Aware Reviews:** Detect acknowledged/disputed replies for accurate review status
+- **PR Size Guards:** Warn and truncate when PRs exceed token limits
+- **Severity Thresholds:** Configurable blocking behavior per severity level
 
 ### Key Documents
 
