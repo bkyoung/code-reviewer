@@ -162,6 +162,15 @@ type PostReviewResult struct {
 // counted in CommentsSkipped. Findings already posted (matching fingerprint)
 // are counted in DuplicatesSkipped.
 func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*PostReviewResult, error) {
+	// Validate and normalize OverrideEvent if set (Issue #36)
+	if req.OverrideEvent != "" {
+		normalized, valid := github.NormalizeAction(string(req.OverrideEvent))
+		if !valid {
+			return nil, fmt.Errorf("invalid OverrideEvent: %q (must be APPROVE, REQUEST_CHANGES, or COMMENT)", req.OverrideEvent)
+		}
+		req.OverrideEvent = normalized
+	}
+
 	findings := req.Findings
 	var duplicatesSkipped int
 	var semanticDuplicatesSkipped int
@@ -225,6 +234,9 @@ func (p *ReviewPoster) PostReview(ctx context.Context, req PostReviewRequest) (*
 	resp, err := p.client.CreateReview(ctx, input)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("CreateReview returned nil response")
 	}
 
 	// Dismiss previous bot reviews AFTER successful post
