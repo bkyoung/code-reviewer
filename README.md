@@ -27,6 +27,7 @@ See [Security Considerations](docs/SECURITY.md) for complete details.
 - **Git Integration**: Review branches, commits, and diffs directly from your repository
 - **Interactive Planning**: LLM-powered clarifying questions before review for better context
 - **Multiple Output Formats**: Markdown, JSON, and SARIF for CI/CD integration
+- **Skip Triggers**: Skip reviews with `[skip code-review]` in the head commit, PR title, or description
 - **Cost Tracking**: Automatic token counting and cost calculation per provider
 - **Observability**: Comprehensive logging and metrics for monitoring API usage
 - **Review History**: SQLite-based storage for tracking reviews over time
@@ -258,6 +259,7 @@ export CR_OBSERVABILITY_METRICS_ENABLED=true
 ## Documentation
 
 - [Configuration Guide](docs/CONFIGURATION.md) - Complete configuration reference
+- [GitHub Action Setup](docs/GITHUB_ACTION_SETUP.md) - CI/CD integration with GitHub Actions
 - [Observability Guide](docs/OBSERVABILITY.md) - Detailed logging and metrics documentation
 - [Cost Tracking Guide](docs/COST_TRACKING.md) - Cost analysis and optimization strategies
 - [Architecture](docs/ARCHITECTURE.md) - System architecture and design decisions

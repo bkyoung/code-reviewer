@@ -27,7 +27,45 @@ jobs:
       - name: Build code-reviewer
         run: go build -o cr ./cmd/cr
 
+      - name: Get head commit message
+        id: get-commit
+        run: |
+          # Capture commit message safely using GITHUB_OUTPUT heredoc syntax
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          git log -1 --format=%B ${{ github.event.pull_request.head.sha }}
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for skip trigger
+        id: skip-check
+        env:
+          # Use environment variables to safely pass potentially untrusted content
+          COMMIT_MSG: ${{ steps.get-commit.outputs.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Check for skip trigger in commit message, PR title, or PR description
+          # Exit codes: 0 = skip, 1 = review, other = error
+          set +e
+          ./cr check-skip \
+            --commit-message "$COMMIT_MSG" \
+            --pr-title "$PR_TITLE" \
+            --pr-description "$PR_BODY"
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skip trigger detected, skipping code review"
+          elif [ $EXIT_CODE -eq 1 ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "No skip trigger found, proceeding with code review"
+          else
+            echo "Error: check-skip command failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
       - name: Run AI code review
+        if: steps.skip-check.outputs.skip != 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -47,6 +85,7 @@ jobs:
             --commit-sha ${{ github.event.pull_request.head.sha }}
 
       - name: Find review files
+        if: steps.skip-check.outputs.skip != 'true'
         id: find-files
         run: |
           # Debug: show what files were created
@@ -88,7 +127,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v4
-        if: always()  # Upload even if review found issues
+        if: steps.skip-check.outputs.skip != 'true'
         continue-on-error: true  # Don't fail workflow if SARIF is invalid
         with:
           sarif_file: ${{ steps.find-files.outputs.sarif_file }}
@@ -96,7 +135,7 @@ jobs:
 
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
-        if: always()  # Always upload for debugging
+        if: steps.skip-check.outputs.skip != 'true'
         with:
           name: code-review-results
           path: review-output/
