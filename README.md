@@ -1,6 +1,6 @@
 # Code Reviewer (cr)
 
-AI-powered code review tool that uses multiple LLM providers to analyze Git branches and generate detailed review feedback.
+AI-powered code review tool that uses multiple LLM providers to analyze Git branches and generate detailed review feedback. Operates as a **first-class GitHub reviewer** with inline annotations and configurable blocking behavior, or as a **local CLI tool** for standalone reviews.
 
 ## ⚠️ Security Warning
 
@@ -21,19 +21,116 @@ Before using this tool, especially in CI/CD or on private repositories, please r
 
 See [Security Considerations](docs/SECURITY.md) for complete details.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Entry["Entry Points"]
+        CLI["CLI (Cobra)"]
+        GHA["GitHub Actions"]
+    end
+
+    subgraph Core["Application Core"]
+        Config["Config Manager<br/>(Viper)"]
+        Git["Git Engine<br/>(go-git)"]
+        Redact["Redaction Engine"]
+        Context["Context Builder"]
+        Orch["Review Orchestrator"]
+        Verify["Verifier Agent"]
+        Merge["Merger Service"]
+    end
+
+    subgraph Providers["LLM Providers"]
+        OpenAI["OpenAI"]
+        Anthropic["Anthropic"]
+        Gemini["Google Gemini"]
+        Ollama["Ollama (Local)"]
+    end
+
+    subgraph Output["Output Layer"]
+        MD["Markdown"]
+        JSON["JSON"]
+        SARIF["SARIF"]
+        GH["GitHub PR Review"]
+    end
+
+    subgraph Persistence["Persistence"]
+        SQLite["SQLite Store"]
+    end
+
+    CLI --> Config
+    GHA --> Config
+    Config --> Git
+    Git -->|"Diff"| Redact
+    Redact -->|"Sanitized Diff"| Context
+    Context -->|"Prompt"| Orch
+
+    Orch -->|"Parallel Requests"| OpenAI
+    Orch -->|"Parallel Requests"| Anthropic
+    Orch -->|"Parallel Requests"| Gemini
+    Orch -->|"Parallel Requests"| Ollama
+
+    OpenAI -->|"Findings"| Orch
+    Anthropic -->|"Findings"| Orch
+    Gemini -->|"Findings"| Orch
+    Ollama -->|"Findings"| Orch
+
+    Orch -->|"Candidates"| Verify
+    Verify -->|"Verified Findings"| Merge
+    Merge -->|"Merged Review"| MD
+    Merge --> JSON
+    Merge --> SARIF
+    Merge -->|"Post Review"| GH
+
+    Orch -.->|"Run History"| SQLite
+    GH -.->|"Dedup State"| SQLite
+
+    style Entry fill:#e1f5fe
+    style Core fill:#fff3e0
+    style Providers fill:#f3e5f5
+    style Output fill:#e8f5e9
+    style Persistence fill:#fce4ec
+```
+
+### Data Flow
+
+1. **Entry** → User invokes via CLI or GitHub Actions triggers on PR
+2. **Configuration** → Viper loads layered config (files, env vars, flags)
+3. **Git Analysis** → go-git produces cumulative diff between base and target refs
+4. **Redaction** → Secrets are stripped via regex patterns before LLM transmission
+5. **Context Assembly** → Prompt builder combines diff, docs, and custom instructions
+6. **Parallel Review** → Orchestrator dispatches to configured LLM providers concurrently
+7. **Verification** → Agent-based verification filters false positives (optional)
+8. **Merge & Dedupe** → Multi-provider findings are synthesized; duplicates are filtered
+9. **Output** → Reviews written to disk (Markdown, JSON, SARIF) and/or posted to GitHub
+
 ## Features
 
-- **Multi-Provider Support**: OpenAI, Anthropic Claude, Google Gemini, and local Ollama models
-- **Git Integration**: Review branches, commits, and diffs directly from your repository
-- **Interactive Planning**: LLM-powered clarifying questions before review for better context
-- **Multiple Output Formats**: Markdown, JSON, and SARIF for CI/CD integration
-- **Skip Triggers**: Skip reviews with `[skip code-review]` in the head commit, PR title, or description
-- **Cost Tracking**: Automatic token counting and cost calculation per provider
-- **Observability**: Comprehensive logging and metrics for monitoring API usage
-- **Review History**: SQLite-based storage for tracking reviews over time
-- **Secret Protection**: Automatic redaction to prevent secrets from being sent to LLMs
-- **Deterministic Reviews**: Reproducible results for CI/CD pipelines
-- **Merge Strategies**: Combine insights from multiple providers with configurable weights
+### GitHub PR Integration (Primary Mode)
+- **Inline Annotations** — Comments on specific source lines, not just PR comments
+- **First-Class Reviewer** — Initiates actual GitHub code reviews via the Review API
+- **Request Changes** — Configurable blocking behavior per severity level
+- **Skip Triggers** — Bypass reviews with `[skip code-review]` in head commit, PR title, or description
+- **Finding Deduplication** — Track findings across PR updates, don't re-flag same issues
+- **Semantic Deduplication** — LLM-based detection of similar findings across review cycles
+- **Status-Aware Reviews** — Detect acknowledged/disputed replies for accurate review status
+- **Stale Review Dismissal** — Auto-dismiss previous bot reviews on new push
+- **PR Size Guards** — Warn and gracefully handle PRs exceeding context limits
+
+### Local CLI (Secondary Mode)
+- **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, and local Ollama models
+- **Git Integration** — Review branches, commits, and diffs directly from your repository
+- **Interactive Planning** — LLM-powered clarifying questions before review for better context
+- **Multiple Output Formats** — Markdown, JSON, and SARIF for CI/CD integration
+- **Agent-Based Verification** — Filter false positives with confidence thresholds
+
+### Core Capabilities
+- **Cost Tracking** — Automatic token counting and cost calculation per provider
+- **Observability** — Comprehensive logging and metrics for monitoring API usage
+- **Review History** — SQLite-based storage for tracking reviews over time
+- **Secret Protection** — Automatic redaction to prevent secrets from being sent to LLMs
+- **Deterministic Reviews** — Reproducible results for CI/CD pipelines
+- **Merge Strategies** — Combine insights from multiple providers with configurable weights
 
 ## Quick Start
 
@@ -47,8 +144,8 @@ cd code-reviewer
 # Build the tool
 go build -o cr ./cmd/cr
 
-# Or use the magefile
-mage build
+# Verify installation
+./cr --version
 ```
 
 ### Configuration
@@ -88,45 +185,86 @@ export OPENAI_API_KEY="sk-your-api-key-here"
 
 ```bash
 # Review the current branch against main
-./cr review branch main --target HEAD
+./cr review branch main
 
-# Review specific commits
-./cr review branch HEAD~3 --target HEAD
-
-# Review with multiple providers
-./cr review branch main --target HEAD
+# Review with custom context
+./cr review branch main --instructions "Focus on security"
 
 # Interactive mode with planning questions
 ./cr review branch main --interactive
+
+# Skip verification for faster reviews (may have more false positives)
+./cr review branch main --no-verify
 ```
 
-## Interactive Planning Mode
+## GitHub Actions Integration
 
-The tool can ask clarifying questions before reviewing to improve context and focus:
+See [docs/GITHUB_ACTION_SETUP.md](docs/GITHUB_ACTION_SETUP.md) for complete setup instructions.
+
+### Quick Example
+
+```yaml
+name: Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Code Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./cr review branch ${{ github.event.pull_request.base.ref }} \
+            --post-github-review \
+            --github-owner ${{ github.repository_owner }} \
+            --github-repo ${{ github.event.repository.name }} \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --commit-sha ${{ github.event.pull_request.head.sha }}
+```
+
+## Skip Triggers
+
+Skip code review by including `[skip code-review]` in any of:
+- Head commit message
+- PR title
+- PR description
+
+The check command can be used in CI to determine if a review should be skipped:
 
 ```bash
-# Enable interactive planning
-./cr review branch main --interactive
+./cr check-skip --pr-title "$PR_TITLE" --pr-body "$PR_BODY" --commit-message "$COMMIT_MSG"
 ```
 
-When enabled, the tool will:
-1. Analyze your changes
-2. Ask 1-5 clarifying questions about:
-   - Purpose of changes
-   - Specific concerns
-   - Focus areas
-3. Incorporate your answers into review prompts
+## Verification
 
-**Benefits**:
-- More targeted reviews focused on your concerns
-- Better context understanding
-- Reduced false positives
+Agent-based verification filters false positives by having a secondary LLM agent validate findings:
 
-**Note**: Interactive mode only runs in TTY environments (real terminals), not in CI/CD pipelines.
+```bash
+# Enable verification (default in config)
+./cr review branch main --verify
+
+# Skip verification for speed
+./cr review branch main --no-verify
+
+# Configure verification depth (minimal, medium, thorough)
+./cr review branch main --verification-depth thorough
+
+# Set confidence thresholds per severity
+./cr review branch main --confidence-critical 90 --confidence-high 80
+```
 
 ## Observability and Cost Tracking
-
-The tool provides comprehensive observability features to monitor API usage, track costs, and debug issues.
 
 ### Enabling Logging
 
@@ -138,146 +276,49 @@ observability:
     level: "info"        # Options: debug, info, error
     format: "human"      # Options: human, json
     redactAPIKeys: true  # Always redact API keys (recommended)
+  metrics:
+    enabled: true
 ```
 
 ### Log Output Examples
 
-**Human-readable format (default):**
+**Human-readable format:**
 ```
 [INFO] openai/gpt-4o-mini: Response received (duration=2.3s, tokens=150/75, cost=$0.0012)
-[INFO] anthropic/claude-3-5-sonnet-20241022: Response received (duration=3.1s, tokens=200/120, cost=$0.0028)
 ```
 
 **JSON format (for log aggregation):**
 ```json
-{"level":"info","type":"response","provider":"openai","model":"gpt-4o-mini","timestamp":"2025-10-21T10:30:00Z","duration_ms":2300,"tokens_in":150,"tokens_out":75,"cost":0.0012,"status_code":200,"finish_reason":"stop"}
+{"level":"info","type":"response","provider":"openai","model":"gpt-4o-mini","duration_ms":2300,"tokens_in":150,"tokens_out":75,"cost":0.0012}
 ```
 
-### Cost Tracking
+## Supported LLM Providers
 
-Costs are automatically calculated and displayed in all output formats:
+| Provider | Models | API Key Required | Cost |
+|----------|--------|------------------|------|
+| OpenAI | gpt-4o, gpt-4o-mini, o1-preview, o1-mini | Yes | Paid |
+| Anthropic | claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022 | Yes | Paid |
+| Google Gemini | gemini-1.5-pro, gemini-1.5-flash | Yes | Paid |
+| Ollama | Any local model | No | Free |
 
-**Terminal output:**
-```
-Review complete!
-- OpenAI (gpt-4o-mini): $0.0012 (150 tokens in, 75 tokens out)
-- Anthropic (claude-3-5-sonnet): $0.0028 (200 tokens in, 120 tokens out)
-Total cost: $0.0040
-```
+See [docs/COST_TRACKING.md](docs/COST_TRACKING.md) for detailed pricing information.
 
-**Review files include cost data:**
-```markdown
-## Review Summary
-- **Provider**: OpenAI (gpt-4o-mini)
-- **Cost**: $0.0012
-- **Tokens**: 150 in, 75 out
-- **Duration**: 2.3s
-```
+## Output Formats
 
-### Debug Mode
+The tool generates reviews in multiple formats:
 
-Enable debug logging to see detailed request information:
+1. **Markdown** (`.md`) — Human-readable review with findings and suggestions
+2. **JSON** (`.json`) — Structured data for programmatic analysis
+3. **SARIF** (`.sarif`) — Static Analysis Results Interchange Format for CI/CD integration
 
-```bash
-# Via config file
-observability:
-  logging:
-    level: "debug"
-
-# Via environment variable
-export CR_OBSERVABILITY_LOGGING_LEVEL=debug
-./cr review branch main --target HEAD
-```
-
-Debug output includes:
-- Prompt character counts
-- Redacted API keys (last 4 characters only)
-- Request timestamps
-- Model and provider details
-
-**Example debug output:**
-```
-[DEBUG] openai/gpt-4o-mini: Request sent (prompt=1543 chars, key=****cdef)
-[INFO] openai/gpt-4o-mini: Response received (duration=2.3s, tokens=150/75, cost=$0.0012)
-```
-
-### Metrics Tracking
-
-Enable metrics to track performance and usage statistics:
-
-```yaml
-observability:
-  metrics:
-    enabled: true
-```
-
-Metrics include:
-- Request/response duration
-- Token counts (input and output)
-- Cost per request and cumulative cost
-- Error rates by provider and type
-- Success rates
-
-### Production Monitoring
-
-For production use, enable JSON logging for integration with log aggregation tools:
-
-```yaml
-observability:
-  logging:
-    enabled: true
-    level: "info"
-    format: "json"
-    redactAPIKeys: true
-  metrics:
-    enabled: true
-```
-
-Then pipe logs to your monitoring system:
-```bash
-./cr review branch main --target HEAD 2>&1 | tee -a /var/log/cr/reviews.log
-```
-
-### Environment Variable Configuration
-
-All observability settings can be configured via environment variables:
-
-```bash
-# Enable logging
-export CR_OBSERVABILITY_LOGGING_ENABLED=true
-export CR_OBSERVABILITY_LOGGING_LEVEL=debug
-export CR_OBSERVABILITY_LOGGING_FORMAT=json
-export CR_OBSERVABILITY_LOGGING_REDACTAPIKEYS=true
-
-# Enable metrics
-export CR_OBSERVABILITY_METRICS_ENABLED=true
-
-# Run review
-./cr review branch main --target HEAD
-```
-
-## Documentation
-
-- [Configuration Guide](docs/CONFIGURATION.md) - Complete configuration reference
-- [GitHub Action Setup](docs/GITHUB_ACTION_SETUP.md) - CI/CD integration with GitHub Actions
-- [Observability Guide](docs/OBSERVABILITY.md) - Detailed logging and metrics documentation
-- [Cost Tracking Guide](docs/COST_TRACKING.md) - Cost analysis and optimization strategies
-- [Architecture](docs/ARCHITECTURE.md) - System architecture and design decisions
-- [Development Workflow](docs/DEVELOPER_WORKFLOW.md) - Contributing and development guide
+All formats include:
+- Review findings with severity levels
+- File locations and line numbers
+- Cost and token usage data
+- Provider and model information
+- Timestamps and duration
 
 ## Example Configurations
-
-### Minimal (Testing)
-
-```yaml
-providers:
-  static:
-    enabled: true
-    model: "static-model"
-
-output:
-  directory: "./reviews"
-```
 
 ### Production (Multi-provider with observability)
 
@@ -292,6 +333,21 @@ providers:
     enabled: true
     model: "claude-3-5-sonnet-20241022"
     apiKey: "${ANTHROPIC_API_KEY}"
+
+verification:
+  enabled: true
+  depth: "medium"
+  confidenceThresholds:
+    critical: 85
+    high: 75
+    medium: 65
+    low: 50
+
+review:
+  actions:
+    blockThreshold: "high"  # Block on critical or high severity
+    alwaysBlockCategories:
+      - "security"
 
 store:
   enabled: true
@@ -315,11 +371,6 @@ redaction:
     - "**/*.env"
     - "**/*.pem"
     - "**/*.key"
-
-determinism:
-  enabled: true
-  temperature: 0.0
-  useSeed: true
 ```
 
 ### Local Only (Ollama)
@@ -340,76 +391,59 @@ observability:
     format: "human"
 ```
 
-## Supported LLM Providers
+## Project Status
 
-| Provider | Models | API Key Required | Cost |
-|----------|--------|------------------|------|
-| OpenAI | gpt-4o, gpt-4o-mini, o1-preview, o1-mini | Yes | Paid |
-| Anthropic | claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022 | Yes | Paid |
-| Google Gemini | gemini-1.5-pro, gemini-1.5-flash | Yes | Paid |
-| Ollama | Any local model | No | Free |
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1: Foundation | ✅ Complete | Multi-provider LLM, local CLI, basic GitHub workflow |
+| Phase 2: GitHub Native | ✅ Complete | First-class reviewer with inline annotations |
+| Phase 3: Production | 🚧 Next | Feedback loops, cost visibility, hardening |
+| Phase 4: Enterprise | Planned | Multi-platform, org-wide learning |
 
-See [COST_TRACKING.md](docs/COST_TRACKING.md) for detailed pricing information.
+**Current Version:** v0.4.0
 
-## Output Formats
+See [docs/PROJECT_RESET_PLAN.md](docs/PROJECT_RESET_PLAN.md) for detailed roadmap.
 
-The tool generates reviews in multiple formats:
+## Documentation
 
-1. **Markdown** (`.md`) - Human-readable review with findings and suggestions
-2. **JSON** (`.json`) - Structured data for programmatic analysis
-3. **SARIF** (`.sarif`) - Static Analysis Results Interchange Format for CI/CD integration
-
-All formats include:
-- Review findings with severity levels
-- File locations and line numbers
-- Cost and token usage data
-- Provider and model information
-- Timestamps and duration
-
-## CI/CD Integration
-
-Use the SARIF output format for integration with GitHub, GitLab, or other CI/CD platforms:
-
-```bash
-# Generate SARIF output
-./cr review branch origin/main --target HEAD
-
-# Upload to GitHub Code Scanning
-gh api repos/$REPO/code-scanning/sarifs \
-  -F sarif=@reviews/review-openai-*.sarif \
-  -F ref=$GITHUB_REF \
-  -F sha=$GITHUB_SHA
-```
-
-## Security
-
-- **API Key Redaction**: All logs redact API keys to show only the last 4 characters
-- **Secret Protection**: Configure deny globs to prevent sensitive files from being sent to LLMs
-- **Local Models**: Use Ollama for completely local, private code reviews
+- [Configuration Guide](docs/CONFIGURATION.md) — Complete configuration reference
+- [GitHub Action Setup](docs/GITHUB_ACTION_SETUP.md) — CI/CD integration with GitHub Actions
+- [Architecture](docs/ARCHITECTURE.md) — System architecture and design decisions
+- [Security Considerations](docs/SECURITY.md) — Security best practices
+- [Cost Tracking Guide](docs/COST_TRACKING.md) — Cost analysis and optimization strategies
 
 ## Building
 
 ```bash
 # Build binary
-mage build
+go build -o cr ./cmd/cr
 
 # Run tests
-mage test
+go test ./...
 
-# Run linter
-mage maintain:gofmt
+# Run tests with race detector
+go test -race ./...
 
-# Full CI pipeline
-mage ci
+# Format code
+gofmt -w .
+
+# Lint (if golangci-lint installed)
+golangci-lint run
 ```
 
 ## Contributing
 
-See [DEVELOPER_WORKFLOW.md](docs/DEVELOPER_WORKFLOW.md) for development setup and contribution guidelines.
+1. Fork the repository
+2. Create a feature branch
+3. Write tests first (TDD)
+4. Implement the feature
+5. Ensure all tests pass: `go test ./...`
+6. Format code: `gofmt -w .`
+7. Submit a pull request
 
 ## License
 
-[Add your license here]
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Support
 
