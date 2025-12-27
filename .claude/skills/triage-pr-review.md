@@ -6,50 +6,68 @@ Triage, respond to, and address PR code review feedback including SARIF code sca
 
 When this skill is invoked (e.g., "triage the latest pr code review findings"), perform a comprehensive assessment of all feedback on the current PR and take appropriate action.
 
-## CRITICAL: Always Triage the MOST RECENT Review
+## CRITICAL: Check Run Annotations vs PR Comments
 
-**IMPORTANT:** PRs often have multiple review cycles. Each push triggers a new review. You MUST:
+**IMPORTANT:** There are TWO sources of findings, and they behave very differently:
 
-1. **Find the HEAD commit** - This is the LATEST commit on the PR
-2. **Find findings on THAT commit** - Filter comments by `commit_id` matching HEAD
-3. **Ignore stale findings** - Comments on older commits may already be addressed
-4. **Check for replies** - Only respond to findings that don't already have replies
+### 1. Check Run Annotations (AUTHORITATIVE)
+- **What:** SARIF findings from the LATEST review cycle only
+- **Where:** `/check-runs/{id}/annotations`
+- **Use for:** Determining what issues exist NOW on the current code
+- **Behavior:** Each push creates NEW annotations; old ones don't accumulate
+
+### 2. PR Comments (ACCUMULATED)
+- **What:** Inline comments from ALL review cycles across the PR's lifetime
+- **Where:** `/pulls/{pr}/comments`
+- **Use for:** Responding to human reviewers, checking reply status
+- **Behavior:** Comments ACCUMULATE - you'll see stale findings from old commits!
+
+**ALWAYS query check run annotations first** to see the actual current findings. PR comments contain historical noise from previous review cycles.
 
 ```bash
-# Get the HEAD commit of the PR
+# Get the HEAD commit and check run
 HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid')
+CHECK_RUN_ID=$(gh api repos/{owner}/{repo}/commits/${HEAD_SHA}/check-runs \
+  --jq '.check_runs[] | select(.name == "openai" or .name == "review") | .id' | head -1)
 
-# Get comments on the LATEST commit only
-gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
-  --jq ".[] | select(.commit_id == \"${HEAD_SHA}\") | {id: .id, path: .path, line: .line, body: .body}"
+# Get CURRENT findings from check run annotations (authoritative source)
+gh api repos/{owner}/{repo}/check-runs/${CHECK_RUN_ID}/annotations \
+  --jq '.[] | {level: .annotation_level, path: .path, line: .start_line, message: .message}'
 ```
 
-**Why this matters:** Responding to findings on older commits creates confusion. The code may have changed, findings may be stale, and you'll miss the actual issues on the current code.
+**Why this matters:** If you query PR comments, you'll see 20+ findings from old commits when the actual latest review might only have 3. This leads to triaging already-fixed issues.
 
 ## Workflow
 
-### Step 1: Gather Feedback from LATEST Commit
+### Step 1: Gather Feedback from LATEST Review
 
-Collect feedback from the most recent review cycle:
+**Start with check run annotations (the authoritative source):**
 
 ```bash
-# Get current PR number and HEAD commit
+# Get current PR info
 PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
 HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid')
 
-# Get PR review comments ONLY on the HEAD commit (latest review)
-gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
-  --jq ".[] | select(.commit_id == \"${HEAD_SHA}\") | {id: .id, path: .path, line: .line, body: .body}"
-
-# Get SARIF code scanning check results for HEAD commit
-CHECK_RUN_ID=$(gh api repos/{owner}/{repo}/commits/${HEAD_SHA}/check-runs \
-  --jq '.check_runs[] | select(.name == "anthropic" or .app.slug == "github-code-scanning") | .id' | head -1)
-
-gh api repos/{owner}/{repo}/check-runs/${CHECK_RUN_ID}/annotations \
-  --jq '.[] | {path: .path, line: .start_line, level: .annotation_level, message: .message}'
-
-# Get check run status (find the code scanning check)
+# Check PR status first
+gh pr view ${PR_NUMBER} --json state,reviewDecision
 gh pr checks ${PR_NUMBER}
+
+# Find the code review check run on HEAD commit
+CHECK_RUN_ID=$(gh api repos/{owner}/{repo}/commits/${HEAD_SHA}/check-runs \
+  --jq '.check_runs[] | select(.name == "openai" or .name == "review" or .name == "anthropic") | .id' | head -1)
+
+# Get CURRENT findings from check run annotations (THIS IS THE AUTHORITATIVE SOURCE)
+gh api repos/{owner}/{repo}/check-runs/${CHECK_RUN_ID}/annotations \
+  --jq '.[] | {level: .annotation_level, path: .path, line: .start_line, message: .message}'
+```
+
+**Only if needed, check PR comments for human reviewer feedback:**
+
+```bash
+# PR comments accumulate across all commits - use sparingly
+# Only needed for responding to human reviewers, not for SARIF triage
+gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
+  --jq '.[] | select(.user.type == "User") | {id: .id, path: .path, body: .body[0:100]}'
 ```
 
 ### Step 2: Categorize Findings
