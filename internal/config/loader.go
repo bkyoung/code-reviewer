@@ -59,16 +59,24 @@ func Load(opts LoaderOptions) (Config, error) {
 	cfg = expandEnvVars(cfg)
 
 	// Process review config: expand threshold and apply defaults
-	cfg.Review = processReviewConfig(cfg.Review)
+	reviewConfig, err := processReviewConfig(cfg.Review)
+	if err != nil {
+		return Config{}, fmt.Errorf("process review config: %w", err)
+	}
+	cfg.Review = reviewConfig
 
 	return cfg, nil
 }
 
 // processReviewConfig applies threshold expansion and defaults to the review configuration.
 // This is called after loading to ensure threshold-based configuration works correctly.
-func processReviewConfig(review ReviewConfig) ReviewConfig {
+// Returns an error if the blockThreshold value is invalid.
+func processReviewConfig(review ReviewConfig) (ReviewConfig, error) {
 	// Expand threshold to per-severity actions
-	expandedActions := expandBlockThreshold(review.BlockThreshold)
+	expandedActions, err := expandBlockThreshold(review.BlockThreshold)
+	if err != nil {
+		return ReviewConfig{}, err
+	}
 
 	// Merge expanded threshold with explicit actions (explicit wins)
 	review.Actions = mergeReviewActions(expandedActions, review.Actions)
@@ -76,7 +84,7 @@ func processReviewConfig(review ReviewConfig) ReviewConfig {
 	// Apply defaults for any remaining empty action slots
 	review.Actions = applyActionDefaults(review.Actions)
 
-	return review
+	return review, nil
 }
 
 // expandEnvVars expands ${VAR} and $VAR syntax in configuration strings.

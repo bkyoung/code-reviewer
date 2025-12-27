@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/config"
@@ -19,7 +20,10 @@ func TestMergePrioritizesLaterConfigs(t *testing.T) {
 		Output: config.OutputConfig{Directory: "env"},
 	}
 
-	merged := config.Merge(base, file, final)
+	merged, err := config.Merge(base, file, final)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Output.Directory != "env" {
 		t.Fatalf("expected env directory to win, got %s", merged.Output.Directory)
@@ -241,7 +245,10 @@ func TestReviewActionsMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Overlay with non-empty actions should replace
 	if merged.Review.Actions.OnHigh != "approve" {
@@ -308,7 +315,10 @@ func TestBotUsernameMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Review.BotUsername != "overlay-bot[bot]" {
 		t.Errorf("expected BotUsername 'overlay-bot[bot]' from overlay, got %s", merged.Review.BotUsername)
@@ -327,7 +337,10 @@ func TestBotUsernameMergePreservesBase(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Review.BotUsername != "base-bot[bot]" {
 		t.Errorf("expected BotUsername 'base-bot[bot]' from base, got %s", merged.Review.BotUsername)
@@ -434,7 +447,10 @@ func TestVerificationConfigMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Field-by-field merge: overlay fields override base, unset fields preserved from base
 	if !merged.Verification.Enabled {
@@ -468,7 +484,10 @@ func TestVerificationConfigMergePreservesBase(t *testing.T) {
 		// Empty verification config - should preserve base
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if !merged.Verification.Enabled {
 		t.Error("expected Verification.Enabled to be preserved from base")
@@ -499,7 +518,10 @@ func TestVerificationConfigMergeCanDisable(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Overlay should be able to disable verification when other fields are set
 	if merged.Verification.Enabled {
@@ -649,7 +671,10 @@ func TestSizeGuardsConfigMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Warn should be from base, max from overlay
 	if merged.SizeGuards.WarnTokens != 100000 {
@@ -678,7 +703,10 @@ func TestSizeGuardsConfigMergeProviders(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Both providers should exist in merged config
 	if len(merged.SizeGuards.Providers) != 2 {
@@ -713,7 +741,10 @@ func TestSizeGuardsConfigMergeCanDisable(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.SizeGuards.IsEnabled() {
 		t.Error("expected SizeGuards to be disabled by overlay")
@@ -1017,21 +1048,24 @@ review:
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
-	cfg, err := config.Load(config.LoaderOptions{
+	_, err := config.Load(config.LoaderOptions{
 		ConfigPaths: []string{dir},
 		FileName:    "cr",
 		EnvPrefix:   "CR_TEST_THRESHOLD_INVALID",
 	})
-	if err != nil {
-		t.Fatalf("load returned error: %v", err)
+
+	// Invalid threshold should now return an error instead of silently falling back
+	if err == nil {
+		t.Fatal("expected error for invalid blockThreshold, got nil")
 	}
 
-	// Invalid threshold should fall back to defaults (critical/high block)
-	if cfg.Review.Actions.OnCritical != "request_changes" {
-		t.Errorf("expected OnCritical 'request_changes' (default), got %s", cfg.Review.Actions.OnCritical)
+	// Verify error message contains useful information
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "invalid blockThreshold") {
+		t.Errorf("expected error to mention 'invalid blockThreshold', got: %s", errMsg)
 	}
-	if cfg.Review.Actions.OnHigh != "request_changes" {
-		t.Errorf("expected OnHigh 'request_changes' (default), got %s", cfg.Review.Actions.OnHigh)
+	if !strings.Contains(errMsg, "invalid_value") {
+		t.Errorf("expected error to mention the invalid value 'invalid_value', got: %s", errMsg)
 	}
 }
 
@@ -1082,7 +1116,10 @@ func TestAlwaysBlockCategories_Merge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Should have union of both
 	if len(merged.Review.AlwaysBlockCategories) != 3 {
@@ -1102,7 +1139,10 @@ func TestAlwaysBlockCategories_MergeDeduplicates(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Should deduplicate (case-insensitive)
 	if len(merged.Review.AlwaysBlockCategories) != 2 {
@@ -1122,7 +1162,10 @@ func TestBlockThresholdMerge_OverlayWins(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Medium threshold should win
 	if merged.Review.Actions.OnMedium != "request_changes" {

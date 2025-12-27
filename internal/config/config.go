@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Config represents the full application configuration.
 type Config struct {
@@ -233,14 +236,19 @@ type ConfidenceThresholds struct {
 
 // Merge combines multiple configuration instances, prioritising the latter ones.
 // After merging, threshold expansion and defaults are applied to the Review config.
-func Merge(configs ...Config) Config {
+// Returns an error if the merged configuration contains invalid values (e.g., invalid blockThreshold).
+func Merge(configs ...Config) (Config, error) {
 	result := Config{}
 	for _, cfg := range configs {
 		result = merge(result, cfg)
 	}
 	// Apply threshold expansion and defaults after all merging is complete
-	result.Review = processReviewConfig(result.Review)
-	return result
+	reviewConfig, err := processReviewConfig(result.Review)
+	if err != nil {
+		return Config{}, err
+	}
+	result.Review = reviewConfig
+	return result, nil
 }
 
 func merge(base, overlay Config) Config {
@@ -446,6 +454,9 @@ func applyActionDefaults(actions ReviewActions) ReviewActions {
 	return actions
 }
 
+// ValidBlockThresholds lists the valid values for blockThreshold configuration.
+var ValidBlockThresholds = []string{"critical", "high", "medium", "low", "none"}
+
 // expandBlockThreshold converts a threshold string to explicit per-severity actions.
 // Valid thresholds: "critical", "high", "medium", "low", "none"
 // - "critical": only critical blocks
@@ -453,10 +464,11 @@ func applyActionDefaults(actions ReviewActions) ReviewActions {
 // - "medium": critical, high, and medium block
 // - "low": all severities block
 // - "none": nothing blocks (all comment only)
-// Returns zero-value ReviewActions if threshold is empty or invalid.
-func expandBlockThreshold(threshold string) ReviewActions {
+// Returns zero-value ReviewActions and nil error if threshold is empty.
+// Returns error if threshold is non-empty but invalid.
+func expandBlockThreshold(threshold string) (ReviewActions, error) {
 	if threshold == "" {
-		return ReviewActions{}
+		return ReviewActions{}, nil
 	}
 
 	// Severity levels in order from highest to lowest
@@ -472,8 +484,7 @@ func expandBlockThreshold(threshold string) ReviewActions {
 
 	thresholdLevel, ok := severityLevels[strings.ToLower(threshold)]
 	if !ok {
-		// Invalid threshold - return empty (will use defaults)
-		return ReviewActions{}
+		return ReviewActions{}, fmt.Errorf("invalid blockThreshold %q: must be one of: critical, high, medium, low, none", threshold)
 	}
 
 	var actions ReviewActions
@@ -511,7 +522,7 @@ func expandBlockThreshold(threshold string) ReviewActions {
 		actions.OnLow = "comment"
 	}
 
-	return actions
+	return actions, nil
 }
 
 // mergeCategories returns the union of two category slices, preserving order and deduplicating.
