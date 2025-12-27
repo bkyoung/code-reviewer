@@ -633,6 +633,193 @@ func TestHasBlockingFindings(t *testing.T) {
 	}
 }
 
+func TestHasBlockingFindings_AlwaysBlockCategories(t *testing.T) {
+	// Helper to create a finding with specific category
+	makeFindingWithCategory := func(file string, line int, severity, category, description string) domain.Finding {
+		return domain.Finding{
+			ID:          "test-id",
+			File:        file,
+			LineStart:   line,
+			LineEnd:     line,
+			Severity:    severity,
+			Category:    category,
+			Description: description,
+		}
+	}
+
+	tests := []struct {
+		name     string
+		findings []github.PositionedFinding
+		actions  github.ReviewActions
+		expected bool
+	}{
+		{
+			name: "category in always-block list triggers blocking",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "minor security issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: true, // low severity wouldn't block, but security category does
+		},
+		{
+			name: "category not in always-block list follows severity rules",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "style", "style issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: false, // low severity doesn't block, style not in list
+		},
+		{
+			name: "case insensitive category matching",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "SECURITY", "uppercase category"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: true, // SECURITY matches security (case-insensitive)
+		},
+		{
+			name: "mixed case in config list",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "lowercase finding"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"Security", "Performance"},
+			},
+			expected: true, // security matches Security (case-insensitive)
+		},
+		{
+			name: "multiple categories in list",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "performance", "perf issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security", "performance", "correctness"},
+			},
+			expected: true, // performance is in the list
+		},
+		{
+			name: "empty category on finding doesn't match",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "", "no category"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: false, // empty category doesn't match
+		},
+		{
+			name: "whitespace-only category on finding doesn't match",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "   ", "whitespace category"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: false, // whitespace-only category doesn't match
+		},
+		{
+			name: "whitespace in config category list is trimmed",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "security issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"  security  ", "  "},
+			},
+			expected: true, // "  security  " matches "security" after trimming
+		},
+		{
+			name: "empty always-block list has no effect",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "security issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{},
+			},
+			expected: false, // no categories to block, low severity doesn't block
+		},
+		{
+			name: "category blocking is additive with severity blocking",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "critical", "security", "critical security"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: true, // blocks via both severity AND category
+		},
+		{
+			name: "category blocking works even when severity is set to comment",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "critical", "security", "issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				OnCritical:            "comment", // would not block
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: true, // category override wins
+		},
+		{
+			name: "out of diff category finding ignored",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "out of diff"),
+					DiffPosition: nil, // not in diff
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: false, // out of diff findings are always ignored
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := github.HasBlockingFindings(tt.findings, tt.actions)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestExtractCommentDetails(t *testing.T) {
 	tests := []struct {
 		name            string

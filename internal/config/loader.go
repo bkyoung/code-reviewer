@@ -58,7 +58,33 @@ func Load(opts LoaderOptions) (Config, error) {
 	// Expand environment variables in config values
 	cfg = expandEnvVars(cfg)
 
+	// Process review config: expand threshold and apply defaults
+	reviewConfig, err := processReviewConfig(cfg.Review)
+	if err != nil {
+		return Config{}, fmt.Errorf("process review config: %w", err)
+	}
+	cfg.Review = reviewConfig
+
 	return cfg, nil
+}
+
+// processReviewConfig applies threshold expansion and defaults to the review configuration.
+// This is called after loading to ensure threshold-based configuration works correctly.
+// Returns an error if the blockThreshold value is invalid.
+func processReviewConfig(review ReviewConfig) (ReviewConfig, error) {
+	// Expand threshold to per-severity actions
+	expandedActions, err := expandBlockThreshold(review.BlockThreshold)
+	if err != nil {
+		return ReviewConfig{}, err
+	}
+
+	// Merge expanded threshold with explicit actions (explicit wins)
+	review.Actions = mergeReviewActions(expandedActions, review.Actions)
+
+	// Apply defaults for any remaining empty action slots
+	review.Actions = applyActionDefaults(review.Actions)
+
+	return review, nil
 }
 
 // expandEnvVars expands ${VAR} and $VAR syntax in configuration strings.
@@ -239,13 +265,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("providers.ollama.model", "llama2")
 	v.SetDefault("providers.static.model", "static-v1")
 
-	// Review action defaults (Phase 2) - configures GitHub review actions per severity
-	v.SetDefault("review.actions.onCritical", "request_changes")
-	v.SetDefault("review.actions.onHigh", "request_changes")
-	v.SetDefault("review.actions.onMedium", "comment")
-	v.SetDefault("review.actions.onLow", "comment")
-	v.SetDefault("review.actions.onClean", "approve")
-	v.SetDefault("review.actions.onNonBlocking", "approve")
+	// Review action defaults are NOT set here.
+	// They are applied in config.go after blockThreshold expansion to allow
+	// threshold-based configuration to work correctly. See chooseReview().
 
 	// Bot username for auto-dismissing stale reviews (Phase 2)
 	v.SetDefault("review.botUsername", "github-actions[bot]")

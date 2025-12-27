@@ -23,6 +23,11 @@ type ReviewActions struct {
 	OnLow         string // Action for low severity findings
 	OnClean       string // Action when no findings in diff
 	OnNonBlocking string // Action when findings exist but none trigger REQUEST_CHANGES
+
+	// AlwaysBlockCategories lists finding categories that always trigger REQUEST_CHANGES
+	// regardless of severity. This provides an additive override for specific categories
+	// like "security" that should always block, even if severity-based config wouldn't.
+	AlwaysBlockCategories []string
 }
 
 // NormalizeAction converts a string action to ReviewEvent.
@@ -250,6 +255,10 @@ func wouldTriggerRequestChanges(action string, defaultBlocking bool) bool {
 // based on the provided action configuration.
 // This is exported so that summary_builder can use the same logic to determine
 // whether to show "Approved with suggestions" prefix.
+//
+// A finding blocks if EITHER:
+// - Its severity triggers REQUEST_CHANGES (via OnCritical/OnHigh/etc. or defaults)
+// - Its category is in the AlwaysBlockCategories list (additive override)
 func HasBlockingFindings(findings []PositionedFinding, actions ReviewActions) bool {
 	inDiffFindings := filterInDiff(findings)
 	if len(inDiffFindings) == 0 {
@@ -264,8 +273,25 @@ func HasBlockingFindings(findings []PositionedFinding, actions ReviewActions) bo
 		"low":      actions.OnLow,
 	}
 
-	// Check each finding's severity against blocking configuration
+	// Build set of always-block categories (case-insensitive, trimmed)
+	blockCategories := make(map[string]bool, len(actions.AlwaysBlockCategories))
+	for _, cat := range actions.AlwaysBlockCategories {
+		normalized := strings.ToLower(strings.TrimSpace(cat))
+		if normalized != "" {
+			blockCategories[normalized] = true
+		}
+	}
+
+	// Check each finding against blocking configuration
 	for _, pf := range inDiffFindings {
+		// Check category-based blocking first (additive override)
+		// Normalize category: trim whitespace and lowercase for matching
+		normalizedCategory := strings.ToLower(strings.TrimSpace(pf.Finding.Category))
+		if normalizedCategory != "" && blockCategories[normalizedCategory] {
+			return true
+		}
+
+		// Check severity-based blocking
 		severity := strings.ToLower(pf.Finding.Severity)
 		defaultBlocking, known := defaultBlockingSeverities[severity]
 		if !known {

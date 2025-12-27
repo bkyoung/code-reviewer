@@ -217,12 +217,13 @@ func run() error {
 		DefaultRepo:         repoName,
 		DefaultInstructions: cfg.Review.Instructions,
 		DefaultReviewActions: cli.DefaultReviewActions{
-			OnCritical:    cfg.Review.Actions.OnCritical,
-			OnHigh:        cfg.Review.Actions.OnHigh,
-			OnMedium:      cfg.Review.Actions.OnMedium,
-			OnLow:         cfg.Review.Actions.OnLow,
-			OnClean:       cfg.Review.Actions.OnClean,
-			OnNonBlocking: cfg.Review.Actions.OnNonBlocking,
+			OnCritical:            cfg.Review.Actions.OnCritical,
+			OnHigh:                cfg.Review.Actions.OnHigh,
+			OnMedium:              cfg.Review.Actions.OnMedium,
+			OnLow:                 cfg.Review.Actions.OnLow,
+			OnClean:               cfg.Review.Actions.OnClean,
+			OnNonBlocking:         cfg.Review.Actions.OnNonBlocking,
+			AlwaysBlockCategories: cfg.Review.AlwaysBlockCategories,
 		},
 		DefaultBotUsername: cfg.Review.BotUsername,
 		DefaultVerification: cli.DefaultVerification{
@@ -676,12 +677,13 @@ func (a *githubPosterAdapter) PostReview(ctx context.Context, req review.GitHubP
 
 	// Build review actions config for determining attention severities
 	reviewActions := githubadapter.ReviewActions{
-		OnCritical:    req.ActionOnCritical,
-		OnHigh:        req.ActionOnHigh,
-		OnMedium:      req.ActionOnMedium,
-		OnLow:         req.ActionOnLow,
-		OnClean:       req.ActionOnClean,
-		OnNonBlocking: req.ActionOnNonBlocking,
+		OnCritical:            req.ActionOnCritical,
+		OnHigh:                req.ActionOnHigh,
+		OnMedium:              req.ActionOnMedium,
+		OnLow:                 req.ActionOnLow,
+		OnClean:               req.ActionOnClean,
+		OnNonBlocking:         req.ActionOnNonBlocking,
+		AlwaysBlockCategories: req.AlwaysBlockCategories,
 	}
 
 	// Build programmatic summary (replaces LLM-generated summary)

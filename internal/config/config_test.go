@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bkyoung/code-reviewer/internal/config"
@@ -19,7 +20,10 @@ func TestMergePrioritizesLaterConfigs(t *testing.T) {
 		Output: config.OutputConfig{Directory: "env"},
 	}
 
-	merged := config.Merge(base, file, final)
+	merged, err := config.Merge(base, file, final)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Output.Directory != "env" {
 		t.Fatalf("expected env directory to win, got %s", merged.Output.Directory)
@@ -241,7 +245,10 @@ func TestReviewActionsMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Overlay with non-empty actions should replace
 	if merged.Review.Actions.OnHigh != "approve" {
@@ -308,7 +315,10 @@ func TestBotUsernameMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Review.BotUsername != "overlay-bot[bot]" {
 		t.Errorf("expected BotUsername 'overlay-bot[bot]' from overlay, got %s", merged.Review.BotUsername)
@@ -327,7 +337,10 @@ func TestBotUsernameMergePreservesBase(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.Review.BotUsername != "base-bot[bot]" {
 		t.Errorf("expected BotUsername 'base-bot[bot]' from base, got %s", merged.Review.BotUsername)
@@ -434,7 +447,10 @@ func TestVerificationConfigMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Field-by-field merge: overlay fields override base, unset fields preserved from base
 	if !merged.Verification.Enabled {
@@ -468,7 +484,10 @@ func TestVerificationConfigMergePreservesBase(t *testing.T) {
 		// Empty verification config - should preserve base
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if !merged.Verification.Enabled {
 		t.Error("expected Verification.Enabled to be preserved from base")
@@ -499,7 +518,10 @@ func TestVerificationConfigMergeCanDisable(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Overlay should be able to disable verification when other fields are set
 	if merged.Verification.Enabled {
@@ -649,7 +671,10 @@ func TestSizeGuardsConfigMerge(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Warn should be from base, max from overlay
 	if merged.SizeGuards.WarnTokens != 100000 {
@@ -678,7 +703,10 @@ func TestSizeGuardsConfigMergeProviders(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	// Both providers should exist in merged config
 	if len(merged.SizeGuards.Providers) != 2 {
@@ -713,7 +741,10 @@ func TestSizeGuardsConfigMergeCanDisable(t *testing.T) {
 		},
 	}
 
-	merged := config.Merge(base, overlay)
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
 
 	if merged.SizeGuards.IsEnabled() {
 		t.Error("expected SizeGuards to be disabled by overlay")
@@ -766,5 +797,378 @@ sizeGuards:
 	}
 	if gemini.MaxTokens != 1000000 {
 		t.Errorf("expected gemini MaxTokens 1000000, got %d", gemini.MaxTokens)
+	}
+}
+
+// BlockThreshold tests
+
+func TestBlockThresholdExpansion_Critical(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: critical
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_CRIT",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Only critical should block
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "comment" {
+		t.Errorf("expected OnHigh 'comment', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "comment" {
+		t.Errorf("expected OnMedium 'comment', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "comment" {
+		t.Errorf("expected OnLow 'comment', got %s", cfg.Review.Actions.OnLow)
+	}
+}
+
+func TestBlockThresholdExpansion_High(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: high
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_HIGH",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Critical and high should block
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "request_changes" {
+		t.Errorf("expected OnHigh 'request_changes', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "comment" {
+		t.Errorf("expected OnMedium 'comment', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "comment" {
+		t.Errorf("expected OnLow 'comment', got %s", cfg.Review.Actions.OnLow)
+	}
+}
+
+func TestBlockThresholdExpansion_Medium(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: medium
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_MED",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Critical, high, and medium should block
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "request_changes" {
+		t.Errorf("expected OnHigh 'request_changes', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "request_changes" {
+		t.Errorf("expected OnMedium 'request_changes', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "comment" {
+		t.Errorf("expected OnLow 'comment', got %s", cfg.Review.Actions.OnLow)
+	}
+}
+
+func TestBlockThresholdExpansion_Low(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: low
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_LOW",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// All severities should block
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "request_changes" {
+		t.Errorf("expected OnHigh 'request_changes', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "request_changes" {
+		t.Errorf("expected OnMedium 'request_changes', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "request_changes" {
+		t.Errorf("expected OnLow 'request_changes', got %s", cfg.Review.Actions.OnLow)
+	}
+}
+
+func TestBlockThresholdExpansion_None(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: none
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_NONE",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// No severities should block
+	if cfg.Review.Actions.OnCritical != "comment" {
+		t.Errorf("expected OnCritical 'comment', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "comment" {
+		t.Errorf("expected OnHigh 'comment', got %s", cfg.Review.Actions.OnHigh)
+	}
+	if cfg.Review.Actions.OnMedium != "comment" {
+		t.Errorf("expected OnMedium 'comment', got %s", cfg.Review.Actions.OnMedium)
+	}
+	if cfg.Review.Actions.OnLow != "comment" {
+		t.Errorf("expected OnLow 'comment', got %s", cfg.Review.Actions.OnLow)
+	}
+}
+
+func TestBlockThresholdExpansion_CaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: HIGH
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_CASE",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Should work same as "high"
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "request_changes" {
+		t.Errorf("expected OnHigh 'request_changes', got %s", cfg.Review.Actions.OnHigh)
+	}
+}
+
+func TestBlockThresholdExpansion_ExplicitActionsOverride(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: high
+  actions:
+    onHigh: comment
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_OVERRIDE",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	// Threshold says high blocks, but explicit action overrides to comment
+	if cfg.Review.Actions.OnCritical != "request_changes" {
+		t.Errorf("expected OnCritical 'request_changes', got %s", cfg.Review.Actions.OnCritical)
+	}
+	if cfg.Review.Actions.OnHigh != "comment" {
+		t.Errorf("expected OnHigh 'comment' (explicit override), got %s", cfg.Review.Actions.OnHigh)
+	}
+}
+
+func TestBlockThresholdExpansion_InvalidThreshold(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  blockThreshold: invalid_value
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	_, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_THRESHOLD_INVALID",
+	})
+
+	// Invalid threshold should now return an error instead of silently falling back
+	if err == nil {
+		t.Fatal("expected error for invalid blockThreshold, got nil")
+	}
+
+	// Verify error message contains useful information
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "invalid blockThreshold") {
+		t.Errorf("expected error to mention 'invalid blockThreshold', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "invalid_value") {
+		t.Errorf("expected error to mention the invalid value 'invalid_value', got: %s", errMsg)
+	}
+}
+
+// AlwaysBlockCategories tests
+
+func TestAlwaysBlockCategories_FromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+review:
+  alwaysBlockCategories:
+    - security
+    - bug
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_CATEGORIES_FILE",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	if len(cfg.Review.AlwaysBlockCategories) != 2 {
+		t.Fatalf("expected 2 categories, got %d", len(cfg.Review.AlwaysBlockCategories))
+	}
+	if cfg.Review.AlwaysBlockCategories[0] != "security" {
+		t.Errorf("expected first category 'security', got %s", cfg.Review.AlwaysBlockCategories[0])
+	}
+	if cfg.Review.AlwaysBlockCategories[1] != "bug" {
+		t.Errorf("expected second category 'bug', got %s", cfg.Review.AlwaysBlockCategories[1])
+	}
+}
+
+func TestAlwaysBlockCategories_Merge(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			AlwaysBlockCategories: []string{"security"},
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			AlwaysBlockCategories: []string{"bug", "data-loss"},
+		},
+	}
+
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
+
+	// Should have union of both
+	if len(merged.Review.AlwaysBlockCategories) != 3 {
+		t.Fatalf("expected 3 categories, got %d: %v", len(merged.Review.AlwaysBlockCategories), merged.Review.AlwaysBlockCategories)
+	}
+}
+
+func TestAlwaysBlockCategories_MergeDeduplicates(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			AlwaysBlockCategories: []string{"security", "bug"},
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			AlwaysBlockCategories: []string{"bug", "Security"}, // Duplicate with different case
+		},
+	}
+
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
+
+	// Should deduplicate (case-insensitive)
+	if len(merged.Review.AlwaysBlockCategories) != 2 {
+		t.Fatalf("expected 2 categories (deduplicated), got %d: %v", len(merged.Review.AlwaysBlockCategories), merged.Review.AlwaysBlockCategories)
+	}
+}
+
+func TestBlockThresholdMerge_OverlayWins(t *testing.T) {
+	base := config.Config{
+		Review: config.ReviewConfig{
+			BlockThreshold: "high",
+		},
+	}
+	overlay := config.Config{
+		Review: config.ReviewConfig{
+			BlockThreshold: "medium",
+		},
+	}
+
+	merged, err := config.Merge(base, overlay)
+	if err != nil {
+		t.Fatalf("Merge returned error: %v", err)
+	}
+
+	// Medium threshold should win
+	if merged.Review.Actions.OnMedium != "request_changes" {
+		t.Errorf("expected OnMedium 'request_changes' from overlay threshold, got %s", merged.Review.Actions.OnMedium)
 	}
 }
