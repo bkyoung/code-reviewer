@@ -72,6 +72,10 @@ func (m *mockProvider) Review(ctx context.Context, req review.ProviderRequest) (
 	return m.response, m.err
 }
 
+func (m *mockProvider) EstimateTokens(text string) int {
+	return len(text) / 4 // Simple estimate for testing
+}
+
 type mockMarkdownWriter struct {
 	mu    sync.Mutex
 	calls []domain.MarkdownArtifact
@@ -742,6 +746,10 @@ func (b *blockingProvider) Review(ctx context.Context, req review.ProviderReques
 	b.mu.Unlock()
 
 	return domain.Review{}, ctx.Err()
+}
+
+func (b *blockingProvider) EstimateTokens(text string) int {
+	return len(text) / 4 // Simple estimate for testing
 }
 
 func TestOrchestrator_ContextCancellation(t *testing.T) {

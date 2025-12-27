@@ -10,6 +10,41 @@ import (
 	"github.com/bkyoung/code-reviewer/internal/domain"
 )
 
+// TokenEstimator estimates the token count for a given text.
+// This is used by size guards to determine when truncation is needed.
+type TokenEstimator interface {
+	EstimateTokens(text string) int
+}
+
+// TruncationResult captures the outcome of size guard processing.
+// This information is included in the review output to warn users
+// about potentially incomplete reviews due to size limits.
+type TruncationResult struct {
+	// WasWarned indicates if the prompt exceeded the warning threshold.
+	WasWarned bool
+
+	// WasTruncated indicates if files were removed to fit within limits.
+	WasTruncated bool
+
+	// OriginalTokens is the estimated token count before truncation.
+	OriginalTokens int
+
+	// FinalTokens is the estimated token count after truncation.
+	FinalTokens int
+
+	// RemovedFiles lists files that were removed during truncation.
+	RemovedFiles []string
+
+	// TruncationNote is a human-readable message about what was truncated.
+	TruncationNote string
+}
+
+// SizeGuardLimits specifies the token thresholds for size guards.
+type SizeGuardLimits struct {
+	WarnTokens int
+	MaxTokens  int
+}
+
 // EnhancedPromptBuilder builds prompts with rich context and provider-specific templates.
 type EnhancedPromptBuilder struct {
 	providerTemplates map[string]string // Provider-specific templates
@@ -52,6 +87,213 @@ func (b *EnhancedPromptBuilder) Build(
 		Prompt:  prompt,
 		MaxSize: defaultMaxTokens,
 	}, nil
+}
+
+// BuildWithSizeGuards constructs a provider request with size guard enforcement.
+// If the prompt exceeds limits, files are truncated by priority (docs first, source last).
+func (b *EnhancedPromptBuilder) BuildWithSizeGuards(
+	context ProjectContext,
+	diff domain.Diff,
+	req BranchRequest,
+	providerName string,
+	estimator TokenEstimator,
+	limits SizeGuardLimits,
+) (ProviderRequest, TruncationResult, error) {
+	// Validate inputs
+	if estimator == nil {
+		return ProviderRequest{}, TruncationResult{}, fmt.Errorf("estimator cannot be nil")
+	}
+
+	// Select template for provider
+	templateText := b.defaultTemplate
+	if providerTemplate, ok := b.providerTemplates[providerName]; ok {
+		templateText = providerTemplate
+	}
+
+	// Build initial prompt to estimate size
+	prompt, err := b.renderTemplate(templateText, context, diff, req)
+	if err != nil {
+		return ProviderRequest{}, TruncationResult{}, fmt.Errorf("failed to render template: %w", err)
+	}
+
+	originalTokens := estimator.EstimateTokens(prompt)
+	result := TruncationResult{
+		OriginalTokens: originalTokens,
+		FinalTokens:    originalTokens,
+	}
+
+	// Check if warning threshold exceeded
+	if originalTokens >= limits.WarnTokens {
+		result.WasWarned = true
+	}
+
+	// Check if truncation is needed
+	if originalTokens <= limits.MaxTokens {
+		// No truncation needed
+		return ProviderRequest{
+			Prompt:  prompt,
+			MaxSize: defaultMaxTokens,
+		}, result, nil
+	}
+
+	// Truncation needed - remove files by priority until under limit
+	truncatedDiff, removedFiles, truncErr := b.truncateDiff(
+		diff,
+		context,
+		req,
+		templateText,
+		estimator,
+		limits.MaxTokens,
+	)
+	if truncErr != nil {
+		return ProviderRequest{}, TruncationResult{}, truncErr
+	}
+
+	// Re-render with truncated diff
+	prompt, err = b.renderTemplate(templateText, context, truncatedDiff, req)
+	if err != nil {
+		return ProviderRequest{}, TruncationResult{}, fmt.Errorf("failed to render truncated template: %w", err)
+	}
+
+	finalTokens := estimator.EstimateTokens(prompt)
+
+	result.WasTruncated = len(removedFiles) > 0
+	result.FinalTokens = finalTokens
+	result.RemovedFiles = removedFiles
+
+	// Check if we still exceed limits after truncation
+	stillExceedsLimit := finalTokens > limits.MaxTokens
+
+	if result.WasTruncated {
+		if stillExceedsLimit {
+			result.TruncationNote = fmt.Sprintf(
+				"PR size (%d tokens) exceeded limit (%d tokens). Removed %d file(s) but still at %d tokens. "+
+					"The review will likely fail or be incomplete. This PR is too large to review effectively.",
+				originalTokens,
+				limits.MaxTokens,
+				len(removedFiles),
+				finalTokens,
+			)
+		} else {
+			result.TruncationNote = fmt.Sprintf(
+				"PR size (%d tokens) exceeded limit (%d tokens). Removed %d file(s) for review: %s. "+
+					"The review may be incomplete. Consider splitting this PR into smaller changes.",
+				originalTokens,
+				limits.MaxTokens,
+				len(removedFiles),
+				strings.Join(removedFiles, ", "),
+			)
+		}
+	}
+
+	return ProviderRequest{
+		Prompt:  prompt,
+		MaxSize: defaultMaxTokens,
+	}, result, nil
+}
+
+// truncateDiff removes files by priority until the prompt fits within maxTokens.
+// Removal priority (docs removed first, source code last):
+// - Priority 4: Documentation (.md, .rst, .txt, docs/)
+// - Priority 3: Build/CI files (Dockerfile, Makefile, .github/, ci)
+// - Priority 2: Configuration files (.yaml, .yml, .json, .toml, etc.)
+// - Priority 1: Test files (files containing "test" or "spec")
+// - Priority 0: Source code (highest priority to keep)
+//
+// Returns an error if template rendering fails, as this indicates a fundamental
+// problem (like template syntax errors) that cannot be fixed by removing files.
+func (b *EnhancedPromptBuilder) truncateDiff(
+	diff domain.Diff,
+	context ProjectContext,
+	req BranchRequest,
+	templateText string,
+	estimator TokenEstimator,
+	maxTokens int,
+) (domain.Diff, []string, error) {
+	// Handle empty diff case
+	if len(diff.Files) == 0 {
+		return diff, nil, nil
+	}
+
+	// Sort files by removal priority (highest priority to remove first)
+	type prioritizedFile struct {
+		file     domain.FileDiff
+		priority int
+		index    int // Original index for stable removal
+	}
+
+	files := make([]prioritizedFile, len(diff.Files))
+	for i, f := range diff.Files {
+		files[i] = prioritizedFile{
+			file:     f,
+			priority: fileTypePriority(f.Path),
+			index:    i,
+		}
+	}
+
+	// Sort by priority descending (higher priority = remove first)
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].priority > files[j].priority
+	})
+
+	var removedFiles []string
+	removedIndices := make(map[int]bool)
+
+	// Maximum iterations = number of files (one removal per iteration max)
+	for i := 0; i <= len(diff.Files); i++ {
+		// Build current file list excluding removed indices
+		currentFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
+		for idx, f := range diff.Files {
+			if !removedIndices[idx] {
+				currentFiles = append(currentFiles, f)
+			}
+		}
+
+		testDiff := domain.Diff{
+			FromCommitHash: diff.FromCommitHash,
+			ToCommitHash:   diff.ToCommitHash,
+			Files:          currentFiles,
+		}
+
+		// Try rendering - if this fails, it's a template error, not a size issue
+		prompt, err := b.renderTemplate(templateText, context, testDiff, req)
+		if err != nil {
+			// Template errors cannot be fixed by removing files - fail fast
+			return domain.Diff{}, nil, fmt.Errorf("template rendering failed: %w", err)
+		}
+
+		tokens := estimator.EstimateTokens(prompt)
+		if tokens <= maxTokens {
+			// Success - we're under the limit
+			return testDiff, removedFiles, nil
+		}
+
+		// Still too large - remove next lowest priority file if available
+		if len(files) == 0 {
+			// No more files to remove, return what we have
+			// (caller will see it's still over limit via token count)
+			return testDiff, removedFiles, nil
+		}
+
+		fileToRemove := files[0]
+		files = files[1:]
+		removedIndices[fileToRemove.index] = true
+		removedFiles = append(removedFiles, fileToRemove.file.Path)
+	}
+
+	// Fallback: return remaining files (should not reach here normally)
+	finalFiles := make([]domain.FileDiff, 0, len(diff.Files)-len(removedIndices))
+	for idx, f := range diff.Files {
+		if !removedIndices[idx] {
+			finalFiles = append(finalFiles, f)
+		}
+	}
+
+	return domain.Diff{
+		FromCommitHash: diff.FromCommitHash,
+		ToCommitHash:   diff.ToCommitHash,
+		Files:          finalFiles,
+	}, removedFiles, nil
 }
 
 // TemplateData holds all data available to templates.

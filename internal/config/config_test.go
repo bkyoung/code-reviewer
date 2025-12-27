@@ -509,3 +509,262 @@ func TestVerificationConfigMergeCanDisable(t *testing.T) {
 		t.Errorf("expected Verification.Depth 'disabled' from overlay, got %s", merged.Verification.Depth)
 	}
 }
+
+// SizeGuards config tests
+
+func TestSizeGuardsConfigDefaults(t *testing.T) {
+	// With no config set, GetLimitsForProvider should return hardcoded defaults
+	cfg := config.SizeGuardsConfig{}
+
+	warn, max := cfg.GetLimitsForProvider("openai")
+
+	if warn != 150000 {
+		t.Errorf("expected default warn tokens 150000, got %d", warn)
+	}
+	if max != 200000 {
+		t.Errorf("expected default max tokens 200000, got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigGlobalOverrides(t *testing.T) {
+	cfg := config.SizeGuardsConfig{
+		WarnTokens: 100000,
+		MaxTokens:  120000,
+	}
+
+	warn, max := cfg.GetLimitsForProvider("openai")
+
+	if warn != 100000 {
+		t.Errorf("expected warn tokens 100000, got %d", warn)
+	}
+	if max != 120000 {
+		t.Errorf("expected max tokens 120000, got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigPerProviderOverrides(t *testing.T) {
+	cfg := config.SizeGuardsConfig{
+		WarnTokens: 150000,
+		MaxTokens:  200000,
+		Providers: map[string]config.ProviderSizeConfig{
+			"gemini": {
+				WarnTokens: 500000,
+				MaxTokens:  900000,
+			},
+		},
+	}
+
+	// Default provider gets global limits
+	warn, max := cfg.GetLimitsForProvider("openai")
+	if warn != 150000 {
+		t.Errorf("expected openai warn tokens 150000, got %d", warn)
+	}
+	if max != 200000 {
+		t.Errorf("expected openai max tokens 200000, got %d", max)
+	}
+
+	// Gemini gets per-provider limits
+	warn, max = cfg.GetLimitsForProvider("gemini")
+	if warn != 500000 {
+		t.Errorf("expected gemini warn tokens 500000, got %d", warn)
+	}
+	if max != 900000 {
+		t.Errorf("expected gemini max tokens 900000, got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigPartialProviderOverride(t *testing.T) {
+	cfg := config.SizeGuardsConfig{
+		WarnTokens: 150000,
+		MaxTokens:  200000,
+		Providers: map[string]config.ProviderSizeConfig{
+			"openai": {
+				MaxTokens: 120000, // Only override max (creates warn > max situation)
+			},
+		},
+	}
+
+	warn, max := cfg.GetLimitsForProvider("openai")
+
+	// When max < warn due to partial override, values are swapped
+	// to maintain warn <= max invariant
+	if warn != 120000 {
+		t.Errorf("expected warn tokens 120000 (swapped from max), got %d", warn)
+	}
+	if max != 150000 {
+		t.Errorf("expected max tokens 150000 (swapped from warn), got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigSwapsWarnMaxIfMisconfigured(t *testing.T) {
+	// Test that warn > max is corrected by swapping
+	cfg := config.SizeGuardsConfig{
+		WarnTokens: 200000, // Warn is higher than max (misconfigured)
+		MaxTokens:  100000,
+	}
+
+	warn, max := cfg.GetLimitsForProvider("openai")
+
+	// Should swap to maintain warn <= max
+	if warn != 100000 {
+		t.Errorf("expected warn tokens 100000 after swap, got %d", warn)
+	}
+	if max != 200000 {
+		t.Errorf("expected max tokens 200000 after swap, got %d", max)
+	}
+}
+
+func TestSizeGuardsConfigIsEnabled(t *testing.T) {
+	// Default (nil) should be enabled
+	cfg := config.SizeGuardsConfig{}
+	if !cfg.IsEnabled() {
+		t.Error("expected SizeGuards to be enabled by default")
+	}
+
+	// Explicit true
+	enabled := true
+	cfg.Enabled = &enabled
+	if !cfg.IsEnabled() {
+		t.Error("expected SizeGuards to be enabled when Enabled=true")
+	}
+
+	// Explicit false
+	disabled := false
+	cfg.Enabled = &disabled
+	if cfg.IsEnabled() {
+		t.Error("expected SizeGuards to be disabled when Enabled=false")
+	}
+}
+
+func TestSizeGuardsConfigMerge(t *testing.T) {
+	base := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			WarnTokens: 100000,
+			MaxTokens:  150000,
+		},
+	}
+	overlay := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			MaxTokens: 200000, // Only override max
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	// Warn should be from base, max from overlay
+	if merged.SizeGuards.WarnTokens != 100000 {
+		t.Errorf("expected WarnTokens 100000 from base, got %d", merged.SizeGuards.WarnTokens)
+	}
+	if merged.SizeGuards.MaxTokens != 200000 {
+		t.Errorf("expected MaxTokens 200000 from overlay, got %d", merged.SizeGuards.MaxTokens)
+	}
+}
+
+func TestSizeGuardsConfigMergeProviders(t *testing.T) {
+	base := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			WarnTokens: 150000,
+			MaxTokens:  200000,
+			Providers: map[string]config.ProviderSizeConfig{
+				"openai": {WarnTokens: 100000, MaxTokens: 120000},
+			},
+		},
+	}
+	overlay := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			Providers: map[string]config.ProviderSizeConfig{
+				"gemini": {WarnTokens: 500000, MaxTokens: 900000},
+			},
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	// Both providers should exist in merged config
+	if len(merged.SizeGuards.Providers) != 2 {
+		t.Fatalf("expected 2 providers in merged config, got %d", len(merged.SizeGuards.Providers))
+	}
+
+	openai := merged.SizeGuards.Providers["openai"]
+	if openai.WarnTokens != 100000 || openai.MaxTokens != 120000 {
+		t.Errorf("expected openai from base, got warn=%d max=%d", openai.WarnTokens, openai.MaxTokens)
+	}
+
+	gemini := merged.SizeGuards.Providers["gemini"]
+	if gemini.WarnTokens != 500000 || gemini.MaxTokens != 900000 {
+		t.Errorf("expected gemini from overlay, got warn=%d max=%d", gemini.WarnTokens, gemini.MaxTokens)
+	}
+}
+
+func TestSizeGuardsConfigMergeCanDisable(t *testing.T) {
+	enabled := true
+	disabled := false
+
+	base := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			Enabled:    &enabled,
+			WarnTokens: 150000,
+			MaxTokens:  200000,
+		},
+	}
+	overlay := config.Config{
+		SizeGuards: config.SizeGuardsConfig{
+			Enabled: &disabled,
+		},
+	}
+
+	merged := config.Merge(base, overlay)
+
+	if merged.SizeGuards.IsEnabled() {
+		t.Error("expected SizeGuards to be disabled by overlay")
+	}
+	// Other fields should be preserved from base
+	if merged.SizeGuards.WarnTokens != 150000 {
+		t.Errorf("expected WarnTokens 150000 from base, got %d", merged.SizeGuards.WarnTokens)
+	}
+}
+
+func TestSizeGuardsConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cr.yaml")
+	content := `
+sizeGuards:
+  warnTokens: 100000
+  maxTokens: 150000
+  enabled: false
+  providers:
+    gemini:
+      warnTokens: 800000
+      maxTokens: 1000000
+`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(config.LoaderOptions{
+		ConfigPaths: []string{dir},
+		FileName:    "cr",
+		EnvPrefix:   "CR_TEST_SIZEGUARDS",
+	})
+	if err != nil {
+		t.Fatalf("load returned error: %v", err)
+	}
+
+	if cfg.SizeGuards.IsEnabled() {
+		t.Error("expected SizeGuards to be disabled from file")
+	}
+	if cfg.SizeGuards.WarnTokens != 100000 {
+		t.Errorf("expected WarnTokens 100000 from file, got %d", cfg.SizeGuards.WarnTokens)
+	}
+	if cfg.SizeGuards.MaxTokens != 150000 {
+		t.Errorf("expected MaxTokens 150000 from file, got %d", cfg.SizeGuards.MaxTokens)
+	}
+
+	gemini := cfg.SizeGuards.Providers["gemini"]
+	if gemini.WarnTokens != 800000 {
+		t.Errorf("expected gemini WarnTokens 800000, got %d", gemini.WarnTokens)
+	}
+	if gemini.MaxTokens != 1000000 {
+		t.Errorf("expected gemini MaxTokens 1000000, got %d", gemini.MaxTokens)
+	}
+}

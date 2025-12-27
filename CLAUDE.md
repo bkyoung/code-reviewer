@@ -37,7 +37,7 @@
 | 2.4 Skip Trigger | Not Started |
 | 2.5 Incremental Reviews | ⏸️ Deferred |
 | 2.6 Finding Deduplication | 🚧 Epic #106 |
-| 2.7 PR Size Guards | Not Started |
+| 2.7 PR Size Guards | 🚧 PR #113 |
 | 2.8 Finding Verification | ✅ Complete |
 
 ### v0.3.0 Features
@@ -135,6 +135,7 @@ Use these skills for targeted context instead of reading docs manually:
 | **github-workflow** | Commits, PRs, issues | `/skill github-workflow` |
 | **architecture** | Design questions, understanding codebase | `/skill architecture` |
 | **review** | Using the code reviewer itself | `/skill review` |
+| **triage-pr-review** | Triage PR code review feedback & SARIF alerts | `/skill triage-pr-review` |
 
 ---
 

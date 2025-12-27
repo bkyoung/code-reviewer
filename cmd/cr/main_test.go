@@ -22,6 +22,10 @@ func (m *mockProvider) Review(ctx context.Context, request review.ProviderReques
 	return domain.Review{}, nil
 }
 
+func (m *mockProvider) EstimateTokens(text string) int {
+	return len(text) / 4 // Simple estimate for testing
+}
+
 func TestCreatePlanningProvider(t *testing.T) {
 	tests := []struct {
 		name             string
