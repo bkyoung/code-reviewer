@@ -62,6 +62,34 @@ func TestVerificationPrompt(t *testing.T) {
 			t.Error("missing evidence field in response format")
 		}
 	})
+
+	t.Run("contains false positive patterns guidance", func(t *testing.T) {
+		if !strings.Contains(prompt, "False Positive Patterns") {
+			t.Error("missing false positive patterns section")
+		}
+		if !strings.Contains(prompt, "Short-circuit null guards") {
+			t.Error("missing short-circuit null guards pattern")
+		}
+		if !strings.Contains(prompt, "Short-circuit OR guards") {
+			t.Error("missing short-circuit OR guards pattern")
+		}
+		if !strings.Contains(prompt, "Optional chaining operators") {
+			t.Error("missing optional chaining pattern")
+		}
+		if !strings.Contains(prompt, "Guard clauses with early return") {
+			t.Error("missing guard clauses pattern")
+		}
+		// Check language examples
+		if !strings.Contains(prompt, "Go") {
+			t.Error("missing Go example")
+		}
+		if !strings.Contains(prompt, "JavaScript") {
+			t.Error("missing JavaScript example")
+		}
+		if !strings.Contains(prompt, "Python") {
+			t.Error("missing Python example")
+		}
+	})
 }
 
 func TestCandidatePrompt(t *testing.T) {

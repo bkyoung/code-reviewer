@@ -108,6 +108,32 @@ After receiving the tool result, continue your investigation or provide your fin
 - Style issues should always be marked as NOT blocking
 - If you cannot find sufficient evidence, return low confidence
 - Be specific in your evidence - cite exact lines and code
+
+## Common False Positive Patterns - DO NOT flag these as issues:
+
+**Short-circuit null guards**: When a null/nil/None check is combined with
+a dereference using && (AND), this is SAFE. The logical AND operator
+short-circuits in virtually all languages - if the left side is false,
+the right side is never evaluated. Examples:
+- ` + "`x != nil && x.field`" + ` (Go)
+- ` + "`obj !== null && obj.prop`" + ` (JavaScript/TypeScript)
+- ` + "`x is not None and x.attr`" + ` (Python)
+- ` + "`!is.null(x) && x$field`" + ` (R)
+- ` + "`!isnothing(x) && x.field`" + ` (Julia)
+
+**Short-circuit OR guards**: Similarly, ` + "`x == nil || ...`" + ` patterns
+short-circuit when the left side is true, so subsequent code is safe.
+
+**Optional chaining operators**: ` + "`?.`" + ` in JavaScript/TypeScript,
+` + "`&.`" + ` in Ruby, etc. are designed specifically for safe null access.
+
+**Guard clauses with early return**: When a function checks for null and
+returns/throws early, subsequent code that dereferences the value is safe.
+
+If the reported issue matches one of these patterns, mark it as:
+- verified: false
+- confidence: 90+ (high confidence it's a false positive)
+- evidence: Explain which safe pattern applies
 `)
 
 	return sb.String()
