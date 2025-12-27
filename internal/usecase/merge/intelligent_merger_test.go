@@ -250,6 +250,9 @@ func TestIntelligentMerge_Integration(t *testing.T) {
 			ProviderName: "openai",
 			ModelName:    "gpt-4o-mini",
 			Summary:      "Found 2 critical security vulnerabilities in authentication code",
+			TokensIn:     1500,
+			TokensOut:    250,
+			Cost:         0.0012,
 			Findings: []domain.Finding{
 				{
 					ID:          "finding1",
@@ -278,6 +281,9 @@ func TestIntelligentMerge_Integration(t *testing.T) {
 			ProviderName: "anthropic",
 			ModelName:    "claude-3-5-sonnet",
 			Summary:      "Identified SQL injection risk and potential null pointer issue",
+			TokensIn:     2000,
+			TokensOut:    300,
+			Cost:         0.0018,
 			Findings: []domain.Finding{
 				{
 					ID:          "finding3",
@@ -331,6 +337,21 @@ func TestIntelligentMerge_Integration(t *testing.T) {
 	totalFindings := len(reviews[0].Findings) + len(reviews[1].Findings)
 	if len(result.Findings) >= totalFindings {
 		t.Logf("Warning: expected grouping to reduce findings from %d, got %d", totalFindings, len(result.Findings))
+	}
+
+	// Verify usage metadata aggregation
+	expectedTokensIn := 1500 + 2000
+	expectedTokensOut := 250 + 300
+	expectedCost := 0.0012 + 0.0018
+
+	if result.TokensIn != expectedTokensIn {
+		t.Errorf("expected TokensIn %d, got %d", expectedTokensIn, result.TokensIn)
+	}
+	if result.TokensOut != expectedTokensOut {
+		t.Errorf("expected TokensOut %d, got %d", expectedTokensOut, result.TokensOut)
+	}
+	if result.Cost != expectedCost {
+		t.Errorf("expected Cost %.4f, got %.4f", expectedCost, result.Cost)
 	}
 }
 

@@ -54,6 +54,7 @@ func buildContent(artifact domain.MarkdownArtifact) string {
 	builder.WriteString(fmt.Sprintf("- Provider: %s (%s)\n", artifact.Review.ProviderName, artifact.Review.ModelName))
 	builder.WriteString(fmt.Sprintf("- Base: %s\n", artifact.BaseRef))
 	builder.WriteString(fmt.Sprintf("- Target: %s\n", artifact.TargetRef))
+	builder.WriteString(fmt.Sprintf("- Tokens: %d in / %d out\n", artifact.Review.TokensIn, artifact.Review.TokensOut))
 	builder.WriteString(fmt.Sprintf("- Cost: $%.4f\n\n", artifact.Review.Cost))
 
 	// Include truncation warning if PR was too large

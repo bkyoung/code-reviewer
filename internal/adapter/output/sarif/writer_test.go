@@ -158,6 +158,8 @@ func TestWriter_Write_IncludesCostInProperties(t *testing.T) {
 		ProviderName: "openai",
 		ModelName:    "gpt-4o",
 		Summary:      "Test review",
+		TokensIn:     1000,
+		TokensOut:    500,
 		Cost:         0.0523,
 		Findings:     []domain.Finding{},
 	}
@@ -190,6 +192,8 @@ func TestWriter_Write_IncludesCostInProperties(t *testing.T) {
 	properties := run["properties"].(map[string]interface{})
 	assert.Equal(t, 0.0523, properties["cost"])
 	assert.Equal(t, "Test review", properties["summary"])
+	assert.Equal(t, float64(1000), properties["tokensIn"])
+	assert.Equal(t, float64(500), properties["tokensOut"])
 }
 
 func TestWriter_Write_HandlesInvalidCost(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	"github.com/bkyoung/code-reviewer/internal/adapter/llm/anthropic"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
@@ -13,11 +14,11 @@ import (
 
 type stubClient struct {
 	requests []anthropic.Request
-	response anthropic.Response
+	response llm.ProviderResponse
 	err      error
 }
 
-func (s *stubClient) CreateReview(ctx context.Context, req anthropic.Request) (anthropic.Response, error) {
+func (s *stubClient) CreateReview(ctx context.Context, req anthropic.Request) (llm.ProviderResponse, error) {
 	s.requests = append(s.requests, req)
 	return s.response, s.err
 }
@@ -25,12 +26,13 @@ func (s *stubClient) CreateReview(ctx context.Context, req anthropic.Request) (a
 func TestProvider_Review(t *testing.T) {
 	t.Run("forwards request to client correctly", func(t *testing.T) {
 		client := &stubClient{
-			response: anthropic.Response{
+			response: llm.ProviderResponse{
 				Model:   "claude-3-5-sonnet-20241022",
 				Summary: "Test summary",
 				Findings: []domain.Finding{
 					{ID: "id1", File: "main.go", LineStart: 1, LineEnd: 5, Severity: "high", Category: "security"},
 				},
+				Usage: llm.UsageMetadata{TokensIn: 100, TokensOut: 50, Cost: 0.01},
 			},
 		}
 

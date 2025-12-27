@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -318,7 +319,7 @@ func (c *HTTPClient) handleErrorResponse(statusCode int, body []byte) error {
 }
 
 // CreateReview implements the Client interface for the Provider.
-func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, error) {
+func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (llm.ProviderResponse, error) {
 	var seed *uint64
 	if req.Seed > 0 {
 		seed = &req.Seed
@@ -328,35 +329,44 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 		Seed: seed,
 	})
 	if err != nil {
-		return Response{}, fmt.Errorf("ollama: %w", err)
+		return llm.ProviderResponse{}, fmt.Errorf("ollama: %w", err)
+	}
+
+	// Build usage metadata from API response
+	// Note: Ollama is local/free, so Cost will be 0
+	usage := llm.UsageMetadata{
+		TokensIn:  apiResp.TokensIn,
+		TokensOut: apiResp.TokensOut,
+		Cost:      apiResp.Cost,
 	}
 
 	// Parse the response text to extract JSON review
 	review, err := parseReviewJSON(apiResp.Text)
 	if err != nil {
 		// If JSON parsing fails, return text as summary
-		return Response{
+		return llm.ProviderResponse{
 			Model:    apiResp.Model,
 			Summary:  apiResp.Text,
 			Findings: []domain.Finding{},
+			Usage:    usage,
 		}, nil
 	}
 
 	review.Model = apiResp.Model
+	review.Usage = usage
 	return review, nil
 }
 
 // parseReviewJSON extracts and parses the JSON review from the response text.
 // The LLM may return JSON wrapped in markdown code blocks.
-func parseReviewJSON(text string) (Response, error) {
+func parseReviewJSON(text string) (llm.ProviderResponse, error) {
 	// Use shared JSON parsing utility
 	summary, findings, err := llmhttp.ParseReviewResponse(text)
 	if err != nil {
-		return Response{}, err
+		return llm.ProviderResponse{}, err
 	}
 
-	return Response{
-		Model:    "", // Will be set by caller
+	return llm.ProviderResponse{
 		Summary:  summary,
 		Findings: findings,
 	}, nil

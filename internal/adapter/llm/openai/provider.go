@@ -13,7 +13,7 @@ const providerName = "openai"
 
 // Client abstracts the OpenAI HTTP client behaviour we need.
 type Client interface {
-	CreateReview(ctx context.Context, req Request) (Response, error)
+	CreateReview(ctx context.Context, req Request) (llm.ProviderResponse, error)
 }
 
 // Request represents the outbound payload for the OpenAI provider.
@@ -22,13 +22,6 @@ type Request struct {
 	Prompt    string
 	Seed      uint64
 	MaxTokens int
-}
-
-// Response captures the structured result returned by the LLM.
-type Response struct {
-	Model    string
-	Summary  string
-	Findings []domain.Finding
 }
 
 // Provider implements the usecase Provider port.
@@ -66,6 +59,9 @@ func (p *Provider) Review(ctx context.Context, req review.ProviderRequest) (doma
 		ModelName:    response.Model,
 		Summary:      response.Summary,
 		Findings:     response.Findings,
+		TokensIn:     response.Usage.TokensIn,
+		TokensOut:    response.Usage.TokensOut,
+		Cost:         response.Usage.Cost,
 	}, nil
 }
 

@@ -103,11 +103,23 @@ func (m *IntelligentMerger) Merge(ctx context.Context, reviews []domain.Review) 
 	// Synthesize summary
 	summary := m.synthesizeSummary(reviews)
 
+	// Aggregate usage metadata from all providers
+	var totalTokensIn, totalTokensOut int
+	var totalCost float64
+	for _, review := range reviews {
+		totalTokensIn += review.TokensIn
+		totalTokensOut += review.TokensOut
+		totalCost += review.Cost
+	}
+
 	return domain.Review{
 		ProviderName: "merged",
 		ModelName:    "consensus",
 		Summary:      summary,
 		Findings:     findings,
+		TokensIn:     totalTokensIn,
+		TokensOut:    totalTokensOut,
+		Cost:         totalCost,
 	}
 }
 

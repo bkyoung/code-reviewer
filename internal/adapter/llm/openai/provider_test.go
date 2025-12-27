@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	"github.com/bkyoung/code-reviewer/internal/adapter/llm/openai"
 	"github.com/bkyoung/code-reviewer/internal/domain"
 	"github.com/bkyoung/code-reviewer/internal/usecase/review"
@@ -12,22 +13,23 @@ import (
 
 type stubClient struct {
 	requests []openai.Request
-	response openai.Response
+	response llm.ProviderResponse
 	err      error
 }
 
-func (s *stubClient) CreateReview(ctx context.Context, req openai.Request) (openai.Response, error) {
+func (s *stubClient) CreateReview(ctx context.Context, req openai.Request) (llm.ProviderResponse, error) {
 	s.requests = append(s.requests, req)
 	return s.response, s.err
 }
 
 func TestProviderReview(t *testing.T) {
 	client := &stubClient{
-		response: openai.Response{
+		response: llm.ProviderResponse{
 			Summary: "summary",
 			Findings: []domain.Finding{
 				{ID: "id", File: "main.go", LineStart: 1, LineEnd: 1, Severity: "low", Category: "style"},
 			},
+			Usage: llm.UsageMetadata{TokensIn: 100, TokensOut: 50, Cost: 0.01},
 		},
 	}
 

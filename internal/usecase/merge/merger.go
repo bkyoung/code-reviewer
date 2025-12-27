@@ -14,7 +14,8 @@ func NewService() *Service {
 	return &Service{}
 }
 
-// Merge combines multiple reviews into a single review, de-duplicating findings.
+// Merge combines multiple reviews into a single review, de-duplicating findings
+// and aggregating usage metadata (tokens, cost) from all providers.
 func (s *Service) Merge(ctx context.Context, reviews []domain.Review) domain.Review {
 	mergedReview := domain.Review{
 		ProviderName: "merged",
@@ -25,7 +26,17 @@ func (s *Service) Merge(ctx context.Context, reviews []domain.Review) domain.Rev
 	seenFindings := make(map[string]bool)
 	var findings []domain.Finding
 
+	// Aggregate usage metadata from all providers
+	var totalTokensIn, totalTokensOut int
+	var totalCost float64
+
 	for _, review := range reviews {
+		// Aggregate usage
+		totalTokensIn += review.TokensIn
+		totalTokensOut += review.TokensOut
+		totalCost += review.Cost
+
+		// De-duplicate findings
 		for _, finding := range review.Findings {
 			if !seenFindings[finding.ID] {
 				seenFindings[finding.ID] = true
@@ -35,5 +46,8 @@ func (s *Service) Merge(ctx context.Context, reviews []domain.Review) domain.Rev
 	}
 
 	mergedReview.Findings = findings
+	mergedReview.TokensIn = totalTokensIn
+	mergedReview.TokensOut = totalTokensOut
+	mergedReview.Cost = totalCost
 	return mergedReview
 }

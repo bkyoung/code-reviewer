@@ -77,6 +77,8 @@ func TestWriterIncludesCostInformation(t *testing.T) {
 		ProviderName: "openai",
 		ModelName:    "gpt-4o",
 		Summary:      "Review summary",
+		TokensIn:     1000,
+		TokensOut:    500,
 		Cost:         0.0523, // $0.0523
 		Findings:     []domain.Finding{},
 	}
@@ -100,6 +102,11 @@ func TestWriterIncludesCostInformation(t *testing.T) {
 	}
 
 	contentStr := string(content)
+
+	// Verify token usage is included
+	if !strings.Contains(contentStr, "Tokens: 1000 in / 500 out") {
+		t.Errorf("markdown missing token information: %s", contentStr)
+	}
 
 	// Verify cost is included with correct formatting
 	if !strings.Contains(contentStr, "Cost: $0.0523") {

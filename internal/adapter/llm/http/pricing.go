@@ -43,15 +43,39 @@ func (p *DefaultPricing) GetCost(provider, model string, tokensIn, tokensOut int
 }
 
 // buildPricingTable returns pricing data for all models.
-// Pricing as of: 2025-10-21
+// Pricing as of: 2025-12-27
 // Sources:
 // - OpenAI: https://openai.com/api/pricing/
-// - Anthropic: https://www.anthropic.com/pricing
-// - Gemini: https://ai.google.dev/pricing
+// - Anthropic: https://claude.com/pricing
+// - Gemini: https://ai.google.dev/gemini-api/docs/pricing
 // - Ollama: Free (local)
 func buildPricingTable() map[string]map[string]ModelPricing {
 	return map[string]map[string]ModelPricing{
 		"openai": {
+			// GPT-5.2 family (December 2025)
+			// Short aliases (commonly used in config)
+			"gpt-5.2": {
+				InputPer1M:  1.75,
+				OutputPer1M: 14.00,
+			},
+			"gpt-5.2-pro": {
+				InputPer1M:  21.00,
+				OutputPer1M: 168.00,
+			},
+			// Full versioned names (returned by API)
+			"gpt-5.2-2025-12-11": {
+				InputPer1M:  1.75,
+				OutputPer1M: 14.00,
+			},
+			"gpt-5.2-pro-2025-12-11": {
+				InputPer1M:  21.00,
+				OutputPer1M: 168.00,
+			},
+			"gpt-5.2-codex": {
+				InputPer1M:  1.75,
+				OutputPer1M: 14.00,
+			},
+			// GPT-4o family (still available)
 			"gpt-4o": {
 				InputPer1M:  2.50,
 				OutputPer1M: 10.00,
@@ -60,6 +84,7 @@ func buildPricingTable() map[string]map[string]ModelPricing {
 				InputPer1M:  0.15,
 				OutputPer1M: 0.60,
 			},
+			// o-series reasoning models
 			"o1": {
 				InputPer1M:  15.00,
 				OutputPer1M: 60.00,
@@ -67,10 +92,6 @@ func buildPricingTable() map[string]map[string]ModelPricing {
 			"o1-mini": {
 				InputPer1M:  3.00,
 				OutputPer1M: 12.00,
-			},
-			"o1-preview": {
-				InputPer1M:  15.00,
-				OutputPer1M: 60.00,
 			},
 			"o3-mini": {
 				InputPer1M:  1.10,
@@ -82,11 +103,21 @@ func buildPricingTable() map[string]map[string]ModelPricing {
 			},
 		},
 		"anthropic": {
-			"claude-3-5-sonnet-20241022": {
+			// Claude 4.5 family (2025)
+			"claude-opus-4-5-20251101": {
+				InputPer1M:  5.00,
+				OutputPer1M: 25.00,
+			},
+			"claude-sonnet-4-5-20250929": {
 				InputPer1M:  3.00,
 				OutputPer1M: 15.00,
 			},
-			"claude-3-5-sonnet-20240620": {
+			"claude-haiku-4-5": {
+				InputPer1M:  1.00,
+				OutputPer1M: 5.00,
+			},
+			// Legacy Claude 3.5 family (still available)
+			"claude-3-5-sonnet-20241022": {
 				InputPer1M:  3.00,
 				OutputPer1M: 15.00,
 			},
@@ -94,20 +125,27 @@ func buildPricingTable() map[string]map[string]ModelPricing {
 				InputPer1M:  0.80,
 				OutputPer1M: 4.00,
 			},
-			"claude-3-opus-20240229": {
-				InputPer1M:  15.00,
-				OutputPer1M: 75.00,
-			},
-			"claude-3-sonnet-20240229": {
-				InputPer1M:  3.00,
-				OutputPer1M: 15.00,
-			},
-			"claude-3-haiku-20240307": {
-				InputPer1M:  0.25,
-				OutputPer1M: 1.25,
-			},
 		},
 		"gemini": {
+			// Gemini 3 family (December 2025)
+			"gemini-3-pro-preview": {
+				InputPer1M:  2.00,
+				OutputPer1M: 12.00,
+			},
+			"gemini-3-flash-preview": {
+				InputPer1M:  0.50,
+				OutputPer1M: 3.00,
+			},
+			// Gemini 2.5 family
+			"gemini-2.5-pro": {
+				InputPer1M:  1.25,
+				OutputPer1M: 10.00,
+			},
+			"gemini-2.5-flash": {
+				InputPer1M:  0.15,
+				OutputPer1M: 0.60,
+			},
+			// Legacy Gemini 1.5 family
 			"gemini-1.5-pro": {
 				InputPer1M:  1.25,
 				OutputPer1M: 5.00,
@@ -116,33 +154,10 @@ func buildPricingTable() map[string]map[string]ModelPricing {
 				InputPer1M:  0.075,
 				OutputPer1M: 0.30,
 			},
-			"gemini-2.0-flash-exp": {
-				InputPer1M:  0.00, // Free during preview
-				OutputPer1M: 0.00,
-			},
 		},
 		"ollama": {
-			// All Ollama models are free (local)
-			"codellama": {
-				InputPer1M:  0.00,
-				OutputPer1M: 0.00,
-			},
-			"qwen2.5-coder": {
-				InputPer1M:  0.00,
-				OutputPer1M: 0.00,
-			},
-			"deepseek-coder": {
-				InputPer1M:  0.00,
-				OutputPer1M: 0.00,
-			},
-			"llama3": {
-				InputPer1M:  0.00,
-				OutputPer1M: 0.00,
-			},
-			"mistral": {
-				InputPer1M:  0.00,
-				OutputPer1M: 0.00,
-			},
+			// All Ollama models are free (local execution)
+			// We use a wildcard approach - any model returns $0
 		},
 	}
 }

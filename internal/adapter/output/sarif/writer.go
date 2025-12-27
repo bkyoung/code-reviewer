@@ -143,8 +143,10 @@ func (w *Writer) convertToSARIF(artifact review.SARIFArtifact) map[string]interf
 // buildProperties creates the properties map for SARIF run, validating cost.
 func buildProperties(review domain.Review) map[string]interface{} {
 	properties := map[string]interface{}{
-		"summary": review.Summary,
-		"model":   review.ModelName,
+		"summary":   review.Summary,
+		"model":     review.ModelName,
+		"tokensIn":  review.TokensIn,
+		"tokensOut": review.TokensOut,
 	}
 
 	// Only include cost if it's a valid number (not NaN or Inf)

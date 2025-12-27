@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -351,7 +352,7 @@ func (c *HTTPClient) handleErrorResponse(statusCode int, body []byte) error {
 }
 
 // CreateReview implements the Client interface for the Provider.
-func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, error) {
+func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (llm.ProviderResponse, error) {
 	// Call the API
 	apiResp, err := c.Call(ctx, req.Prompt, CallOptions{
 		Temperature: 0.0, // Deterministic
@@ -359,33 +360,42 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 		MaxTokens:   req.MaxTokens,
 	})
 	if err != nil {
-		return Response{}, err
+		return llm.ProviderResponse{}, err
+	}
+
+	// Build usage metadata from API response
+	usage := llm.UsageMetadata{
+		TokensIn:  apiResp.TokensIn,
+		TokensOut: apiResp.TokensOut,
+		Cost:      apiResp.Cost,
 	}
 
 	// Parse the JSON response into domain types
 	response, err := parseReviewJSON(apiResp.Text)
 	if err != nil {
 		// If JSON parsing fails, return a text summary with no findings
-		return Response{
+		return llm.ProviderResponse{
 			Model:    apiResp.Model,
 			Summary:  apiResp.Text,
 			Findings: []domain.Finding{},
+			Usage:    usage,
 		}, nil
 	}
 
 	response.Model = apiResp.Model
+	response.Usage = usage
 	return response, nil
 }
 
 // parseReviewJSON extracts review data from JSON response.
-func parseReviewJSON(text string) (Response, error) {
+func parseReviewJSON(text string) (llm.ProviderResponse, error) {
 	// Use shared JSON parsing utility
 	summary, findings, err := llmhttp.ParseReviewResponse(text)
 	if err != nil {
-		return Response{}, err
+		return llm.ProviderResponse{}, err
 	}
 
-	return Response{
+	return llm.ProviderResponse{
 		Summary:  summary,
 		Findings: findings,
 	}, nil

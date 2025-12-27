@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bkyoung/code-reviewer/internal/adapter/llm"
 	llmhttp "github.com/bkyoung/code-reviewer/internal/adapter/llm/http"
 	"github.com/bkyoung/code-reviewer/internal/config"
 	"github.com/bkyoung/code-reviewer/internal/domain"
@@ -401,12 +402,19 @@ func (c *HTTPClient) handleErrorResponse(statusCode int, body []byte) error {
 }
 
 // CreateReview implements the Client interface for the Provider.
-func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, error) {
+func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (llm.ProviderResponse, error) {
 	apiResp, err := c.Call(ctx, req.Prompt, CallOptions{
 		MaxTokens: req.MaxTokens,
 	})
 	if err != nil {
-		return Response{}, fmt.Errorf("gemini: %w", err)
+		return llm.ProviderResponse{}, fmt.Errorf("gemini: %w", err)
+	}
+
+	// Build usage metadata from API response
+	usage := llm.UsageMetadata{
+		TokensIn:  apiResp.TokensIn,
+		TokensOut: apiResp.TokensOut,
+		Cost:      apiResp.Cost,
 	}
 
 	// Parse the response text to extract JSON review
@@ -421,27 +429,28 @@ func (c *HTTPClient) CreateReview(ctx context.Context, req Request) (Response, e
 			})
 		}
 		// If JSON parsing fails, return text as summary
-		return Response{
+		return llm.ProviderResponse{
 			Model:    c.model,
 			Summary:  apiResp.Text,
 			Findings: []domain.Finding{},
+			Usage:    usage,
 		}, nil
 	}
 
 	review.Model = c.model
+	review.Usage = usage
 	return review, nil
 }
 
 // parseReviewJSON extracts and parses the JSON review from the response text.
-func parseReviewJSON(text string) (Response, error) {
+func parseReviewJSON(text string) (llm.ProviderResponse, error) {
 	// Use shared JSON parsing utility
 	summary, findings, err := llmhttp.ParseReviewResponse(text)
 	if err != nil {
-		return Response{}, err
+		return llm.ProviderResponse{}, err
 	}
 
-	return Response{
-		Model:    "", // Will be set by caller
+	return llm.ProviderResponse{
 		Summary:  summary,
 		Findings: findings,
 	}, nil

@@ -35,7 +35,11 @@ type Review struct {
 	ModelName    string    `json:"modelName"`
 	Summary      string    `json:"summary"`
 	Findings     []Finding `json:"findings"`
-	Cost         float64   `json:"cost"` // Cost in USD
+
+	// Usage metadata from LLM API calls
+	TokensIn  int     `json:"tokensIn"`  // Input tokens consumed
+	TokensOut int     `json:"tokensOut"` // Output tokens generated
+	Cost      float64 `json:"cost"`      // Cost in USD
 
 	// Agent verification fields (Epic #92 - agent-based verification)
 	// When agent verification is enabled:
