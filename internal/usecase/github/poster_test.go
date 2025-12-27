@@ -298,6 +298,27 @@ func TestReviewPoster_PostReview_OverrideEvent(t *testing.T) {
 	assert.Equal(t, github.EventComment, result.Event)
 }
 
+func TestReviewPoster_PostReview_OverrideEventNormalized(t *testing.T) {
+	// Verify that lowercase event values are normalized to uppercase for the GitHub API
+	client := &MockReviewClient{}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	result, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:         "owner",
+		Repo:          "repo",
+		PullNumber:    1,
+		CommitSHA:     "sha",
+		OverrideEvent: "approve", // lowercase
+	})
+
+	require.NoError(t, err)
+	// The result should have the uppercase canonical value
+	assert.Equal(t, github.EventApprove, result.Event)
+	// The API should have received the uppercase value
+	require.NotNil(t, client.LastInput)
+	assert.Equal(t, github.EventApprove, client.LastInput.Event)
+}
+
 func TestReviewPoster_PostReview_OverrideEventValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -326,7 +347,7 @@ func TestReviewPoster_PostReview_OverrideEventValidation(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:          "lowercase approve is valid",
+			name:          "lowercase approve is valid and normalized",
 			overrideEvent: "approve",
 			wantErr:       false,
 		},
