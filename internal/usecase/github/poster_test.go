@@ -237,6 +237,27 @@ func TestReviewPoster_PostReview_ClientError(t *testing.T) {
 	assert.ErrorIs(t, err, expectedErr)
 }
 
+func TestReviewPoster_PostReview_NilResponse(t *testing.T) {
+	// Issue #35: When CreateReview returns (nil, nil), we should get an error
+	// rather than a nil pointer panic.
+	client := &MockReviewClient{
+		CreateReviewFunc: func(ctx context.Context, input github.CreateReviewInput) (*github.CreateReviewResponse, error) {
+			return nil, nil // Pathological case: no response, no error
+		},
+	}
+	poster := usecasegithub.NewReviewPoster(client)
+
+	_, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+		Owner:      "owner",
+		Repo:       "repo",
+		PullNumber: 1,
+		CommitSHA:  "sha",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil response")
+}
+
 func TestReviewPoster_PostReview_UsesSummaryFromReview(t *testing.T) {
 	client := &MockReviewClient{}
 	poster := usecasegithub.NewReviewPoster(client)
@@ -275,6 +296,75 @@ func TestReviewPoster_PostReview_OverrideEvent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, github.EventComment, result.Event)
+}
+
+func TestReviewPoster_PostReview_OverrideEventValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		overrideEvent github.ReviewEvent
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name:          "empty is allowed",
+			overrideEvent: "",
+			wantErr:       false,
+		},
+		{
+			name:          "APPROVE is valid",
+			overrideEvent: github.EventApprove,
+			wantErr:       false,
+		},
+		{
+			name:          "REQUEST_CHANGES is valid",
+			overrideEvent: github.EventRequestChanges,
+			wantErr:       false,
+		},
+		{
+			name:          "COMMENT is valid",
+			overrideEvent: github.EventComment,
+			wantErr:       false,
+		},
+		{
+			name:          "lowercase approve is valid",
+			overrideEvent: "approve",
+			wantErr:       false,
+		},
+		{
+			name:          "invalid event returns error",
+			overrideEvent: "INVALID_EVENT",
+			wantErr:       true,
+			errContains:   "invalid OverrideEvent",
+		},
+		{
+			name:          "typo returns error",
+			overrideEvent: "APROVE",
+			wantErr:       true,
+			errContains:   "must be APPROVE, REQUEST_CHANGES, or COMMENT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &MockReviewClient{}
+			poster := usecasegithub.NewReviewPoster(client)
+
+			_, err := poster.PostReview(context.Background(), usecasegithub.PostReviewRequest{
+				Owner:         "owner",
+				Repo:          "repo",
+				PullNumber:    1,
+				CommitSHA:     "sha",
+				OverrideEvent: tt.overrideEvent,
+			})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestReviewPoster_PostReview_WithCustomReviewActions(t *testing.T) {
