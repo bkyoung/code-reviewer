@@ -273,16 +273,21 @@ func HasBlockingFindings(findings []PositionedFinding, actions ReviewActions) bo
 		"low":      actions.OnLow,
 	}
 
-	// Build set of always-block categories (case-insensitive)
+	// Build set of always-block categories (case-insensitive, trimmed)
 	blockCategories := make(map[string]bool, len(actions.AlwaysBlockCategories))
 	for _, cat := range actions.AlwaysBlockCategories {
-		blockCategories[strings.ToLower(cat)] = true
+		normalized := strings.ToLower(strings.TrimSpace(cat))
+		if normalized != "" {
+			blockCategories[normalized] = true
+		}
 	}
 
 	// Check each finding against blocking configuration
 	for _, pf := range inDiffFindings {
 		// Check category-based blocking first (additive override)
-		if pf.Finding.Category != "" && blockCategories[strings.ToLower(pf.Finding.Category)] {
+		// Normalize category: trim whitespace and lowercase for matching
+		normalizedCategory := strings.ToLower(strings.TrimSpace(pf.Finding.Category))
+		if normalizedCategory != "" && blockCategories[normalizedCategory] {
 			return true
 		}
 

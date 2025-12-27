@@ -732,6 +732,32 @@ func TestHasBlockingFindings_AlwaysBlockCategories(t *testing.T) {
 			expected: false, // empty category doesn't match
 		},
 		{
+			name: "whitespace-only category on finding doesn't match",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "   ", "whitespace category"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"security"},
+			},
+			expected: false, // whitespace-only category doesn't match
+		},
+		{
+			name: "whitespace in config category list is trimmed",
+			findings: []github.PositionedFinding{
+				{
+					Finding:      makeFindingWithCategory("a.go", 1, "low", "security", "security issue"),
+					DiffPosition: diff.IntPtr(1),
+				},
+			},
+			actions: github.ReviewActions{
+				AlwaysBlockCategories: []string{"  security  ", "  "},
+			},
+			expected: true, // "  security  " matches "security" after trimming
+		},
+		{
 			name: "empty always-block list has no effect",
 			findings: []github.PositionedFinding{
 				{
