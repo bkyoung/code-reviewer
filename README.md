@@ -27,7 +27,7 @@ See [Security Considerations](docs/SECURITY.md) for complete details.
 - **Git Integration**: Review branches, commits, and diffs directly from your repository
 - **Interactive Planning**: LLM-powered clarifying questions before review for better context
 - **Multiple Output Formats**: Markdown, JSON, and SARIF for CI/CD integration
-- **Skip Triggers**: Skip reviews with `[skip code-review]` in commit messages or PR descriptions
+- **Skip Triggers**: Skip reviews with `[skip code-review]` in the head commit, PR title, or description
 - **Cost Tracking**: Automatic token counting and cost calculation per provider
 - **Observability**: Comprehensive logging and metrics for monitoring API usage
 - **Review History**: SQLite-based storage for tracking reviews over time

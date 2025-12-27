@@ -27,22 +27,41 @@ jobs:
       - name: Build code-reviewer
         run: go build -o cr ./cmd/cr
 
+      - name: Get head commit message
+        id: get-commit
+        run: |
+          # Capture commit message safely using GITHUB_OUTPUT heredoc syntax
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          git log -1 --format=%B ${{ github.event.pull_request.head.sha }}
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Check for skip trigger
         id: skip-check
+        env:
+          # Use environment variables to safely pass potentially untrusted content
+          COMMIT_MSG: ${{ steps.get-commit.outputs.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          # Get the head commit message
-          HEAD_COMMIT_MSG=$(git log -1 --format=%B ${{ github.event.pull_request.head.sha }})
-
           # Check for skip trigger in commit message, PR title, or PR description
-          if ./cr check-skip \
-            --commit-message "$HEAD_COMMIT_MSG" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --pr-description "${{ github.event.pull_request.body }}"; then
+          # Exit codes: 0 = skip, 1 = review, other = error
+          set +e
+          ./cr check-skip \
+            --commit-message "$COMMIT_MSG" \
+            --pr-title "$PR_TITLE" \
+            --pr-description "$PR_BODY"
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -eq 0 ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
             echo "Skip trigger detected, skipping code review"
-          else
+          elif [ $EXIT_CODE -eq 1 ]; then
             echo "skip=false" >> $GITHUB_OUTPUT
             echo "No skip trigger found, proceeding with code review"
+          else
+            echo "Error: check-skip command failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
           fi
 
       - name: Run AI code review

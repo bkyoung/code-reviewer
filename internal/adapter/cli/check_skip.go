@@ -15,7 +15,7 @@ import (
 var ErrShouldReview = errors.New("should review")
 
 // checkSkipCommand creates the check-skip subcommand.
-// This command checks commit messages and PR metadata for skip triggers.
+// This command checks the head commit message and PR metadata for skip triggers.
 //
 // Exit codes:
 //   - 0: Skip trigger found, review should be skipped
@@ -28,7 +28,7 @@ func checkSkipCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check-skip",
 		Short: "Check if code review should be skipped",
-		Long: `Check commit messages and PR metadata for skip triggers.
+		Long: `Check the head commit message and PR metadata for skip triggers.
 
 Supported skip trigger patterns:
   [skip code-review]

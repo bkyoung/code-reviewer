@@ -306,9 +306,9 @@ planning:
 
 ## Skipping Code Review
 
-You can skip code review for specific commits or PRs by including a skip trigger in:
+You can skip code review by including a skip trigger in:
 
-- **Commit messages** - Any commit in the PR
+- **Commit message** - The head (latest) commit in the PR
 - **PR title** - The pull request title
 - **PR description** - The pull request body/description
 
