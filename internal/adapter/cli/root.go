@@ -212,7 +212,10 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			//
 			// If CLI --block-threshold is set, expand it to per-severity values,
 			// then apply explicit CLI per-severity overrides on top.
-			cliThresholdActions := expandBlockThresholdCLI(cmd, blockThreshold)
+			cliThresholdActions, err := expandBlockThresholdCLI(cmd, blockThreshold)
+			if err != nil {
+				return err
+			}
 			resolvedActionCritical := resolveActionWithThreshold(actionCritical, cliThresholdActions.OnCritical, defaultActions.OnCritical)
 			resolvedActionHigh := resolveActionWithThreshold(actionHigh, cliThresholdActions.OnHigh, defaultActions.OnHigh)
 			resolvedActionMedium := resolveActionWithThreshold(actionMedium, cliThresholdActions.OnMedium, defaultActions.OnMedium)
@@ -244,7 +247,7 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedConfMedium := resolveInt(cmd, "confidence-medium", confidenceMedium, defaultVerification.ConfidenceMedium)
 			resolvedConfLow := resolveInt(cmd, "confidence-low", confidenceLow, defaultVerification.ConfidenceLow)
 
-			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
+			_, err = branchReviewer.ReviewBranch(ctx, review.BranchRequest{
 				BaseRef:               baseRef,
 				TargetRef:             targetRef,
 				OutputDir:             outputDir,
@@ -433,11 +436,12 @@ type cliThresholdActions struct {
 }
 
 // expandBlockThresholdCLI expands a --block-threshold CLI flag to per-severity actions.
-// If the flag was not set or the value is invalid, returns an empty struct.
+// If the flag was not set, returns an empty struct and nil error.
+// If the flag was set to an invalid value, returns an error.
 // This mirrors the logic in config.expandBlockThreshold but for CLI flags.
-func expandBlockThresholdCLI(cmd *cobra.Command, threshold string) cliThresholdActions {
+func expandBlockThresholdCLI(cmd *cobra.Command, threshold string) (cliThresholdActions, error) {
 	if !cmd.Flags().Changed("block-threshold") || threshold == "" {
-		return cliThresholdActions{}
+		return cliThresholdActions{}, nil
 	}
 
 	// Severity levels: higher = blocks first
@@ -451,8 +455,7 @@ func expandBlockThresholdCLI(cmd *cobra.Command, threshold string) cliThresholdA
 
 	thresholdLevel, ok := severityLevels[strings.ToLower(threshold)]
 	if !ok {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: invalid --block-threshold value %q, ignoring\n", threshold)
-		return cliThresholdActions{}
+		return cliThresholdActions{}, fmt.Errorf("invalid --block-threshold value %q: must be one of: critical, high, medium, low, none", threshold)
 	}
 
 	const (
@@ -489,7 +492,7 @@ func expandBlockThresholdCLI(cmd *cobra.Command, threshold string) cliThresholdA
 		actions.OnLow = "comment"
 	}
 
-	return actions
+	return actions, nil
 }
 
 // resolveActionWithThreshold resolves an action value with three-level precedence:
