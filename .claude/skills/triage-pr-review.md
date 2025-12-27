@@ -6,22 +6,46 @@ Triage, respond to, and address PR code review feedback including SARIF code sca
 
 When this skill is invoked (e.g., "triage the latest pr code review findings"), perform a comprehensive assessment of all feedback on the current PR and take appropriate action.
 
-## Workflow
+## CRITICAL: Always Triage the MOST RECENT Review
 
-### Step 1: Gather All Feedback
+**IMPORTANT:** PRs often have multiple review cycles. Each push triggers a new review. You MUST:
 
-Collect feedback from multiple sources:
+1. **Find the HEAD commit** - This is the LATEST commit on the PR
+2. **Find findings on THAT commit** - Filter comments by `commit_id` matching HEAD
+3. **Ignore stale findings** - Comments on older commits may already be addressed
+4. **Check for replies** - Only respond to findings that don't already have replies
 
 ```bash
-# Get current PR number (if on a feature branch)
-PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+# Get the HEAD commit of the PR
+HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid')
 
-# Get PR review comments (inline findings)
+# Get comments on the LATEST commit only
 gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
-  --jq '.[] | {path: .path, line: .line, body: .body, created_at: .created_at}'
+  --jq ".[] | select(.commit_id == \"${HEAD_SHA}\") | {id: .id, path: .path, line: .line, body: .body}"
+```
 
-# Get SARIF code scanning check results
-gh api repos/{owner}/{repo}/check-runs/{check_run_id}/annotations \
+**Why this matters:** Responding to findings on older commits creates confusion. The code may have changed, findings may be stale, and you'll miss the actual issues on the current code.
+
+## Workflow
+
+### Step 1: Gather Feedback from LATEST Commit
+
+Collect feedback from the most recent review cycle:
+
+```bash
+# Get current PR number and HEAD commit
+PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid')
+
+# Get PR review comments ONLY on the HEAD commit (latest review)
+gh api repos/{owner}/{repo}/pulls/${PR_NUMBER}/comments \
+  --jq ".[] | select(.commit_id == \"${HEAD_SHA}\") | {id: .id, path: .path, line: .line, body: .body}"
+
+# Get SARIF code scanning check results for HEAD commit
+CHECK_RUN_ID=$(gh api repos/{owner}/{repo}/commits/${HEAD_SHA}/check-runs \
+  --jq '.check_runs[] | select(.name == "anthropic" or .app.slug == "github-code-scanning") | .id' | head -1)
+
+gh api repos/{owner}/{repo}/check-runs/${CHECK_RUN_ID}/annotations \
   --jq '.[] | {path: .path, line: .start_line, level: .annotation_level, message: .message}'
 
 # Get check run status (find the code scanning check)
@@ -79,7 +103,7 @@ For findings that need fixing:
 1. **Make the fix** - Edit the relevant code
 2. **Add tests** - If the fix addresses a bug or edge case
 3. **Run validation** - `go test ./... && go build -o cr ./cmd/cr`
-4. **Commit with context** - Reference the finding in commit message
+4. **Commit with context** - Reference the finding in commit message (but DON'T push yet!)
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
@@ -88,8 +112,15 @@ fix: <description of fix>
 Addresses code review finding: <brief description>
 EOF
 )"
-git push
+# DO NOT push yet - reply to findings first!
 ```
+
+**IMPORTANT ORDER OF OPERATIONS:**
+1. Make fixes and commit locally
+2. Reply to ALL findings on GitHub (Step 5)
+3. THEN push changes
+
+This order prevents race conditions where a new review cycle starts before you've responded to the current findings, causing confusion about which findings were addressed.
 
 ### Step 5: Reply to Disputed Findings
 
