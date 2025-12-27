@@ -36,6 +36,16 @@ type DefaultReviewActions struct {
 	OnLow         string
 	OnClean       string
 	OnNonBlocking string
+
+	// BlockThreshold is syntactic sugar for setting per-severity actions.
+	// Values: "critical", "high", "medium", "low", "none"
+	// This is already expanded by the config layer into OnCritical/OnHigh/etc.
+	// Stored here for documentation; the expanded values are used directly.
+	BlockThreshold string
+
+	// AlwaysBlockCategories lists finding categories that always trigger REQUEST_CHANGES.
+	// This provides an additive override for specific categories like "security".
+	AlwaysBlockCategories []string
 }
 
 // DefaultVerification holds default verification configuration from config.
@@ -145,6 +155,8 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	var actionLow string
 	var actionClean string
 	var actionNonBlocking string
+	var blockThreshold string
+	var alwaysBlockCategories []string
 
 	// Verification flags
 	var verify bool
@@ -196,12 +208,20 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			}
 
 			// Resolve review actions: CLI flags override defaults from config
-			resolvedActionCritical := resolveAction(actionCritical, defaultActions.OnCritical)
-			resolvedActionHigh := resolveAction(actionHigh, defaultActions.OnHigh)
-			resolvedActionMedium := resolveAction(actionMedium, defaultActions.OnMedium)
-			resolvedActionLow := resolveAction(actionLow, defaultActions.OnLow)
+			// Priority: explicit CLI per-severity > CLI threshold > config (already has threshold expanded)
+			//
+			// If CLI --block-threshold is set, expand it to per-severity values,
+			// then apply explicit CLI per-severity overrides on top.
+			cliThresholdActions := expandBlockThresholdCLI(cmd, blockThreshold)
+			resolvedActionCritical := resolveActionWithThreshold(actionCritical, cliThresholdActions.OnCritical, defaultActions.OnCritical)
+			resolvedActionHigh := resolveActionWithThreshold(actionHigh, cliThresholdActions.OnHigh, defaultActions.OnHigh)
+			resolvedActionMedium := resolveActionWithThreshold(actionMedium, cliThresholdActions.OnMedium, defaultActions.OnMedium)
+			resolvedActionLow := resolveActionWithThreshold(actionLow, cliThresholdActions.OnLow, defaultActions.OnLow)
 			resolvedActionClean := resolveAction(actionClean, defaultActions.OnClean)
 			resolvedActionNonBlocking := resolveAction(actionNonBlocking, defaultActions.OnNonBlocking)
+
+			// Resolve always-block categories: CLI values add to config values (additive)
+			resolvedAlwaysBlockCategories := mergeAlwaysBlockCategories(alwaysBlockCategories, defaultActions.AlwaysBlockCategories)
 
 			// Resolve bot username for auto-dismiss feature
 			// "none" (case-insensitive) explicitly disables auto-dismiss; empty uses default
@@ -225,29 +245,30 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 			resolvedConfLow := resolveInt(cmd, "confidence-low", confidenceLow, defaultVerification.ConfidenceLow)
 
 			_, err := branchReviewer.ReviewBranch(ctx, review.BranchRequest{
-				BaseRef:             baseRef,
-				TargetRef:           targetRef,
-				OutputDir:           outputDir,
-				Repository:          repository,
-				IncludeUncommitted:  includeUncommitted,
-				CustomInstructions:  customInstructions,
-				ContextFiles:        contextFiles,
-				NoArchitecture:      noArchitecture,
-				NoAutoContext:       noAutoContext,
-				Interactive:         interactive,
-				PostToGitHub:        postGitHubReview,
-				GitHubOwner:         githubOwner,
-				GitHubRepo:          githubRepo,
-				PRNumber:            prNumber,
-				CommitSHA:           commitSHA,
-				ActionOnCritical:    resolvedActionCritical,
-				ActionOnHigh:        resolvedActionHigh,
-				ActionOnMedium:      resolvedActionMedium,
-				ActionOnLow:         resolvedActionLow,
-				ActionOnClean:       resolvedActionClean,
-				ActionOnNonBlocking: resolvedActionNonBlocking,
-				BotUsername:         resolvedBotUsername,
-				SkipVerification:    !resolvedVerifyEnabled,
+				BaseRef:               baseRef,
+				TargetRef:             targetRef,
+				OutputDir:             outputDir,
+				Repository:            repository,
+				IncludeUncommitted:    includeUncommitted,
+				CustomInstructions:    customInstructions,
+				ContextFiles:          contextFiles,
+				NoArchitecture:        noArchitecture,
+				NoAutoContext:         noAutoContext,
+				Interactive:           interactive,
+				PostToGitHub:          postGitHubReview,
+				GitHubOwner:           githubOwner,
+				GitHubRepo:            githubRepo,
+				PRNumber:              prNumber,
+				CommitSHA:             commitSHA,
+				ActionOnCritical:      resolvedActionCritical,
+				ActionOnHigh:          resolvedActionHigh,
+				ActionOnMedium:        resolvedActionMedium,
+				ActionOnLow:           resolvedActionLow,
+				ActionOnClean:         resolvedActionClean,
+				ActionOnNonBlocking:   resolvedActionNonBlocking,
+				AlwaysBlockCategories: resolvedAlwaysBlockCategories,
+				BotUsername:           resolvedBotUsername,
+				SkipVerification:      !resolvedVerifyEnabled,
 				VerificationConfig: review.VerificationSettings{
 					Depth:              resolvedDepth,
 					CostCeiling:        resolvedCostCeiling,
@@ -295,6 +316,8 @@ func branchCommand(branchReviewer BranchReviewer, defaultOutput, defaultRepo, de
 	cmd.Flags().StringVar(&actionLow, "action-low", "", "Review action for low severity (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionClean, "action-clean", "", "Review action when no findings (approve, comment, request_changes)")
 	cmd.Flags().StringVar(&actionNonBlocking, "action-non-blocking", "", "Review action when findings exist but none block (approve, comment)")
+	cmd.Flags().StringVar(&blockThreshold, "block-threshold", "", "Minimum severity to trigger REQUEST_CHANGES (critical, high, medium, low, none)")
+	cmd.Flags().StringSliceVar(&alwaysBlockCategories, "always-block-category", []string{}, "Categories that always trigger REQUEST_CHANGES regardless of severity (repeatable)")
 
 	// Verification flags
 	cmd.Flags().BoolVar(&verify, "verify", false, "Enable agent-based verification of findings (overrides config)")
@@ -399,4 +422,124 @@ func resolveInt(cmd *cobra.Command, flagName string, cliValue, configDefault int
 		return configDefault
 	}
 	return cliValue
+}
+
+// cliThresholdActions holds expanded threshold values for CLI resolution.
+type cliThresholdActions struct {
+	OnCritical string
+	OnHigh     string
+	OnMedium   string
+	OnLow      string
+}
+
+// expandBlockThresholdCLI expands a --block-threshold CLI flag to per-severity actions.
+// If the flag was not set or the value is invalid, returns an empty struct.
+// This mirrors the logic in config.expandBlockThreshold but for CLI flags.
+func expandBlockThresholdCLI(cmd *cobra.Command, threshold string) cliThresholdActions {
+	if !cmd.Flags().Changed("block-threshold") || threshold == "" {
+		return cliThresholdActions{}
+	}
+
+	// Severity levels: higher = blocks first
+	severityLevels := map[string]int{
+		"critical": 4,
+		"high":     3,
+		"medium":   2,
+		"low":      1,
+		"none":     5, // Above all severities - nothing blocks
+	}
+
+	thresholdLevel, ok := severityLevels[strings.ToLower(threshold)]
+	if !ok {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: invalid --block-threshold value %q, ignoring\n", threshold)
+		return cliThresholdActions{}
+	}
+
+	const (
+		criticalLevel = 4
+		highLevel     = 3
+		mediumLevel   = 2
+		lowLevel      = 1
+	)
+
+	actions := cliThresholdActions{}
+
+	// A severity blocks if its level >= threshold level
+	if criticalLevel >= thresholdLevel {
+		actions.OnCritical = "request_changes"
+	} else {
+		actions.OnCritical = "comment"
+	}
+
+	if highLevel >= thresholdLevel {
+		actions.OnHigh = "request_changes"
+	} else {
+		actions.OnHigh = "comment"
+	}
+
+	if mediumLevel >= thresholdLevel {
+		actions.OnMedium = "request_changes"
+	} else {
+		actions.OnMedium = "comment"
+	}
+
+	if lowLevel >= thresholdLevel {
+		actions.OnLow = "request_changes"
+	} else {
+		actions.OnLow = "comment"
+	}
+
+	return actions
+}
+
+// resolveActionWithThreshold resolves an action value with three-level precedence:
+// 1. Explicit CLI per-severity flag (highest priority)
+// 2. CLI threshold-expanded value
+// 3. Config default (lowest priority)
+func resolveActionWithThreshold(cliPerSeverity, cliFromThreshold, configDefault string) string {
+	// Explicit CLI per-severity flag takes highest priority
+	if cliPerSeverity != "" {
+		return cliPerSeverity
+	}
+	// CLI threshold-expanded value takes second priority
+	if cliFromThreshold != "" {
+		return cliFromThreshold
+	}
+	// Fall back to config default
+	return configDefault
+}
+
+// mergeAlwaysBlockCategories combines CLI and config categories, deduplicating.
+// CLI categories add to config categories (additive, not replacement).
+func mergeAlwaysBlockCategories(cliCategories, configCategories []string) []string {
+	if len(cliCategories) == 0 {
+		return configCategories
+	}
+	if len(configCategories) == 0 {
+		return cliCategories
+	}
+
+	// Build set for deduplication (case-insensitive)
+	seen := make(map[string]bool)
+	var result []string
+
+	// Add config categories first
+	for _, cat := range configCategories {
+		lower := strings.ToLower(cat)
+		if !seen[lower] {
+			seen[lower] = true
+			result = append(result, cat)
+		}
+	}
+
+	// Add CLI categories
+	for _, cat := range cliCategories {
+		lower := strings.ToLower(cat)
+		if !seen[lower] {
+			seen[lower] = true
+			result = append(result, cat)
+		}
+	}
+
+	return result
 }

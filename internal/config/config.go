@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // Config represents the full application configuration.
 type Config struct {
 	Providers     map[string]ProviderConfig `yaml:"providers"`
@@ -138,6 +140,22 @@ type ReviewConfig struct {
 	// Set to "none" to explicitly disable auto-dismiss.
 	// Default: "github-actions[bot]"
 	BotUsername string `yaml:"botUsername"`
+
+	// BlockThreshold is syntactic sugar for setting per-severity actions.
+	// Valid values: "critical", "high", "medium", "low", "none"
+	// - "critical": only critical findings block (request_changes)
+	// - "high": critical and high block (default behavior)
+	// - "medium": critical, high, and medium block
+	// - "low": all severities block
+	// - "none": nothing blocks (all findings are informational)
+	// Explicit per-severity actions (Actions.OnCritical, etc.) override this threshold.
+	BlockThreshold string `yaml:"blockThreshold"`
+
+	// AlwaysBlockCategories lists finding categories that always trigger REQUEST_CHANGES
+	// regardless of severity. This is additive - if a finding's category matches,
+	// it blocks even if the severity threshold would not.
+	// Example: ["security", "bug"] - security and bug findings always block
+	AlwaysBlockCategories []string `yaml:"alwaysBlockCategories"`
 }
 
 // ReviewActions maps finding severities to GitHub review actions.
@@ -214,11 +232,14 @@ type ConfidenceThresholds struct {
 }
 
 // Merge combines multiple configuration instances, prioritising the latter ones.
+// After merging, threshold expansion and defaults are applied to the Review config.
 func Merge(configs ...Config) Config {
 	result := Config{}
 	for _, cfg := range configs {
 		result = merge(result, cfg)
 	}
+	// Apply threshold expansion and defaults after all merging is complete
+	result.Review = processReviewConfig(result.Review)
 	return result
 }
 
@@ -345,15 +366,28 @@ func chooseReview(base, overlay ReviewConfig) ReviewConfig {
 		result.Instructions = overlay.Instructions
 	}
 
-	// Actions: overlay wins if any field is non-empty
+	// BlockThreshold: overlay wins if non-empty
+	if overlay.BlockThreshold != "" {
+		result.BlockThreshold = overlay.BlockThreshold
+	}
+
+	// Actions: merge base and overlay (overlay wins for non-empty fields)
 	if overlay.Actions.hasAny() {
 		result.Actions = mergeReviewActions(base.Actions, overlay.Actions)
 	}
+
+	// NOTE: Threshold expansion and defaults are NOT applied here.
+	// They are applied in processReviewConfig() which is called by Load()
+	// after all config sources are merged. This prevents defaults from one
+	// merge iteration from overriding threshold expansion in a later iteration.
 
 	// BotUsername: overlay wins if non-empty
 	if overlay.BotUsername != "" {
 		result.BotUsername = overlay.BotUsername
 	}
+
+	// AlwaysBlockCategories: union of base and overlay (additive)
+	result.AlwaysBlockCategories = mergeCategories(base.AlwaysBlockCategories, overlay.AlwaysBlockCategories)
 
 	return result
 }
@@ -384,6 +418,127 @@ func mergeReviewActions(base, overlay ReviewActions) ReviewActions {
 	if overlay.OnNonBlocking != "" {
 		result.OnNonBlocking = overlay.OnNonBlocking
 	}
+	return result
+}
+
+// applyActionDefaults fills in empty action slots with sensible defaults.
+// Default behavior: critical/high block (request_changes), medium/low don't block (comment),
+// clean reviews get approved, non-blocking findings get approved.
+func applyActionDefaults(actions ReviewActions) ReviewActions {
+	if actions.OnCritical == "" {
+		actions.OnCritical = "request_changes"
+	}
+	if actions.OnHigh == "" {
+		actions.OnHigh = "request_changes"
+	}
+	if actions.OnMedium == "" {
+		actions.OnMedium = "comment"
+	}
+	if actions.OnLow == "" {
+		actions.OnLow = "comment"
+	}
+	if actions.OnClean == "" {
+		actions.OnClean = "approve"
+	}
+	if actions.OnNonBlocking == "" {
+		actions.OnNonBlocking = "approve"
+	}
+	return actions
+}
+
+// expandBlockThreshold converts a threshold string to explicit per-severity actions.
+// Valid thresholds: "critical", "high", "medium", "low", "none"
+// - "critical": only critical blocks
+// - "high": critical and high block (matches default behavior)
+// - "medium": critical, high, and medium block
+// - "low": all severities block
+// - "none": nothing blocks (all comment only)
+// Returns zero-value ReviewActions if threshold is empty or invalid.
+func expandBlockThreshold(threshold string) ReviewActions {
+	if threshold == "" {
+		return ReviewActions{}
+	}
+
+	// Severity levels in order from highest to lowest
+	// The threshold means "block at this level and above"
+	// "none" is set to 5 (above critical=4) so no severity meets the threshold
+	severityLevels := map[string]int{
+		"critical": 4,
+		"high":     3,
+		"medium":   2,
+		"low":      1,
+		"none":     5, // Above all severities - nothing blocks
+	}
+
+	thresholdLevel, ok := severityLevels[strings.ToLower(threshold)]
+	if !ok {
+		// Invalid threshold - return empty (will use defaults)
+		return ReviewActions{}
+	}
+
+	var actions ReviewActions
+
+	// A severity blocks if its level >= threshold level
+	// e.g., threshold "high" (level 3): critical (4) and high (3) block, medium (2) and low (1) don't
+	const (
+		criticalLevel = 4
+		highLevel     = 3
+		mediumLevel   = 2
+		lowLevel      = 1
+	)
+
+	if criticalLevel >= thresholdLevel {
+		actions.OnCritical = "request_changes"
+	} else {
+		actions.OnCritical = "comment"
+	}
+
+	if highLevel >= thresholdLevel {
+		actions.OnHigh = "request_changes"
+	} else {
+		actions.OnHigh = "comment"
+	}
+
+	if mediumLevel >= thresholdLevel {
+		actions.OnMedium = "request_changes"
+	} else {
+		actions.OnMedium = "comment"
+	}
+
+	if lowLevel >= thresholdLevel {
+		actions.OnLow = "request_changes"
+	} else {
+		actions.OnLow = "comment"
+	}
+
+	return actions
+}
+
+// mergeCategories returns the union of two category slices, preserving order and deduplicating.
+func mergeCategories(base, overlay []string) []string {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, cat := range base {
+		normalized := strings.ToLower(strings.TrimSpace(cat))
+		if normalized != "" && !seen[normalized] {
+			seen[normalized] = true
+			result = append(result, cat)
+		}
+	}
+
+	for _, cat := range overlay {
+		normalized := strings.ToLower(strings.TrimSpace(cat))
+		if normalized != "" && !seen[normalized] {
+			seen[normalized] = true
+			result = append(result, cat)
+		}
+	}
+
 	return result
 }
 

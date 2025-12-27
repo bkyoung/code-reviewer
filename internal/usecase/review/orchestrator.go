@@ -124,6 +124,9 @@ type GitHubPostRequest struct {
 	ActionOnClean       string
 	ActionOnNonBlocking string
 
+	// AlwaysBlockCategories lists finding categories that always trigger REQUEST_CHANGES.
+	AlwaysBlockCategories []string
+
 	// BotUsername is the bot username for auto-dismissing stale reviews.
 	// If set, previous reviews from this user are dismissed AFTER the new
 	// review posts successfully. This ensures the PR always has review signal.
@@ -245,6 +248,11 @@ type BranchRequest struct {
 	ActionOnLow         string // Action for low severity findings
 	ActionOnClean       string // Action when no findings in diff
 	ActionOnNonBlocking string // Action when findings exist but none block
+
+	// AlwaysBlockCategories lists finding categories that always trigger REQUEST_CHANGES
+	// regardless of severity. This provides an additive override for specific categories
+	// like "security" that should always block, even if severity-based config wouldn't.
+	AlwaysBlockCategories []string
 
 	// BotUsername is the bot username for auto-dismissing stale reviews.
 	// If set, previous reviews from this user are dismissed AFTER the new
@@ -784,19 +792,20 @@ func (o *Orchestrator) ReviewBranch(ctx context.Context, req BranchRequest) (Res
 	var githubResult *GitHubPostResult
 	if req.PostToGitHub && o.deps.GitHubPoster != nil {
 		result, err := o.deps.GitHubPoster.PostReview(ctx, GitHubPostRequest{
-			Owner:               req.GitHubOwner,
-			Repo:                req.GitHubRepo,
-			PRNumber:            req.PRNumber,
-			CommitSHA:           req.CommitSHA,
-			Review:              mergedReview,
-			Diff:                diff,
-			ActionOnCritical:    req.ActionOnCritical,
-			ActionOnHigh:        req.ActionOnHigh,
-			ActionOnMedium:      req.ActionOnMedium,
-			ActionOnLow:         req.ActionOnLow,
-			ActionOnClean:       req.ActionOnClean,
-			ActionOnNonBlocking: req.ActionOnNonBlocking,
-			BotUsername:         req.BotUsername,
+			Owner:                 req.GitHubOwner,
+			Repo:                  req.GitHubRepo,
+			PRNumber:              req.PRNumber,
+			CommitSHA:             req.CommitSHA,
+			Review:                mergedReview,
+			Diff:                  diff,
+			ActionOnCritical:      req.ActionOnCritical,
+			ActionOnHigh:          req.ActionOnHigh,
+			ActionOnMedium:        req.ActionOnMedium,
+			ActionOnLow:           req.ActionOnLow,
+			ActionOnClean:         req.ActionOnClean,
+			ActionOnNonBlocking:   req.ActionOnNonBlocking,
+			AlwaysBlockCategories: req.AlwaysBlockCategories,
+			BotUsername:           req.BotUsername,
 		})
 		if err != nil {
 			// Log warning but don't fail the review
